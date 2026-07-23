@@ -192,17 +192,9 @@ SawaariShare is a community-driven ride-sharing platform for students, enabling 
 - Avatar display in UI
 - Profile completion percentage
 
-### Phase 6: Persistence & Configuration (Tasks 16-18)
+### Phase 6: Polish & Configuration (Tasks 16-18)
 
-#### Task 16: Offline Persistence & Sync Queue (8h)
-**Scope:**
-- Offline write buffering
-- Automatic sync on reconnection
-- Conflict resolution
-- Sync status indicators
-- Exponential backoff for failed syncs
-
-#### Task 17: Material 3 Polish (6h)
+#### Task 16: Material 3 Polish & Animations (8h)
 **Scope:**
 - Animations and transitions
 - Loading indicators
@@ -210,8 +202,10 @@ SawaariShare is a community-driven ride-sharing platform for students, enabling 
 - Swipe actions
 - Haptic feedback
 - Dark mode support
+- Button ripple effects
+- Page transitions
 
-#### Task 18: Firebase Configuration (4h)
+#### Task 17: Firebase Configuration (4h)
 **Scope:**
 - Setup Firebase project
 - Configure authentication
@@ -220,9 +214,9 @@ SawaariShare is a community-driven ride-sharing platform for students, enabling 
 - Setup Cloud Storage
 - Email configuration
 
-### Phase 7: Testing & Launch (Tasks 19-20)
+### Phase 7: Testing & Launch (Tasks 18-20)
 
-#### Task 19: Testing & Emulator (10h)
+#### Task 18: Testing & Emulator (10h)
 **Scope:**
 - Unit tests for repository
 - UI tests for screens
@@ -231,13 +225,11 @@ SawaariShare is a community-driven ride-sharing platform for students, enabling 
 - Device testing
 - Performance profiling
 
-#### Task 20: Final Integration & Launch (8h)
+#### Task 19: Final Integration & Launch (2h)
 **Scope:**
-- End-to-end testing
-- Bug fixes and refinement
+- Final bug fixes and refinement
 - Documentation finalization
 - Release notes
-- App Store submission (optional)
 - Analytics setup
 
 ## Architecture Highlights
@@ -416,19 +408,20 @@ SawaariShare is a community-driven ride-sharing platform for students, enabling 
 - **Documentation:** 8 guides (2500+ lines)
 - **Velocity:** 62.5 LOC/hour
 
-### Remaining Work (Tasks 15-20)
-- **Estimated Time:** 38 hours (down from 64 after Tasks 13-14)
-- **Estimated LOC:** 2500+
+### Remaining Work (Tasks 15-19)
+- **Estimated Time:** 30 hours (removed offline sync queue - online only)
+- **Estimated LOC:** 2000+
 - **Critical Path:** Firebase Storage → Polish → Testing → Launch
+- **Architectural Decision:** Online direct sync (no offline write queue)
 
 ### Project Timeline
 - **Phase 1 Complete:** Tasks 1-3 (Foundation)
 - **Phase 2 Complete:** Tasks 4-5 (Marketplace)
 - **Phase 3 Complete:** Tasks 6-7 (Matching)
-- **Phase 4 Complete:** Tasks 8-9 (UI/UX) [Partial]
-- **Phase 5 Pending:** Tasks 10-12 (Advanced UI)
-- **Phase 6 Pending:** Tasks 13-15 (Persistence)
-- **Phase 7 Pending:** Tasks 16-17 (Testing)
+- **Phase 4 Complete:** Tasks 8-9 (UI/UX)
+- **Phase 5 Complete:** Tasks 13-14 (Host Dashboard + Ride Details)
+- **Phase 6 In Progress:** Tasks 15-17 (Storage + Polish + Firebase)
+- **Phase 7 Pending:** Tasks 18-19 (Testing + Launch)
 
 ## Next Immediate Actions
 
@@ -437,16 +430,14 @@ SawaariShare is a community-driven ride-sharing platform for students, enabling 
 2. Deploy Firestore security rules
 3. Configure Firebase Authentication
 
-### Medium Term (Next 20 hours)
-4. Build Host Dashboard UI (10h)
-5. Build Ride Details UI (8h)
-6. Firebase Storage integration (6h)
+### Medium Term (Next 14 hours)
+4. Firebase Storage integration (6h) - Task 15
+5. Material 3 animations and polish (8h) - Task 16
 
-### Long Term (Next 40 hours)
-7. Offline sync queue implementation (8h)
-8. Material 3 animations and polish (6h)
-9. Comprehensive testing suite (10h)
-10. Integration testing and refinement (16h)
+### Long Term (Next 16 hours)
+6. Firebase configuration and setup (4h) - Task 17
+7. Comprehensive testing suite (10h) - Task 18
+8. Final integration and launch (2h) - Task 19
 
 ## Success Criteria
 
@@ -472,8 +463,9 @@ SawaariShare is a community-driven ride-sharing platform for students, enabling 
 SawaariShare has a solid foundation with 7 completed feature areas and comprehensive documentation. The core backend logic (50+ repository methods) handles the complex marketplace dynamics of matching, messaging, and real-time sync. The UI is partially implemented with Material 3 components ready for final polish.
 
 **Current Status:** 75% complete toward MVP
-**Estimated to MVP:** 38 hours remaining
+**Estimated to MVP:** 30 hours remaining (simplified - online sync only)
 **Path to 100%:** Clear with documented tasks and architecture
+**Architectural Note:** Removed offline write queue complexity - using online direct sync to Firebase
 
 ---
 
