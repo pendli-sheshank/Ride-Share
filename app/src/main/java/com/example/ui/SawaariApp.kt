@@ -4667,6 +4667,11 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
         var isHostCardExpanded by remember { mutableStateOf(false) }
         var showDriverModal by remember { mutableStateOf(false) }
 
+        // Coordination state
+        val matchMessages = existingMatch?.let { match ->
+            remember(match.id) { viewModel.repository.messages.value.filter { it.matchId == match.id }.takeLast(3) }
+        } ?: emptyList()
+
         val hostUser = remember(offer.hostId) { viewModel.getUserPublicProfile(offer.hostId) }
         val hostVehicle = remember(offer.hostId) { viewModel.getVehicleInfo(offer.hostId) }
 
@@ -4971,6 +4976,62 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                 if (index < offer.passengerNames.size - 1) {
                                     HorizontalDivider(color = SawaariDivider, modifier = Modifier.padding(vertical = 4.dp))
                                 }
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(24.dp))
+                }
+
+                // Message history section (if match exists)
+                if (existingMatch != null && matchMessages.isNotEmpty()) {
+                    Text("RECENT COORDINATION", color = SawaariSaffron, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = SawaariCardBg),
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, SawaariDivider, RoundedCornerShape(16.dp))
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            matchMessages.forEachIndexed { index, message ->
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Icon(
+                                        imageVector = if (message.senderId == currentUser?.id) Icons.AutoMirrored.Filled.Send else Icons.AutoMirrored.Filled.Chat,
+                                        contentDescription = "Message",
+                                        tint = SawaariLightGray,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = message.text,
+                                            color = SawaariTextPrimary,
+                                            fontSize = 12.sp,
+                                            lineHeight = 15.sp
+                                        )
+                                        Text(
+                                            text = "${if (message.senderId == currentUser?.id) "You" else offer.hostName}",
+                                            color = SawaariLightGray,
+                                            fontSize = 10.sp
+                                        )
+                                    }
+                                }
+                                if (index < matchMessages.size - 1) {
+                                    HorizontalDivider(color = SawaariDivider, modifier = Modifier.padding(vertical = 8.dp))
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Button(
+                                onClick = { navController.navigate("chat/${existingMatch.id}") },
+                                colors = ButtonDefaults.buttonColors(containerColor = SawaariIndigo),
+                                modifier = Modifier.fillMaxWidth().height(36.dp),
+                                contentPadding = PaddingValues(vertical = 4.dp),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = "Chat", tint = SawaariSaffron, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("View Full Chat", color = SawaariSaffron, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
