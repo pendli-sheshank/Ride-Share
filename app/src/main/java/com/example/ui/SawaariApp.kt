@@ -151,6 +151,56 @@ fun ShimmerSkeleton(
     )
 }
 
+@Composable
+fun ExpandableCard(
+    title: String,
+    isExpanded: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .animateContentSize(
+                animationSpec = spring(
+                    dampingRatio = 0.8f,
+                    stiffness = 500f
+                )
+            )
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onToggle() },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(title, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = SawaariTextPrimary)
+                Icon(
+                    imageVector = if (isExpanded)
+                        Icons.Default.ExpandLess
+                    else
+                        Icons.Default.ExpandMore,
+                    contentDescription = "Toggle",
+                    modifier = Modifier.rotate(if (isExpanded) 0f else 180f)
+                )
+            }
+
+            AnimatedVisibility(
+                visible = isExpanded,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                Column(modifier = Modifier.padding(top = 8.dp)) {
+                    content()
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SawaariApp(viewModel: MainViewModel = viewModel()) {
@@ -5069,6 +5119,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                             }
                         }
                     }
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -5548,8 +5599,15 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                     modifier = Modifier
                         .fillMaxWidth()
                         .border(1.dp, SawaariDivider, RoundedCornerShape(16.dp))
+                        .animateContentSize(
+                            animationSpec = spring(
+                                dampingRatio = 0.8f,
+                                stiffness = 500f
+                            )
+                        )
                 ) {
-                    Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column {
+                        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
                                 .size(48.dp)
