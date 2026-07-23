@@ -238,19 +238,39 @@ fun SawaariApp(viewModel: MainViewModel = viewModel()) {
                 startDestination = if (currentUser == null) "login" else "dashboard",
                 modifier = Modifier.fillMaxSize()
             ) {
-                composable("login") {
+                composable(
+                    "login",
+                    enterTransition = { fadeIn() + slideInHorizontally { 1000 } },
+                    exitTransition = { fadeOut() + slideOutHorizontally { -1000 } }
+                ) {
                     EmailPasswordLoginScreen(viewModel, navController)
                 }
-                composable("profile_setup") {
+                composable(
+                    "profile_setup",
+                    enterTransition = { fadeIn() + slideInHorizontally { 1000 } },
+                    exitTransition = { fadeOut() + slideOutHorizontally { -1000 } }
+                ) {
                     ProfileSetupScreen(viewModel, navController)
                 }
-                composable("dashboard") {
+                composable(
+                    "dashboard",
+                    enterTransition = { fadeIn() + slideInHorizontally { 1000 } },
+                    exitTransition = { fadeOut() + slideOutHorizontally { -1000 } }
+                ) {
                     DashboardScreen(viewModel, navController)
                 }
-                composable("post_offer") {
+                composable(
+                    "post_offer",
+                    enterTransition = { fadeIn() + slideInHorizontally { 1000 } },
+                    exitTransition = { fadeOut() + slideOutHorizontally { -1000 } }
+                ) {
                     PostOfferScreen(viewModel, navController)
                 }
-                composable("post_request") {
+                composable(
+                    "post_request",
+                    enterTransition = { fadeIn() + slideInHorizontally { 1000 } },
+                    exitTransition = { fadeOut() + slideOutHorizontally { -1000 } }
+                ) {
                     PostRequestScreen(viewModel, navController)
                 }
                 composable(
@@ -258,23 +278,41 @@ fun SawaariApp(viewModel: MainViewModel = viewModel()) {
                     arguments = listOf(
                         navArgument("id") { type = NavType.StringType },
                         navArgument("type") { type = NavType.StringType }
-                    )
+                    ),
+                    enterTransition = { fadeIn() + slideInHorizontally { 1000 } },
+                    exitTransition = { fadeOut() + slideOutHorizontally { -1000 } }
                 ) { backStackEntry ->
                     val id = backStackEntry.arguments?.getString("id") ?: ""
                     val type = backStackEntry.arguments?.getString("type") ?: ""
                     TripDetailScreen(id, type, viewModel, navController)
                 }
-                composable("chat/{matchId}") { backStackEntry ->
+                composable(
+                    "chat/{matchId}",
+                    enterTransition = { fadeIn() + slideInHorizontally { 1000 } },
+                    exitTransition = { fadeOut() + slideOutHorizontally { -1000 } }
+                ) { backStackEntry ->
                     val matchId = backStackEntry.arguments?.getString("matchId") ?: ""
                     ChatScreen(matchId, viewModel, navController)
                 }
-                composable("profile") {
+                composable(
+                    "profile",
+                    enterTransition = { fadeIn() + slideInHorizontally { 1000 } },
+                    exitTransition = { fadeOut() + slideOutHorizontally { -1000 } }
+                ) {
                     ProfileScreen(viewModel, navController)
                 }
-                composable("blocked_list") {
+                composable(
+                    "blocked_list",
+                    enterTransition = { fadeIn() + slideInHorizontally { 1000 } },
+                    exitTransition = { fadeOut() + slideOutHorizontally { -1000 } }
+                ) {
                     BlockedListScreen(viewModel, navController)
                 }
-                composable("host_dashboard") {
+                composable(
+                    "host_dashboard",
+                    enterTransition = { fadeIn() + slideInHorizontally { 1000 } },
+                    exitTransition = { fadeOut() + slideOutHorizontally { -1000 } }
+                ) {
                     HostDashboard(viewModel, navController)
                 }
             }
