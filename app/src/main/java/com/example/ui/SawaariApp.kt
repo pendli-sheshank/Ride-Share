@@ -35,6 +35,8 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.animation.core.*
+import androidx.compose.animation.core.EaseInOutQuad
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
@@ -71,6 +73,83 @@ val SawaariDivider = Color(0xFFE2E8F0)
 
 val SawaariTextPrimary = Color(0xFF0F172A)
 val SawaariTextSecondary = Color(0xFF64748B)
+
+// --- Material 3 Animation Utilities ---
+
+@Composable
+fun AnimatedButtonScale(
+    isPressed: Boolean,
+    enabled: Boolean = true
+): Float {
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed && enabled) 0.95f else 1f,
+        animationSpec = spring(dampingRatio = 0.8f, stiffness = 400f),
+        label = "button_scale"
+    )
+    return scale
+}
+
+@Composable
+fun rememberButtonPressState(): MutableState<Boolean> {
+    return remember { mutableStateOf(false) }
+}
+
+fun Modifier.withButtonScale(scale: Float): Modifier {
+    return this.graphicsLayer { scaleX = scale; scaleY = scale }
+}
+
+@Composable
+fun SawaariLoadingSpinner(
+    modifier: Modifier = Modifier,
+    size: Dp = 48.dp
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "spinner")
+    val rotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "rotation"
+    )
+
+    Box(
+        modifier = modifier
+            .size(size)
+            .graphicsLayer { rotationZ = rotation }
+    ) {
+        CircularProgressIndicator(
+            modifier = Modifier.fillMaxSize(),
+            color = SawaariSaffron,
+            strokeWidth = 4.dp
+        )
+    }
+}
+
+@Composable
+fun ShimmerSkeleton(
+    modifier: Modifier = Modifier
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "shimmer")
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.9f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = EaseInOutQuad),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "shimmer_alpha"
+    )
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(12.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(SawaariDivider.copy(alpha = alpha))
+    )
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -220,6 +299,7 @@ fun EmailPasswordLoginScreen(viewModel: MainViewModel, navController: NavControl
     var isSignUpMode by remember { mutableStateOf(false) }
     var passwordVisible by remember { mutableStateOf(false) }
     var confirmPasswordVisible by remember { mutableStateOf(false) }
+    var authButtonPressed by remember { mutableStateOf(false) }
     val isFirebaseEnabled = viewModel.repository.isFirebaseEnabled
     val context = LocalContext.current
 
@@ -396,32 +476,40 @@ fun EmailPasswordLoginScreen(viewModel: MainViewModel, navController: NavControl
                     )
                 }
 
+                val authScale = AnimatedButtonScale(authButtonPressed)
                 Button(
                     onClick = {
+                        authButtonPressed = true
                         val emailTrimmed = email.trim()
                         val passTrimmed = password.trim()
                         if (emailTrimmed.isEmpty() || passTrimmed.isEmpty()) {
+                            authButtonPressed = false
                             viewModel.setError("Email and password cannot be empty")
                             return@Button
                         }
                         if (!emailTrimmed.contains("@") || !emailTrimmed.contains(".")) {
+                            authButtonPressed = false
                             viewModel.setError("Please enter a valid email address.")
                             return@Button
                         }
                         if (isSignUpMode) {
                             if (passTrimmed.length < 6) {
+                                authButtonPressed = false
                                 viewModel.setError("Password must be at least 6 characters")
                                 return@Button
                             }
                             if (passTrimmed != confirmPassword.trim()) {
+                                authButtonPressed = false
                                 viewModel.setError("Passwords do not match")
                                 return@Button
                             }
                             viewModel.signUpWithEmail(emailTrimmed, passTrimmed) { isNewUser ->
+                                authButtonPressed = false
                                 // Navigates automatically based on global StateFlow observer
                             }
                         } else {
                             viewModel.loginWithEmail(emailTrimmed, passTrimmed) { isNewUser ->
+                                authButtonPressed = false
                                 // Navigates automatically based on global StateFlow observer
                             }
                         }
@@ -429,7 +517,8 @@ fun EmailPasswordLoginScreen(viewModel: MainViewModel, navController: NavControl
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(54.dp)
-                        .testTag("auth_submit_button"),
+                        .testTag("auth_submit_button")
+                        .withButtonScale(authScale),
                     colors = ButtonDefaults.buttonColors(containerColor = SawaariSaffron),
                     shape = RoundedCornerShape(12.dp)
                 ) {
@@ -468,6 +557,7 @@ fun EmailPasswordLoginScreen(viewModel: MainViewModel, navController: NavControl
 @Composable
 fun InviteCodeScreen(viewModel: MainViewModel, navController: NavController) {
     var inviteCode by remember { mutableStateOf("") }
+    var redeemButtonPressed by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     Column(
@@ -542,10 +632,13 @@ fun InviteCodeScreen(viewModel: MainViewModel, navController: NavController) {
 
         Spacer(modifier = Modifier.height(24.dp))
 
+        val redeemScale = AnimatedButtonScale(redeemButtonPressed)
         Button(
             onClick = {
                 if (inviteCode.isNotEmpty()) {
+                    redeemButtonPressed = true
                     viewModel.redeemInviteCode(inviteCode) {
+                        redeemButtonPressed = false
                         // Routing handled by state flow
                     }
                 }
@@ -553,7 +646,8 @@ fun InviteCodeScreen(viewModel: MainViewModel, navController: NavController) {
             modifier = Modifier
                 .fillMaxWidth()
                 .height(54.dp)
-                .testTag("redeem_invite_button"),
+                .testTag("redeem_invite_button")
+                .withButtonScale(redeemScale),
             colors = ButtonDefaults.buttonColors(containerColor = SawaariSaffron),
             shape = RoundedCornerShape(12.dp)
         ) {
@@ -3152,6 +3246,8 @@ fun TripOfferCard(
 ) {
     val formatter = remember { SimpleDateFormat("EEE, d MMM • h:mm a", Locale.US) }
     val dateStr = formatter.format(Date(offer.departureTime))
+    var joinButtonPressed by remember { mutableStateOf(false) }
+    val joinScale = AnimatedButtonScale(joinButtonPressed)
 
     Card(
         onClick = onClick,
@@ -3315,11 +3411,15 @@ fun TripOfferCard(
                             // Primary CTA / Status Pill
                             if (isJoinable && onJoinClick != null) {
                                 Button(
-                                    onClick = onJoinClick,
+                                    onClick = {
+                                        joinButtonPressed = true
+                                        onJoinClick()
+                                    },
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(36.dp)
-                                        .testTag("card_join_button_${offer.id}"),
+                                        .testTag("card_join_button_${offer.id}")
+                                        .withButtonScale(joinScale),
                                     colors = ButtonDefaults.buttonColors(containerColor = SawaariSaffron),
                                     shape = RoundedCornerShape(8.dp),
                                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
@@ -4725,6 +4825,14 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
         var isHostCardExpanded by remember { mutableStateOf(false) }
         var showDriverModal by remember { mutableStateOf(false) }
 
+        // Animation state for action buttons
+        var completeButtonPressed by remember { mutableStateOf(false) }
+        var cancelButtonPressed by remember { mutableStateOf(false) }
+        var joinButtonPressed by remember { mutableStateOf(false) }
+        val completeScale = AnimatedButtonScale(completeButtonPressed)
+        val cancelScale = AnimatedButtonScale(cancelButtonPressed)
+        val joinScale = AnimatedButtonScale(joinButtonPressed)
+
         // Coordination state
         val matchMessages = existingMatch?.let { match ->
             remember(match.id) { viewModel.repository.messages.value.filter { it.matchId == match.id }.takeLast(3) }
@@ -5144,12 +5252,14 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                 if (offer.status != "completed") {
                                     Button(
                                         onClick = {
+                                            completeButtonPressed = true
                                             viewModel.updateTripOfferStatus(offer.id, "completed") {
+                                                completeButtonPressed = false
                                                 Toast.makeText(context, "Sawaari completed!", Toast.LENGTH_SHORT).show()
                                             }
                                         },
                                         colors = ButtonDefaults.buttonColors(containerColor = SawaariEmerald),
-                                        modifier = Modifier.weight(1f).testTag("host_status_completed_btn")
+                                        modifier = Modifier.weight(1f).testTag("host_status_completed_btn").withButtonScale(completeScale)
                                     ) {
                                         Text("Complete", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                     }
@@ -5157,12 +5267,14 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                 if (offer.status != "cancelled") {
                                     Button(
                                         onClick = {
+                                            cancelButtonPressed = true
                                             viewModel.updateTripOfferStatus(offer.id, "cancelled") {
+                                                cancelButtonPressed = false
                                                 Toast.makeText(context, "Sawaari cancelled!", Toast.LENGTH_SHORT).show()
                                             }
                                         },
                                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
-                                        modifier = Modifier.weight(1f).testTag("host_status_cancelled_btn")
+                                        modifier = Modifier.weight(1f).testTag("host_status_cancelled_btn").withButtonScale(cancelScale)
                                     ) {
                                         Text("Cancel", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                     }
@@ -5236,14 +5348,17 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                     // Show Direct Join Button
                                     Button(
                                         onClick = {
+                                            joinButtonPressed = true
                                             viewModel.joinTripOfferDirect(offer.id) {
+                                                joinButtonPressed = false
                                                 Toast.makeText(context, "Successfully joined Sawaari!", Toast.LENGTH_LONG).show()
                                             }
                                         },
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .height(54.dp)
-                                            .testTag("direct_join_button"),
+                                            .testTag("direct_join_button")
+                                            .withButtonScale(joinScale),
                                         colors = ButtonDefaults.buttonColors(containerColor = SawaariSaffron),
                                         shape = RoundedCornerShape(12.dp)
                                     ) {
