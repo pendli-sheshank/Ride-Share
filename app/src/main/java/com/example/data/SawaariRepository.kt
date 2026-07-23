@@ -56,6 +56,15 @@ class SawaariRepository(private val context: Context) {
     private val _blocks = MutableStateFlow<Map<String, Block>>(emptyMap())
     private val _credentials = MutableStateFlow<Map<String, LocalCredential>>(emptyMap())
 
+    // --- Real-time Connection State ---
+    private val _isConnected = MutableStateFlow<Boolean>(isFirebaseEnabled)
+    val isConnected: StateFlow<Boolean> = _isConnected.asStateFlow()
+
+    private val _lastSyncTime = MutableStateFlow<Long>(0L)
+    val lastSyncTime: StateFlow<Long> = _lastSyncTime.asStateFlow()
+
+    private var listenerRegistrations = mutableListOf<com.google.firebase.firestore.ListenerRegistration>()
+
     // --- Public Reactive Streams ---
     private val _currentUser = MutableStateFlow<User?>(null)
     val currentUser: StateFlow<User?> = _currentUser.asStateFlow()
@@ -222,100 +231,193 @@ class SawaariRepository(private val context: Context) {
         }
 
         if (isFirebaseEnabled && firebaseFirestore != null) {
-            // Listen to trip_offers in real-time
-            try {
-                firebaseFirestore?.collection("trip_offers")?.addSnapshotListener { snapshot, error ->
-                    if (error != null) {
-                        Log.e("SawaariShare", "Listen to trip_offers failed: ${error.message}")
-                        return@addSnapshotListener
-                    }
-                    if (snapshot != null) {
-                        val offers = snapshot.documents.mapNotNull { doc -> doc.toTripOfferSafe() }
-                        if (offers.isNotEmpty() || snapshot.isEmpty) {
-                            val updatedOffersMap = _tripOffers.value.toMutableMap()
-                            offers.forEach { offer ->
-                                updatedOffersMap[offer.id] = offer
-                            }
-                            _tripOffers.value = updatedOffersMap
-                            updateFeeds(_currentUser.value)
-                            saveList("trip_offers.json", _tripOffers.value.values.toList(), tripOfferListAdapter)
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("SawaariShare", "Failed to register trip_offers listener: ${e.message}")
-            }
-
-            // Listen to ride_requests in real-time
-            try {
-                firebaseFirestore?.collection("ride_requests")?.addSnapshotListener { snapshot, error ->
-                    if (error != null) {
-                        Log.e("SawaariShare", "Listen to ride_requests failed: ${error.message}")
-                        return@addSnapshotListener
-                    }
-                    if (snapshot != null) {
-                        val reqs = snapshot.documents.mapNotNull { doc -> doc.toRideRequestSafe() }
-                        if (reqs.isNotEmpty() || snapshot.isEmpty) {
-                            val updatedReqsMap = _rideRequests.value.toMutableMap()
-                            reqs.forEach { req ->
-                                updatedReqsMap[req.id] = req
-                            }
-                            _rideRequests.value = updatedReqsMap
-                            updateFeeds(_currentUser.value)
-                            saveList("ride_requests.json", _rideRequests.value.values.toList(), rideRequestListAdapter)
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("SawaariShare", "Failed to register ride_requests listener: ${e.message}")
-            }
-
-            // Listen to messages in real-time
-            try {
-                firebaseFirestore?.collection("messages")?.addSnapshotListener { snapshot, error ->
-                    if (error != null) {
-                        Log.e("SawaariShare", "Listen to messages failed: ${error.message}")
-                        return@addSnapshotListener
-                    }
-                    if (snapshot != null) {
-                        val msgs = snapshot.documents.mapNotNull { doc -> doc.toMessageSafe() }
-                        if (msgs.isNotEmpty() || snapshot.isEmpty) {
-                            val updatedMsgsMap = _messages.value.toMutableMap()
-                            msgs.forEach { msg ->
-                                updatedMsgsMap[msg.id] = msg
-                            }
-                            _messages.value = updatedMsgsMap
-                            saveList("messages.json", _messages.value.values.toList(), messageListAdapter)
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("SawaariShare", "Failed to register messages listener: ${e.message}")
-            }
-
-            // Listen to notifications in real-time
-            try {
-                firebaseFirestore?.collection("notifications")?.addSnapshotListener { snapshot, error ->
-                    if (error != null) {
-                        Log.e("SawaariShare", "Listen to notifications failed: ${error.message}")
-                        return@addSnapshotListener
-                    }
-                    if (snapshot != null) {
-                        val currentUserId = _currentUser.value?.id ?: ""
-                        val alerts = snapshot.documents
-                            .mapNotNull { doc -> doc.toNotificationAlertSafe() }
-                            .filter { it.userId == currentUserId || it.userId.isEmpty() }
-                            .sortedByDescending { it.timestamp }
-                        if (alerts.isNotEmpty() || snapshot.isEmpty) {
-                            _notifications.value = alerts
-                            saveList("notifications.json", _notifications.value, notificationListAdapter)
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("SawaariShare", "Failed to register notifications listener: ${e.message}")
-            }
+            setupRealtimeListeners()
         }
+    }
+
+    private fun setupRealtimeListeners() {
+        // Enable offline persistence for seamless sync
+        try {
+            firebaseFirestore?.firestoreSettings = com.google.firebase.firestore.FirestoreSettings.Builder()
+                .setPersistenceEnabled(true)
+                .build()
+        } catch (e: Exception) {
+            Log.w("SawaariShare", "Could not enable Firestore persistence: ${e.message}")
+        }
+
+        // Listen to trip_offers in real-time
+        try {
+            val offersListener = firebaseFirestore?.collection("trip_offers")?.addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("SawaariShare", "Listen to trip_offers failed: ${error.message}")
+                    _isConnected.value = false
+                    return@addSnapshotListener
+                }
+                _isConnected.value = true
+                if (snapshot != null) {
+                    val offers = snapshot.documents.mapNotNull { doc -> doc.toTripOfferSafe() }
+                    if (offers.isNotEmpty() || snapshot.isEmpty) {
+                        val updatedOffersMap = _tripOffers.value.toMutableMap()
+                        offers.forEach { offer ->
+                            updatedOffersMap[offer.id] = offer
+                        }
+                        _tripOffers.value = updatedOffersMap
+                        updateFeeds(_currentUser.value)
+                        saveList("trip_offers.json", _tripOffers.value.values.toList(), tripOfferListAdapter)
+                        _lastSyncTime.value = System.currentTimeMillis()
+                    }
+                }
+            }
+            if (offersListener != null) listenerRegistrations.add(offersListener)
+        } catch (e: Exception) {
+            Log.e("SawaariShare", "Failed to register trip_offers listener: ${e.message}")
+        }
+
+        // Listen to ride_requests in real-time
+        try {
+            val requestsListener = firebaseFirestore?.collection("ride_requests")?.addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("SawaariShare", "Listen to ride_requests failed: ${error.message}")
+                    _isConnected.value = false
+                    return@addSnapshotListener
+                }
+                _isConnected.value = true
+                if (snapshot != null) {
+                    val reqs = snapshot.documents.mapNotNull { doc -> doc.toRideRequestSafe() }
+                    if (reqs.isNotEmpty() || snapshot.isEmpty) {
+                        val updatedReqsMap = _rideRequests.value.toMutableMap()
+                        reqs.forEach { req ->
+                            updatedReqsMap[req.id] = req
+                        }
+                        _rideRequests.value = updatedReqsMap
+                        updateFeeds(_currentUser.value)
+                        saveList("ride_requests.json", _rideRequests.value.values.toList(), rideRequestListAdapter)
+                        _lastSyncTime.value = System.currentTimeMillis()
+                    }
+                }
+            }
+            if (requestsListener != null) listenerRegistrations.add(requestsListener)
+        } catch (e: Exception) {
+            Log.e("SawaariShare", "Failed to register ride_requests listener: ${e.message}")
+        }
+
+        // Listen to trip_matches in real-time
+        try {
+            val matchesListener = firebaseFirestore?.collection("trip_matches")?.addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("SawaariShare", "Listen to trip_matches failed: ${error.message}")
+                    _isConnected.value = false
+                    return@addSnapshotListener
+                }
+                _isConnected.value = true
+                if (snapshot != null) {
+                    val matches = snapshot.documents.mapNotNull { doc -> doc.toObject(TripMatch::class.java) }
+                    if (matches.isNotEmpty() || snapshot.isEmpty) {
+                        val updatedMatchesMap = _tripMatches.value.toMutableMap()
+                        matches.forEach { match ->
+                            updatedMatchesMap[match.id] = match
+                        }
+                        _tripMatches.value = updatedMatchesMap
+                        updateFeeds(_currentUser.value)
+                        saveList("trip_matches.json", _tripMatches.value.values.toList(), tripMatchListAdapter)
+                        _lastSyncTime.value = System.currentTimeMillis()
+                    }
+                }
+            }
+            if (matchesListener != null) listenerRegistrations.add(matchesListener)
+        } catch (e: Exception) {
+            Log.e("SawaariShare", "Failed to register trip_matches listener: ${e.message}")
+        }
+
+        // Listen to messages in real-time
+        try {
+            val messagesListener = firebaseFirestore?.collection("messages")?.addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("SawaariShare", "Listen to messages failed: ${error.message}")
+                    _isConnected.value = false
+                    return@addSnapshotListener
+                }
+                _isConnected.value = true
+                if (snapshot != null) {
+                    val msgs = snapshot.documents.mapNotNull { doc -> doc.toMessageSafe() }
+                    if (msgs.isNotEmpty() || snapshot.isEmpty) {
+                        val updatedMsgsMap = _messages.value.toMutableMap()
+                        msgs.forEach { msg ->
+                            updatedMsgsMap[msg.id] = msg
+                        }
+                        _messages.value = updatedMsgsMap
+                        saveList("messages.json", _messages.value.values.toList(), messageListAdapter)
+                        _lastSyncTime.value = System.currentTimeMillis()
+                    }
+                }
+            }
+            if (messagesListener != null) listenerRegistrations.add(messagesListener)
+        } catch (e: Exception) {
+            Log.e("SawaariShare", "Failed to register messages listener: ${e.message}")
+        }
+
+        // Listen to notifications in real-time
+        try {
+            val notificationsListener = firebaseFirestore?.collection("notifications")?.addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("SawaariShare", "Listen to notifications failed: ${error.message}")
+                    _isConnected.value = false
+                    return@addSnapshotListener
+                }
+                _isConnected.value = true
+                if (snapshot != null) {
+                    val currentUserId = _currentUser.value?.id ?: ""
+                    val alerts = snapshot.documents
+                        .mapNotNull { doc -> doc.toNotificationAlertSafe() }
+                        .filter { it.userId == currentUserId || it.userId.isEmpty() }
+                        .sortedByDescending { it.timestamp }
+                    if (alerts.isNotEmpty() || snapshot.isEmpty) {
+                        _notifications.value = alerts
+                        saveList("notifications.json", _notifications.value, notificationListAdapter)
+                        _lastSyncTime.value = System.currentTimeMillis()
+                    }
+                }
+            }
+            if (notificationsListener != null) listenerRegistrations.add(notificationsListener)
+        } catch (e: Exception) {
+            Log.e("SawaariShare", "Failed to register notifications listener: ${e.message}")
+        }
+
+        // Listen to users for profile updates
+        try {
+            val usersListener = firebaseFirestore?.collection("users")?.addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("SawaariShare", "Listen to users failed: ${error.message}")
+                    return@addSnapshotListener
+                }
+                if (snapshot != null) {
+                    val users = snapshot.documents.mapNotNull { doc -> doc.toObject(User::class.java) }
+                    if (users.isNotEmpty() || snapshot.isEmpty) {
+                        val updatedUsersMap = _users.value.toMutableMap()
+                        users.forEach { user ->
+                            updatedUsersMap[user.id] = user
+                            // Update current user if it's them
+                            if (_currentUser.value?.id == user.id) {
+                                _currentUser.value = user
+                            }
+                        }
+                        _users.value = updatedUsersMap
+                        saveList("users.json", _users.value.values.toList(), userListAdapter)
+                    }
+                }
+            }
+            if (usersListener != null) listenerRegistrations.add(usersListener)
+        } catch (e: Exception) {
+            Log.e("SawaariShare", "Failed to register users listener: ${e.message}")
+        }
+
+        Log.d("SawaariShare", "Real-time listeners registered: ${listenerRegistrations.size}")
+    }
+
+    fun stopRealtimeListeners() {
+        listenerRegistrations.forEach { it.remove() }
+        listenerRegistrations.clear()
+        Log.d("SawaariShare", "Real-time listeners stopped")
     }
 
     private fun updateFeeds(currentUser: User?) {
@@ -1819,7 +1921,44 @@ class SawaariRepository(private val context: Context) {
         )
     }
 
+    suspend fun syncDataWithFirestore(): Result<Unit> = withContext(Dispatchers.IO) {
+        if (!isFirebaseEnabled || firebaseFirestore == null) {
+            return@withContext Result.success(Unit)
+        }
+
+        try {
+            // Force refresh all collections from Firestore
+            val offers = firebaseFirestore?.collection("trip_offers")?.get()?.awaitTask()
+                ?.documents?.mapNotNull { it.toTripOfferSafe() } ?: emptyList()
+            val requests = firebaseFirestore?.collection("ride_requests")?.get()?.awaitTask()
+                ?.documents?.mapNotNull { it.toRideRequestSafe() } ?: emptyList()
+            val matches = firebaseFirestore?.collection("trip_matches")?.get()?.awaitTask()
+                ?.documents?.mapNotNull { it.toObject(TripMatch::class.java) } ?: emptyList()
+            val messages = firebaseFirestore?.collection("messages")?.get()?.awaitTask()
+                ?.documents?.mapNotNull { it.toMessageSafe() } ?: emptyList()
+
+            _tripOffers.value = offers.associateBy { it.id }
+            _rideRequests.value = requests.associateBy { it.id }
+            _tripMatches.value = matches.associateBy { it.id }
+            _messages.value = messages.associateBy { it.id }
+
+            saveList("trip_offers.json", _tripOffers.value.values.toList(), tripOfferListAdapter)
+            saveList("ride_requests.json", _rideRequests.value.values.toList(), rideRequestListAdapter)
+            saveList("trip_matches.json", _tripMatches.value.values.toList(), tripMatchListAdapter)
+            saveList("messages.json", _messages.value.values.toList(), messageListAdapter)
+
+            _lastSyncTime.value = System.currentTimeMillis()
+            updateFeeds(_currentUser.value)
+
+            return@withContext Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e("SawaariShare", "Failed to sync with Firestore: ${e.message}")
+            return@withContext Result.failure(e)
+        }
+    }
+
     fun logout() {
+        stopRealtimeListeners()
         _currentUser.value = null
     }
 }
