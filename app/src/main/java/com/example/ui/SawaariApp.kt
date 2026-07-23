@@ -586,6 +586,12 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
     var vColor by remember { mutableStateOf("") }
     var vPlate by remember { mutableStateOf("") }
 
+    // Profile picture state
+    var selectedAvatarUrl by remember { mutableStateOf("") }
+    var uploadingProfilePicture by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -620,6 +626,58 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
                 fontSize = 13.sp,
                 modifier = Modifier.padding(top = 4.dp, bottom = 24.dp)
             )
+
+            // Profile Picture Upload Section
+            Card(
+                colors = CardDefaults.cardColors(containerColor = SawaariIndigo.copy(alpha = 0.15f)),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 24.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "Profile Picture",
+                        color = SawaariTextPrimary,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    if (selectedAvatarUrl.isNotEmpty()) {
+                        StudentAvatar(
+                            avatarUrl = selectedAvatarUrl,
+                            name = name.ifEmpty { "?" },
+                            size = 80.dp,
+                            fontSize = 32.sp
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("✓ Image selected", color = SawaariEmerald, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Image,
+                            contentDescription = "Add photo",
+                            tint = SawaariSaffron,
+                            modifier = Modifier.size(40.dp)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Choose a profile photo", color = SawaariLightGray, fontSize = 12.sp)
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "(Optional - can be added later)",
+                        color = SawaariLightGray,
+                        fontSize = 10.sp,
+                        fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
+                    )
+                }
+            }
 
             // Name
             OutlinedTextField(

@@ -1957,6 +1957,107 @@ class SawaariRepository(private val context: Context) {
         }
     }
 
+    // --- Firebase Storage (Profile Pictures) ---
+
+    suspend fun resizeImage(inputFile: File, maxWidth: Int = 512, maxHeight: Int = 512): Result<File> = withContext(Dispatchers.IO) {
+        try {
+            val bitmap = android.graphics.BitmapFactory.decodeFile(inputFile.absolutePath)
+                ?: return@withContext Result.failure(Exception("Failed to decode image"))
+
+            val aspectRatio = bitmap.width.toFloat() / bitmap.height.toFloat()
+            val (newWidth, newHeight) = if (aspectRatio > 1) {
+                maxWidth to (maxWidth / aspectRatio).toInt()
+            } else {
+                (maxHeight * aspectRatio).toInt() to maxHeight
+            }
+
+            val resizedBitmap = android.graphics.Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
+
+            val outputFile = File(context.cacheDir, "resized_${System.currentTimeMillis()}.jpg")
+            val fos = java.io.FileOutputStream(outputFile)
+            resizedBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, fos)
+            fos.close()
+
+            bitmap.recycle()
+            resizedBitmap.recycle()
+
+            return@withContext Result.success(outputFile)
+        } catch (e: Exception) {
+            Log.e("SawaariShare", "Failed to resize image: ${e.message}")
+            return@withContext Result.failure(e)
+        }
+    }
+
+    suspend fun uploadProfilePicture(userId: String, imageFile: File): Result<String> = withContext(Dispatchers.IO) {
+        if (!isFirebaseEnabled) {
+            // Fallback: return local path
+            return@withContext Result.success(imageFile.absolutePath)
+        }
+
+        try {
+            val storageRef = firebaseStorage?.reference?.child("profile_pictures/$userId.jpg")
+                ?: return@withContext Result.failure(Exception("Storage not initialized"))
+
+            // Upload file to Firebase Storage
+            val uploadTask = storageRef.putFile(android.net.Uri.fromFile(imageFile))
+            uploadTask.awaitTask()
+
+            // Get download URL
+            val downloadUrl = storageRef.downloadUrl.awaitTask()
+
+            // Update user profile with avatar URL
+            val updatedUser = _currentUser.value?.copy(avatarUrl = downloadUrl.toString())
+            if (updatedUser != null) {
+                firebaseFirestore?.collection("users")?.document(userId)
+                    ?.update("avatarUrl", downloadUrl.toString())
+                    ?.awaitTask()
+
+                _currentUser.value = updatedUser
+                _users.value = _users.value.toMutableMap().apply {
+                    put(userId, updatedUser)
+                }
+                saveUser(updatedUser, userAdapter)
+            }
+
+            return@withContext Result.success(downloadUrl.toString())
+        } catch (e: Exception) {
+            Log.e("SawaariShare", "Failed to upload profile picture: ${e.message}")
+            return@withContext Result.failure(e)
+        }
+    }
+
+    suspend fun deleteProfilePicture(userId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        if (!isFirebaseEnabled) {
+            return@withContext Result.success(Unit)
+        }
+
+        try {
+            val storageRef = firebaseStorage?.reference?.child("profile_pictures/$userId.jpg")
+                ?: return@withContext Result.failure(Exception("Storage not initialized"))
+
+            storageRef.delete().awaitTask()
+
+            // Clear avatar URL from user profile
+            val updatedUser = _currentUser.value?.copy(avatarUrl = "")
+            if (updatedUser != null) {
+                firebaseFirestore?.collection("users")?.document(userId)
+                    ?.update("avatarUrl", "")
+                    ?.awaitTask()
+
+                _currentUser.value = updatedUser
+                _users.value = _users.value.toMutableMap().apply {
+                    put(userId, updatedUser)
+                }
+                saveUser(updatedUser, userAdapter)
+            }
+
+            return@withContext Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e("SawaariShare", "Failed to delete profile picture: ${e.message}")
+            return@withContext Result.failure(e)
+        }
+    }
+
     fun logout() {
         stopRealtimeListeners()
         _currentUser.value = null
