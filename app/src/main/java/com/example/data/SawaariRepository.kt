@@ -56,6 +56,15 @@ class SawaariRepository(private val context: Context) {
     private val _blocks = MutableStateFlow<Map<String, Block>>(emptyMap())
     private val _credentials = MutableStateFlow<Map<String, LocalCredential>>(emptyMap())
 
+    // --- Real-time Connection State ---
+    private val _isConnected = MutableStateFlow<Boolean>(isFirebaseEnabled)
+    val isConnected: StateFlow<Boolean> = _isConnected.asStateFlow()
+
+    private val _lastSyncTime = MutableStateFlow<Long>(0L)
+    val lastSyncTime: StateFlow<Long> = _lastSyncTime.asStateFlow()
+
+    private var listenerRegistrations = mutableListOf<com.google.firebase.firestore.ListenerRegistration>()
+
     // --- Public Reactive Streams ---
     private val _currentUser = MutableStateFlow<User?>(null)
     val currentUser: StateFlow<User?> = _currentUser.asStateFlow()
@@ -222,100 +231,193 @@ class SawaariRepository(private val context: Context) {
         }
 
         if (isFirebaseEnabled && firebaseFirestore != null) {
-            // Listen to trip_offers in real-time
-            try {
-                firebaseFirestore?.collection("trip_offers")?.addSnapshotListener { snapshot, error ->
-                    if (error != null) {
-                        Log.e("SawaariShare", "Listen to trip_offers failed: ${error.message}")
-                        return@addSnapshotListener
-                    }
-                    if (snapshot != null) {
-                        val offers = snapshot.documents.mapNotNull { doc -> doc.toTripOfferSafe() }
-                        if (offers.isNotEmpty() || snapshot.isEmpty) {
-                            val updatedOffersMap = _tripOffers.value.toMutableMap()
-                            offers.forEach { offer ->
-                                updatedOffersMap[offer.id] = offer
-                            }
-                            _tripOffers.value = updatedOffersMap
-                            updateFeeds(_currentUser.value)
-                            saveList("trip_offers.json", _tripOffers.value.values.toList(), tripOfferListAdapter)
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("SawaariShare", "Failed to register trip_offers listener: ${e.message}")
-            }
-
-            // Listen to ride_requests in real-time
-            try {
-                firebaseFirestore?.collection("ride_requests")?.addSnapshotListener { snapshot, error ->
-                    if (error != null) {
-                        Log.e("SawaariShare", "Listen to ride_requests failed: ${error.message}")
-                        return@addSnapshotListener
-                    }
-                    if (snapshot != null) {
-                        val reqs = snapshot.documents.mapNotNull { doc -> doc.toRideRequestSafe() }
-                        if (reqs.isNotEmpty() || snapshot.isEmpty) {
-                            val updatedReqsMap = _rideRequests.value.toMutableMap()
-                            reqs.forEach { req ->
-                                updatedReqsMap[req.id] = req
-                            }
-                            _rideRequests.value = updatedReqsMap
-                            updateFeeds(_currentUser.value)
-                            saveList("ride_requests.json", _rideRequests.value.values.toList(), rideRequestListAdapter)
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("SawaariShare", "Failed to register ride_requests listener: ${e.message}")
-            }
-
-            // Listen to messages in real-time
-            try {
-                firebaseFirestore?.collection("messages")?.addSnapshotListener { snapshot, error ->
-                    if (error != null) {
-                        Log.e("SawaariShare", "Listen to messages failed: ${error.message}")
-                        return@addSnapshotListener
-                    }
-                    if (snapshot != null) {
-                        val msgs = snapshot.documents.mapNotNull { doc -> doc.toMessageSafe() }
-                        if (msgs.isNotEmpty() || snapshot.isEmpty) {
-                            val updatedMsgsMap = _messages.value.toMutableMap()
-                            msgs.forEach { msg ->
-                                updatedMsgsMap[msg.id] = msg
-                            }
-                            _messages.value = updatedMsgsMap
-                            saveList("messages.json", _messages.value.values.toList(), messageListAdapter)
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("SawaariShare", "Failed to register messages listener: ${e.message}")
-            }
-
-            // Listen to notifications in real-time
-            try {
-                firebaseFirestore?.collection("notifications")?.addSnapshotListener { snapshot, error ->
-                    if (error != null) {
-                        Log.e("SawaariShare", "Listen to notifications failed: ${error.message}")
-                        return@addSnapshotListener
-                    }
-                    if (snapshot != null) {
-                        val currentUserId = _currentUser.value?.id ?: ""
-                        val alerts = snapshot.documents
-                            .mapNotNull { doc -> doc.toNotificationAlertSafe() }
-                            .filter { it.userId == currentUserId || it.userId.isEmpty() }
-                            .sortedByDescending { it.timestamp }
-                        if (alerts.isNotEmpty() || snapshot.isEmpty) {
-                            _notifications.value = alerts
-                            saveList("notifications.json", _notifications.value, notificationListAdapter)
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("SawaariShare", "Failed to register notifications listener: ${e.message}")
-            }
+            setupRealtimeListeners()
         }
+    }
+
+    private fun setupRealtimeListeners() {
+        // Enable offline persistence for seamless sync
+        try {
+            firebaseFirestore?.firestoreSettings = com.google.firebase.firestore.FirestoreSettings.Builder()
+                .setPersistenceEnabled(true)
+                .build()
+        } catch (e: Exception) {
+            Log.w("SawaariShare", "Could not enable Firestore persistence: ${e.message}")
+        }
+
+        // Listen to trip_offers in real-time
+        try {
+            val offersListener = firebaseFirestore?.collection("trip_offers")?.addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("SawaariShare", "Listen to trip_offers failed: ${error.message}")
+                    _isConnected.value = false
+                    return@addSnapshotListener
+                }
+                _isConnected.value = true
+                if (snapshot != null) {
+                    val offers = snapshot.documents.mapNotNull { doc -> doc.toTripOfferSafe() }
+                    if (offers.isNotEmpty() || snapshot.isEmpty) {
+                        val updatedOffersMap = _tripOffers.value.toMutableMap()
+                        offers.forEach { offer ->
+                            updatedOffersMap[offer.id] = offer
+                        }
+                        _tripOffers.value = updatedOffersMap
+                        updateFeeds(_currentUser.value)
+                        saveList("trip_offers.json", _tripOffers.value.values.toList(), tripOfferListAdapter)
+                        _lastSyncTime.value = System.currentTimeMillis()
+                    }
+                }
+            }
+            if (offersListener != null) listenerRegistrations.add(offersListener)
+        } catch (e: Exception) {
+            Log.e("SawaariShare", "Failed to register trip_offers listener: ${e.message}")
+        }
+
+        // Listen to ride_requests in real-time
+        try {
+            val requestsListener = firebaseFirestore?.collection("ride_requests")?.addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("SawaariShare", "Listen to ride_requests failed: ${error.message}")
+                    _isConnected.value = false
+                    return@addSnapshotListener
+                }
+                _isConnected.value = true
+                if (snapshot != null) {
+                    val reqs = snapshot.documents.mapNotNull { doc -> doc.toRideRequestSafe() }
+                    if (reqs.isNotEmpty() || snapshot.isEmpty) {
+                        val updatedReqsMap = _rideRequests.value.toMutableMap()
+                        reqs.forEach { req ->
+                            updatedReqsMap[req.id] = req
+                        }
+                        _rideRequests.value = updatedReqsMap
+                        updateFeeds(_currentUser.value)
+                        saveList("ride_requests.json", _rideRequests.value.values.toList(), rideRequestListAdapter)
+                        _lastSyncTime.value = System.currentTimeMillis()
+                    }
+                }
+            }
+            if (requestsListener != null) listenerRegistrations.add(requestsListener)
+        } catch (e: Exception) {
+            Log.e("SawaariShare", "Failed to register ride_requests listener: ${e.message}")
+        }
+
+        // Listen to trip_matches in real-time
+        try {
+            val matchesListener = firebaseFirestore?.collection("trip_matches")?.addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("SawaariShare", "Listen to trip_matches failed: ${error.message}")
+                    _isConnected.value = false
+                    return@addSnapshotListener
+                }
+                _isConnected.value = true
+                if (snapshot != null) {
+                    val matches = snapshot.documents.mapNotNull { doc -> doc.toObject(TripMatch::class.java) }
+                    if (matches.isNotEmpty() || snapshot.isEmpty) {
+                        val updatedMatchesMap = _tripMatches.value.toMutableMap()
+                        matches.forEach { match ->
+                            updatedMatchesMap[match.id] = match
+                        }
+                        _tripMatches.value = updatedMatchesMap
+                        updateFeeds(_currentUser.value)
+                        saveList("trip_matches.json", _tripMatches.value.values.toList(), tripMatchListAdapter)
+                        _lastSyncTime.value = System.currentTimeMillis()
+                    }
+                }
+            }
+            if (matchesListener != null) listenerRegistrations.add(matchesListener)
+        } catch (e: Exception) {
+            Log.e("SawaariShare", "Failed to register trip_matches listener: ${e.message}")
+        }
+
+        // Listen to messages in real-time
+        try {
+            val messagesListener = firebaseFirestore?.collection("messages")?.addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("SawaariShare", "Listen to messages failed: ${error.message}")
+                    _isConnected.value = false
+                    return@addSnapshotListener
+                }
+                _isConnected.value = true
+                if (snapshot != null) {
+                    val msgs = snapshot.documents.mapNotNull { doc -> doc.toMessageSafe() }
+                    if (msgs.isNotEmpty() || snapshot.isEmpty) {
+                        val updatedMsgsMap = _messages.value.toMutableMap()
+                        msgs.forEach { msg ->
+                            updatedMsgsMap[msg.id] = msg
+                        }
+                        _messages.value = updatedMsgsMap
+                        saveList("messages.json", _messages.value.values.toList(), messageListAdapter)
+                        _lastSyncTime.value = System.currentTimeMillis()
+                    }
+                }
+            }
+            if (messagesListener != null) listenerRegistrations.add(messagesListener)
+        } catch (e: Exception) {
+            Log.e("SawaariShare", "Failed to register messages listener: ${e.message}")
+        }
+
+        // Listen to notifications in real-time
+        try {
+            val notificationsListener = firebaseFirestore?.collection("notifications")?.addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("SawaariShare", "Listen to notifications failed: ${error.message}")
+                    _isConnected.value = false
+                    return@addSnapshotListener
+                }
+                _isConnected.value = true
+                if (snapshot != null) {
+                    val currentUserId = _currentUser.value?.id ?: ""
+                    val alerts = snapshot.documents
+                        .mapNotNull { doc -> doc.toNotificationAlertSafe() }
+                        .filter { it.userId == currentUserId || it.userId.isEmpty() }
+                        .sortedByDescending { it.timestamp }
+                    if (alerts.isNotEmpty() || snapshot.isEmpty) {
+                        _notifications.value = alerts
+                        saveList("notifications.json", _notifications.value, notificationListAdapter)
+                        _lastSyncTime.value = System.currentTimeMillis()
+                    }
+                }
+            }
+            if (notificationsListener != null) listenerRegistrations.add(notificationsListener)
+        } catch (e: Exception) {
+            Log.e("SawaariShare", "Failed to register notifications listener: ${e.message}")
+        }
+
+        // Listen to users for profile updates
+        try {
+            val usersListener = firebaseFirestore?.collection("users")?.addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("SawaariShare", "Listen to users failed: ${error.message}")
+                    return@addSnapshotListener
+                }
+                if (snapshot != null) {
+                    val users = snapshot.documents.mapNotNull { doc -> doc.toObject(User::class.java) }
+                    if (users.isNotEmpty() || snapshot.isEmpty) {
+                        val updatedUsersMap = _users.value.toMutableMap()
+                        users.forEach { user ->
+                            updatedUsersMap[user.id] = user
+                            // Update current user if it's them
+                            if (_currentUser.value?.id == user.id) {
+                                _currentUser.value = user
+                            }
+                        }
+                        _users.value = updatedUsersMap
+                        saveList("users.json", _users.value.values.toList(), userListAdapter)
+                    }
+                }
+            }
+            if (usersListener != null) listenerRegistrations.add(usersListener)
+        } catch (e: Exception) {
+            Log.e("SawaariShare", "Failed to register users listener: ${e.message}")
+        }
+
+        Log.d("SawaariShare", "Real-time listeners registered: ${listenerRegistrations.size}")
+    }
+
+    fun stopRealtimeListeners() {
+        listenerRegistrations.forEach { it.remove() }
+        listenerRegistrations.clear()
+        Log.d("SawaariShare", "Real-time listeners stopped")
     }
 
     private fun updateFeeds(currentUser: User?) {
@@ -566,10 +668,14 @@ class SawaariRepository(private val context: Context) {
         vehicle: Vehicle? = null
     ): Result<Unit> = withContext(Dispatchers.IO) {
         val user = _currentUser.value ?: return@withContext Result.failure(Exception("No logged in user found."))
-        
+
+        if (name.trim().isEmpty() || lastInitial.trim().isEmpty() || communityId.isEmpty() || homeArea.isEmpty()) {
+            return@withContext Result.failure(Exception("All profile fields are required."))
+        }
+
         val updatedUser = user.copy(
-            name = name,
-            lastInitial = lastInitial,
+            name = name.trim(),
+            lastInitial = lastInitial.trim(),
             communityId = communityId,
             homeArea = homeArea
         )
@@ -578,7 +684,18 @@ class SawaariRepository(private val context: Context) {
         _currentUser.value = updatedUser
 
         saveList("users.json", _users.value.values.toList(), userListAdapter)
-        
+
+        // Sync to Firestore
+        if (isFirebaseEnabled && firebaseFirestore != null) {
+            try {
+                firebaseFirestore?.collection("users")?.document(user.id)?.set(updatedUser)?.awaitTask()
+                Log.d("SawaariShare", "User profile successfully saved to Firestore.")
+            } catch (e: Exception) {
+                Log.e("SawaariShare", "Failed to sync profile to Firestore: ${e.message}")
+                // Still succeeds locally even if Firestore fails
+            }
+        }
+
         if (vehicle != null) {
             saveVehicleInfo(vehicle)
         } else {
@@ -642,15 +759,36 @@ class SawaariRepository(private val context: Context) {
     // --- Core Carpooling: Offers & Requests ---
 
     suspend fun postTripOffer(offer: TripOffer): Result<Unit> = withContext(Dispatchers.IO) {
+        val currentUser = _currentUser.value ?: return@withContext Result.failure(Exception("Please log in to post a ride."))
+
+        // Validation
+        if (offer.origin.trim().isEmpty() || offer.destination.trim().isEmpty()) {
+            return@withContext Result.failure(Exception("Origin and destination are required."))
+        }
+        if (offer.originLat == 0.0 || offer.originLng == 0.0 || offer.destLat == 0.0 || offer.destLng == 0.0) {
+            return@withContext Result.failure(Exception("Valid pickup and dropoff locations required."))
+        }
+        if (offer.departureTime <= System.currentTimeMillis()) {
+            return@withContext Result.failure(Exception("Departure time must be in the future."))
+        }
+        if (offer.totalSeats < 1 || offer.totalSeats > 8) {
+            return@withContext Result.failure(Exception("Total seats must be between 1 and 8."))
+        }
+        if (offer.costPerRider < 0.0) {
+            return@withContext Result.failure(Exception("Cost per rider cannot be negative."))
+        }
+
         val id = "offer_${UUID.randomUUID().toString().take(8)}"
         val finalOffer = offer.copy(
             id = id,
-            hostId = _currentUser.value?.id ?: "",
-            hostName = _currentUser.value?.name ?: "Host",
-            hostRating = _currentUser.value?.ratingAvg ?: 5.0f,
+            hostId = currentUser.id,
+            hostName = currentUser.name,
+            hostRating = currentUser.ratingAvg,
             originGeohash = GeoUtils.encodeGeohash(offer.originLat, offer.originLng, 7),
             destGeohash = GeoUtils.encodeGeohash(offer.destLat, offer.destLng, 7),
-            costEstimate = offer.costPerRider * offer.totalSeats
+            costEstimate = offer.costPerRider * offer.totalSeats,
+            seatsLeft = offer.totalSeats,
+            status = "active"
         )
 
         _tripOffers.value = _tripOffers.value + (id to finalOffer)
@@ -715,19 +853,70 @@ class SawaariRepository(private val context: Context) {
     }
 
     suspend fun postRideRequest(request: RideRequest): Result<Unit> = withContext(Dispatchers.IO) {
+        val currentUser = _currentUser.value ?: return@withContext Result.failure(Exception("Please log in to post a ride request."))
+
+        // Validation
+        if (request.origin.trim().isEmpty() || request.destination.trim().isEmpty()) {
+            return@withContext Result.failure(Exception("Pickup and dropoff locations are required."))
+        }
+        if (request.originLat == 0.0 || request.originLng == 0.0 || request.destLat == 0.0 || request.destLng == 0.0) {
+            return@withContext Result.failure(Exception("Valid pickup and dropoff coordinates required."))
+        }
+        if (request.departureTime <= System.currentTimeMillis()) {
+            return@withContext Result.failure(Exception("Departure time must be in the future."))
+        }
+        if (request.seatsNeeded < 1 || request.seatsNeeded > 8) {
+            return@withContext Result.failure(Exception("Seats needed must be between 1 and 8."))
+        }
+
         val id = "request_${UUID.randomUUID().toString().take(8)}"
         val finalRequest = request.copy(
             id = id,
-            riderId = _currentUser.value?.id ?: "",
-            riderName = _currentUser.value?.name ?: "Rider",
-            riderRating = _currentUser.value?.ratingAvg ?: 5.0f,
+            riderId = currentUser.id,
+            riderName = currentUser.name,
+            riderRating = currentUser.ratingAvg,
             originGeohash = GeoUtils.encodeGeohash(request.originLat, request.originLng, 7),
-            destGeohash = GeoUtils.encodeGeohash(request.destLat, request.destLng, 7)
+            destGeohash = GeoUtils.encodeGeohash(request.destLat, request.destLng, 7),
+            status = "active"
         )
 
         _rideRequests.value = _rideRequests.value + (id to finalRequest)
         saveList("ride_requests.json", _rideRequests.value.values.toList(), rideRequestListAdapter)
         updateFeeds(_currentUser.value)
+
+        // Evaluate matching notifications
+        val now = System.currentTimeMillis()
+        val matchingOffers = _tripOffers.value.values.filter { offer ->
+            offer.status == "active" &&
+            offer.seatsLeft >= finalRequest.seatsNeeded &&
+            offer.departureTime > now &&
+            (offer.origin.lowercase().trim() == finalRequest.origin.lowercase().trim() ||
+             offer.origin.lowercase().trim().contains(finalRequest.origin.lowercase().trim()) ||
+             finalRequest.origin.lowercase().trim().contains(offer.origin.lowercase().trim())) &&
+            (offer.destination.lowercase().trim() == finalRequest.destination.lowercase().trim() ||
+             offer.destination.lowercase().trim().contains(finalRequest.destination.lowercase().trim()) ||
+             finalRequest.destination.lowercase().trim().contains(offer.destination.lowercase().trim()))
+        }
+
+        matchingOffers.forEach { offer ->
+            val driver = _users.value[offer.hostId]
+            if (driver != null && driver.emailNotificationsEnabled) {
+                sendNotificationAlert(
+                    targetUserId = offer.hostId,
+                    title = "New Ride Request Matching Your Trip! 🚗",
+                    message = "${finalRequest.riderName} needs ${finalRequest.seatsNeeded} seat(s) from ${finalRequest.origin} to ${finalRequest.destination}.",
+                    type = "email"
+                )
+            }
+            if (driver != null && driver.pushNotificationsEnabled) {
+                sendNotificationAlert(
+                    targetUserId = offer.hostId,
+                    title = "Rider Looking for Your Route! 👥",
+                    message = "${finalRequest.riderName} needs ${finalRequest.seatsNeeded} seat(s) ${finalRequest.origin} → ${finalRequest.destination}",
+                    type = "push"
+                )
+            }
+        }
 
         if (isFirebaseEnabled && firebaseFirestore != null) {
             try {
@@ -1193,8 +1382,179 @@ class SawaariRepository(private val context: Context) {
         return _users.value[userId]
     }
 
+    suspend fun fetchUserProfileFromFirestore(userId: String): Result<User> = withContext(Dispatchers.IO) {
+        if (!isFirebaseEnabled || firebaseFirestore == null) {
+            val user = _users.value[userId]
+            return@withContext if (user != null) {
+                Result.success(user)
+            } else {
+                Result.failure(Exception("User not found locally"))
+            }
+        }
+
+        try {
+            val doc = firebaseFirestore!!.collection("users").document(userId).get().awaitTask()
+            val user = doc.toObject(User::class.java)
+            return@withContext if (user != null) {
+                _users.value = _users.value + (userId to user)
+                Result.success(user)
+            } else {
+                Result.failure(Exception("User profile not found"))
+            }
+        } catch (e: Exception) {
+            Log.e("SawaariShare", "Failed to fetch user profile from Firestore: ${e.message}")
+            val cachedUser = _users.value[userId]
+            return@withContext if (cachedUser != null) {
+                Result.success(cachedUser)
+            } else {
+                Result.failure(e)
+            }
+        }
+    }
+
+    suspend fun isValidCollegeEmail(email: String): Boolean = withContext(Dispatchers.IO) {
+        val domain = email.lowercase().substringAfter("@")
+        val knownCollegeDomains = setOf(
+            "northeastern.edu", "asu.edu", "utdallas.edu", "usc.edu", "indiana.edu",
+            "mit.edu", "harvard.edu", "stanford.edu", "caltech.edu", "yale.edu",
+            "columbia.edu", "upenn.edu", "dartmouth.edu", "brown.edu", "cornell.edu",
+            "emory.edu", "michigan.edu", "northwestern.edu", "duke.edu", "chicago.edu"
+        )
+        return@withContext knownCollegeDomains.contains(domain)
+    }
+
     fun getTripOfferById(offerId: String): TripOffer? {
         return _tripOffers.value[offerId]
+    }
+
+    suspend fun fetchTripOfferFromFirestore(offerId: String): Result<TripOffer> = withContext(Dispatchers.IO) {
+        if (!isFirebaseEnabled || firebaseFirestore == null) {
+            val offer = _tripOffers.value[offerId]
+            return@withContext if (offer != null) {
+                Result.success(offer)
+            } else {
+                Result.failure(Exception("Trip offer not found locally"))
+            }
+        }
+
+        try {
+            val doc = firebaseFirestore!!.collection("trip_offers").document(offerId).get().awaitTask()
+            val offer = doc.toTripOfferSafe()
+            return@withContext if (offer != null) {
+                _tripOffers.value = _tripOffers.value + (offerId to offer)
+                Result.success(offer)
+            } else {
+                Result.failure(Exception("Trip offer not found"))
+            }
+        } catch (e: Exception) {
+            Log.e("SawaariShare", "Failed to fetch trip offer from Firestore: ${e.message}")
+            val cachedOffer = _tripOffers.value[offerId]
+            return@withContext if (cachedOffer != null) {
+                Result.success(cachedOffer)
+            } else {
+                Result.failure(e)
+            }
+        }
+    }
+
+    fun getHostedRides(userId: String): List<TripOffer> {
+        return _tripOffers.value.values.filter { it.hostId == userId }.sortedByDescending { it.departureTime }
+    }
+
+    fun getActiveRides(): List<TripOffer> {
+        val now = System.currentTimeMillis()
+        return _tripOffers.value.values
+            .filter { it.status == "active" && it.departureTime > now }
+            .sortedBy { it.departureTime }
+    }
+
+    fun calculateCostSplit(costPerRider: Double, riders: Int): Double {
+        return costPerRider * riders
+    }
+
+    fun validateTripOffer(offer: TripOffer): Result<Unit> {
+        if (offer.origin.trim().isEmpty() || offer.destination.trim().isEmpty()) {
+            return Result.failure(Exception("Origin and destination are required."))
+        }
+        if (offer.departureTime <= System.currentTimeMillis()) {
+            return Result.failure(Exception("Departure time must be in the future."))
+        }
+        if (offer.totalSeats < 1 || offer.totalSeats > 8) {
+            return Result.failure(Exception("Total seats must be between 1 and 8."))
+        }
+        if (offer.costPerRider < 0.0) {
+            return Result.failure(Exception("Cost per rider cannot be negative."))
+        }
+        return Result.success(Unit)
+    }
+
+    suspend fun fetchRideRequestFromFirestore(requestId: String): Result<RideRequest> = withContext(Dispatchers.IO) {
+        if (!isFirebaseEnabled || firebaseFirestore == null) {
+            val request = _rideRequests.value[requestId]
+            return@withContext if (request != null) {
+                Result.success(request)
+            } else {
+                Result.failure(Exception("Ride request not found locally"))
+            }
+        }
+
+        try {
+            val doc = firebaseFirestore!!.collection("ride_requests").document(requestId).get().awaitTask()
+            val request = doc.toRideRequestSafe()
+            return@withContext if (request != null) {
+                _rideRequests.value = _rideRequests.value + (requestId to request)
+                Result.success(request)
+            } else {
+                Result.failure(Exception("Ride request not found"))
+            }
+        } catch (e: Exception) {
+            Log.e("SawaariShare", "Failed to fetch ride request from Firestore: ${e.message}")
+            val cachedRequest = _rideRequests.value[requestId]
+            return@withContext if (cachedRequest != null) {
+                Result.success(cachedRequest)
+            } else {
+                Result.failure(e)
+            }
+        }
+    }
+
+    fun getPassengerRequests(riderId: String): List<RideRequest> {
+        return _rideRequests.value.values.filter { it.riderId == riderId }.sortedByDescending { it.departureTime }
+    }
+
+    fun getActiveRequests(): List<RideRequest> {
+        val now = System.currentTimeMillis()
+        return _rideRequests.value.values
+            .filter { it.status == "active" && it.departureTime > now }
+            .sortedBy { it.departureTime }
+    }
+
+    fun findMatchingOffers(request: RideRequest): List<TripOffer> {
+        val now = System.currentTimeMillis()
+        return _tripOffers.value.values.filter { offer ->
+            offer.status == "active" &&
+            offer.seatsLeft >= request.seatsNeeded &&
+            offer.departureTime > now &&
+            (offer.origin.lowercase().trim() == request.origin.lowercase().trim() ||
+             offer.origin.lowercase().trim().contains(request.origin.lowercase().trim()) ||
+             request.origin.lowercase().trim().contains(offer.origin.lowercase().trim())) &&
+            (offer.destination.lowercase().trim() == request.destination.lowercase().trim() ||
+             offer.destination.lowercase().trim().contains(request.destination.lowercase().trim()) ||
+             request.destination.lowercase().trim().contains(offer.destination.lowercase().trim()))
+        }.sortedBy { it.departureTime }
+    }
+
+    fun validateRideRequest(request: RideRequest): Result<Unit> {
+        if (request.origin.trim().isEmpty() || request.destination.trim().isEmpty()) {
+            return Result.failure(Exception("Pickup and dropoff locations are required."))
+        }
+        if (request.departureTime <= System.currentTimeMillis()) {
+            return Result.failure(Exception("Departure time must be in the future."))
+        }
+        if (request.seatsNeeded < 1 || request.seatsNeeded > 8) {
+            return Result.failure(Exception("Seats needed must be between 1 and 8."))
+        }
+        return Result.success(Unit)
     }
 
     fun recordNoShow(userId: String) {
@@ -1320,6 +1680,232 @@ class SawaariRepository(private val context: Context) {
         }
     }
 
+    // --- Trip Matching (TripMatch Creation & Management) ---
+
+    suspend fun createTripMatch(offerId: String, requestId: String): Result<String> = withContext(Dispatchers.IO) {
+        val user = _currentUser.value ?: return@withContext Result.failure(Exception("Not logged in"))
+        val offer = _tripOffers.value[offerId] ?: return@withContext Result.failure(Exception("Offer not found"))
+        val request = _rideRequests.value[requestId] ?: return@withContext Result.failure(Exception("Request not found"))
+
+        // Validate offer and request are compatible
+        if (offer.status != "active" && offer.status != "full") {
+            return@withContext Result.failure(Exception("Offer is no longer active"))
+        }
+        if (offer.seatsLeft < request.seatsNeeded) {
+            return@withContext Result.failure(Exception("Not enough seats available"))
+        }
+        if (request.status != "active") {
+            return@withContext Result.failure(Exception("Request is no longer active"))
+        }
+
+        // Check if already matched
+        val existingMatch = _tripMatches.value.values.find {
+            it.offerId == offerId && it.requestId == requestId
+        }
+        if (existingMatch != null) {
+            return@withContext Result.failure(Exception("Already matched"))
+        }
+
+        // Create new match (driver accepts request)
+        val matchId = "match_${UUID.randomUUID().toString().take(8)}"
+        val match = TripMatch(
+            id = matchId,
+            offerId = offerId,
+            requestId = requestId,
+            hostId = offer.hostId,
+            riderId = request.riderId,
+            riderName = request.riderName,
+            riderRating = request.riderRating,
+            contribution = offer.costPerRider * request.seatsNeeded,
+            status = "pending", // pending → accepted → completed/cancelled
+            timestamp = System.currentTimeMillis()
+        )
+
+        _tripMatches.value = _tripMatches.value + (matchId to match)
+        saveList("trip_matches.json", _tripMatches.value.values.toList(), tripMatchListAdapter)
+
+        if (isFirebaseEnabled && firebaseFirestore != null) {
+            try {
+                firebaseFirestore?.collection("trip_matches")?.document(matchId)?.set(
+                    mapOf(
+                        "id" to match.id,
+                        "offerId" to match.offerId,
+                        "requestId" to match.requestId,
+                        "hostId" to match.hostId,
+                        "riderId" to match.riderId,
+                        "riderName" to match.riderName,
+                        "riderRating" to match.riderRating,
+                        "contribution" to match.contribution,
+                        "status" to match.status,
+                        "timestamp" to match.timestamp
+                    )
+                )?.awaitTask()
+                Log.d("SawaariShare", "TripMatch created: $matchId")
+            } catch (e: Exception) {
+                Log.e("SawaariShare", "Failed to create TripMatch in Firebase: ${e.message}")
+            }
+        }
+
+        // System message in chat
+        sendSystemMessage(matchId, "Match created! Waiting for driver to confirm.")
+
+        // Notify passenger that driver is interested
+        sendNotificationAlert(
+            targetUserId = request.riderId,
+            title = "Driver Interested! 🚗",
+            message = "${offer.hostName} is interested in your ${request.origin} → ${request.destination} request for \$${match.contribution}",
+            type = "match"
+        )
+
+        updateFeeds(_currentUser.value)
+        return@withContext Result.success(matchId)
+    }
+
+    suspend fun getUserMatches(userId: String = _currentUser.value?.id ?: ""): Result<Pair<List<TripMatch>, List<TripMatch>>> = withContext(Dispatchers.IO) {
+        if (userId.isEmpty()) {
+            return@withContext Result.failure(Exception("User ID required"))
+        }
+
+        val hostedMatches = _tripMatches.value.values.filter { it.hostId == userId }
+        val joinedMatches = _tripMatches.value.values.filter { it.riderId == userId }
+
+        // Fetch from Firestore if available
+        if (isFirebaseEnabled && firebaseFirestore != null) {
+            try {
+                firebaseFirestore?.collection("trip_matches")?.whereEqualTo("hostId", userId)?.get()?.awaitTask()?.documents?.mapNotNull {
+                    it.toObject(TripMatch::class.java)
+                }?.let { fbHosted ->
+                    _tripMatches.value = _tripMatches.value + fbHosted.associateBy { it.id }
+                }
+            } catch (e: Exception) {
+                Log.d("SawaariShare", "Could not fetch hosted matches from Firebase: ${e.message}")
+            }
+        }
+
+        return@withContext Result.success(Pair(hostedMatches, joinedMatches))
+    }
+
+    fun getTripMatchById(matchId: String): TripMatch? {
+        return _tripMatches.value[matchId]
+    }
+
+    suspend fun cancelMatch(matchId: String, reason: String = ""): Result<Unit> = withContext(Dispatchers.IO) {
+        val match = _tripMatches.value[matchId] ?: return@withContext Result.failure(Exception("Match not found"))
+        val user = _currentUser.value ?: return@withContext Result.failure(Exception("Not logged in"))
+
+        // Only requester or host can cancel
+        if (user.id != match.riderId && user.id != match.hostId) {
+            return@withContext Result.failure(Exception("Only host or rider can cancel"))
+        }
+
+        // If already accepted, revert seat count
+        if (match.status == "accepted") {
+            val offer = _tripOffers.value[match.offerId]
+            val request = _rideRequests.value[match.requestId]
+            if (offer != null && request != null) {
+                val updatedOffer = offer.copy(
+                    seatsLeft = (offer.seatsLeft + request.seatsNeeded).coerceAtMost(offer.totalSeats),
+                    passengers = offer.passengers - match.riderId,
+                    passengerNames = offer.passengerNames - match.riderName,
+                    status = if (offer.status == "full") "active" else offer.status
+                )
+                _tripOffers.value = _tripOffers.value + (offer.id to updatedOffer)
+                saveList("trip_offers.json", _tripOffers.value.values.toList(), tripOfferListAdapter)
+
+                if (isFirebaseEnabled && firebaseFirestore != null) {
+                    try {
+                        firebaseFirestore?.collection("trip_offers")?.document(offer.id)?.set(updatedOffer)?.awaitTask()
+                    } catch (e: Exception) {
+                        Log.e("SawaariShare", "Failed to sync seat count revert: ${e.message}")
+                    }
+                }
+            }
+        }
+
+        val updatedMatch = match.copy(status = "cancelled")
+        _tripMatches.value = _tripMatches.value + (matchId to updatedMatch)
+        saveList("trip_matches.json", _tripMatches.value.values.toList(), tripMatchListAdapter)
+
+        if (isFirebaseEnabled && firebaseFirestore != null) {
+            try {
+                firebaseFirestore?.collection("trip_matches")?.document(matchId)?.set(
+                    mapOf("status" to "cancelled", "id" to match.id, "offerId" to match.offerId, "requestId" to match.requestId, "hostId" to match.hostId, "riderId" to match.riderId, "riderName" to match.riderName, "riderRating" to match.riderRating, "contribution" to match.contribution, "timestamp" to match.timestamp)
+                )?.awaitTask()
+            } catch (e: Exception) {
+                Log.e("SawaariShare", "Failed to sync match cancellation: ${e.message}")
+            }
+        }
+
+        sendSystemMessage(matchId, "Match cancelled by ${user.displayName}${if (reason.isNotEmpty()) ": $reason" else ""}")
+
+        val otherUserId = if (user.id == match.hostId) match.riderId else match.hostId
+        val otherUserName = if (user.id == match.hostId) "Host" else match.riderName
+        sendNotificationAlert(
+            targetUserId = otherUserId,
+            title = "$otherUserName Cancelled Match ❌",
+            message = "Your trip from ${_tripOffers.value[match.offerId]?.origin} has been cancelled.",
+            type = "match"
+        )
+
+        updateFeeds(_currentUser.value)
+        return@withContext Result.success(Unit)
+    }
+
+    suspend fun getActiveMatches(): List<TripMatch> {
+        return _tripMatches.value.values.filter {
+            it.status == "pending" || it.status == "accepted"
+        }.sortedBy { it.timestamp }.reversed()
+    }
+
+    suspend fun getMatchConversation(matchId: String): Flow<List<Message>> = withContext(Dispatchers.IO) {
+        // Real-time message flow for a specific match
+        return@withContext MutableStateFlow<List<Message>>(emptyList()).apply {
+            scope.launch {
+                _messages.collect { allMessages ->
+                    value = allMessages.values
+                        .filter { it.matchId == matchId }
+                        .sortedBy { it.timestamp }
+                }
+            }
+        }
+    }
+
+    suspend fun markMessagesAsRead(matchId: String, readUntilTimestamp: Long = System.currentTimeMillis()) = withContext(Dispatchers.IO) {
+        val messages = _messages.value.values.filter {
+            it.matchId == matchId && it.timestamp <= readUntilTimestamp
+        }
+
+        // Mark notification alerts as read
+        _notifications.value = _notifications.value.map {
+            if (it.type == "new_message" && it.timestamp <= readUntilTimestamp) {
+                it.copy(isRead = true)
+            } else it
+        }
+        saveList("notifications.json", _notifications.value, notificationListAdapter)
+    }
+
+    suspend fun getMatchDetails(matchId: String): Result<MatchDetails> = withContext(Dispatchers.IO) {
+        val match = _tripMatches.value[matchId] ?: return@withContext Result.failure(Exception("Match not found"))
+        val offer = _tripOffers.value[match.offerId]
+        val request = _rideRequests.value[match.requestId]
+        val host = _users.value[match.hostId]
+        val rider = _users.value[match.riderId]
+
+        if (offer == null || request == null) {
+            return@withContext Result.failure(Exception("Match details incomplete"))
+        }
+
+        return@withContext Result.success(
+            MatchDetails(
+                match = match,
+                offer = offer,
+                request = request,
+                hostProfile = host,
+                riderProfile = rider
+            )
+        )
+    }
+
     suspend fun fetchGoogleMapsMatrix(origin: String, destination: String): MapsRouteMatrixResult {
         val result = GoogleMapsGroundingService.getMapsDistanceAndRouteMatrix(origin, destination)
         return result.getOrDefault(
@@ -1335,7 +1921,145 @@ class SawaariRepository(private val context: Context) {
         )
     }
 
+    suspend fun syncDataWithFirestore(): Result<Unit> = withContext(Dispatchers.IO) {
+        if (!isFirebaseEnabled || firebaseFirestore == null) {
+            return@withContext Result.success(Unit)
+        }
+
+        try {
+            // Force refresh all collections from Firestore
+            val offers = firebaseFirestore?.collection("trip_offers")?.get()?.awaitTask()
+                ?.documents?.mapNotNull { it.toTripOfferSafe() } ?: emptyList()
+            val requests = firebaseFirestore?.collection("ride_requests")?.get()?.awaitTask()
+                ?.documents?.mapNotNull { it.toRideRequestSafe() } ?: emptyList()
+            val matches = firebaseFirestore?.collection("trip_matches")?.get()?.awaitTask()
+                ?.documents?.mapNotNull { it.toObject(TripMatch::class.java) } ?: emptyList()
+            val messages = firebaseFirestore?.collection("messages")?.get()?.awaitTask()
+                ?.documents?.mapNotNull { it.toMessageSafe() } ?: emptyList()
+
+            _tripOffers.value = offers.associateBy { it.id }
+            _rideRequests.value = requests.associateBy { it.id }
+            _tripMatches.value = matches.associateBy { it.id }
+            _messages.value = messages.associateBy { it.id }
+
+            saveList("trip_offers.json", _tripOffers.value.values.toList(), tripOfferListAdapter)
+            saveList("ride_requests.json", _rideRequests.value.values.toList(), rideRequestListAdapter)
+            saveList("trip_matches.json", _tripMatches.value.values.toList(), tripMatchListAdapter)
+            saveList("messages.json", _messages.value.values.toList(), messageListAdapter)
+
+            _lastSyncTime.value = System.currentTimeMillis()
+            updateFeeds(_currentUser.value)
+
+            return@withContext Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e("SawaariShare", "Failed to sync with Firestore: ${e.message}")
+            return@withContext Result.failure(e)
+        }
+    }
+
+    // --- Firebase Storage (Profile Pictures) ---
+
+    suspend fun resizeImage(inputFile: File, maxWidth: Int = 512, maxHeight: Int = 512): Result<File> = withContext(Dispatchers.IO) {
+        try {
+            val bitmap = android.graphics.BitmapFactory.decodeFile(inputFile.absolutePath)
+                ?: return@withContext Result.failure(Exception("Failed to decode image"))
+
+            val aspectRatio = bitmap.width.toFloat() / bitmap.height.toFloat()
+            val (newWidth, newHeight) = if (aspectRatio > 1) {
+                maxWidth to (maxWidth / aspectRatio).toInt()
+            } else {
+                (maxHeight * aspectRatio).toInt() to maxHeight
+            }
+
+            val resizedBitmap = android.graphics.Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
+
+            val outputFile = File(context.cacheDir, "resized_${System.currentTimeMillis()}.jpg")
+            val fos = java.io.FileOutputStream(outputFile)
+            resizedBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, fos)
+            fos.close()
+
+            bitmap.recycle()
+            resizedBitmap.recycle()
+
+            return@withContext Result.success(outputFile)
+        } catch (e: Exception) {
+            Log.e("SawaariShare", "Failed to resize image: ${e.message}")
+            return@withContext Result.failure(e)
+        }
+    }
+
+    suspend fun uploadProfilePicture(userId: String, imageFile: File): Result<String> = withContext(Dispatchers.IO) {
+        if (!isFirebaseEnabled) {
+            // Fallback: return local path
+            return@withContext Result.success(imageFile.absolutePath)
+        }
+
+        try {
+            val storageRef = firebaseStorage?.reference?.child("profile_pictures/$userId.jpg")
+                ?: return@withContext Result.failure(Exception("Storage not initialized"))
+
+            // Upload file to Firebase Storage
+            val uploadTask = storageRef.putFile(android.net.Uri.fromFile(imageFile))
+            uploadTask.awaitTask()
+
+            // Get download URL
+            val downloadUrl = storageRef.downloadUrl.awaitTask()
+
+            // Update user profile with avatar URL
+            val updatedUser = _currentUser.value?.copy(avatarUrl = downloadUrl.toString())
+            if (updatedUser != null) {
+                firebaseFirestore?.collection("users")?.document(userId)
+                    ?.update("avatarUrl", downloadUrl.toString())
+                    ?.awaitTask()
+
+                _currentUser.value = updatedUser
+                _users.value = _users.value.toMutableMap().apply {
+                    put(userId, updatedUser)
+                }
+                saveUser(updatedUser, userAdapter)
+            }
+
+            return@withContext Result.success(downloadUrl.toString())
+        } catch (e: Exception) {
+            Log.e("SawaariShare", "Failed to upload profile picture: ${e.message}")
+            return@withContext Result.failure(e)
+        }
+    }
+
+    suspend fun deleteProfilePicture(userId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        if (!isFirebaseEnabled) {
+            return@withContext Result.success(Unit)
+        }
+
+        try {
+            val storageRef = firebaseStorage?.reference?.child("profile_pictures/$userId.jpg")
+                ?: return@withContext Result.failure(Exception("Storage not initialized"))
+
+            storageRef.delete().awaitTask()
+
+            // Clear avatar URL from user profile
+            val updatedUser = _currentUser.value?.copy(avatarUrl = "")
+            if (updatedUser != null) {
+                firebaseFirestore?.collection("users")?.document(userId)
+                    ?.update("avatarUrl", "")
+                    ?.awaitTask()
+
+                _currentUser.value = updatedUser
+                _users.value = _users.value.toMutableMap().apply {
+                    put(userId, updatedUser)
+                }
+                saveUser(updatedUser, userAdapter)
+            }
+
+            return@withContext Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e("SawaariShare", "Failed to delete profile picture: ${e.message}")
+            return@withContext Result.failure(e)
+        }
+    }
+
     fun logout() {
+        stopRealtimeListeners()
         _currentUser.value = null
     }
 }
