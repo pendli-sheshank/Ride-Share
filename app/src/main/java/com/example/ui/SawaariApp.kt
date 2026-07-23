@@ -145,6 +145,9 @@ fun SawaariApp(viewModel: MainViewModel = viewModel()) {
                 composable("blocked_list") {
                     BlockedListScreen(viewModel, navController)
                 }
+                composable("host_dashboard") {
+                    HostDashboard(viewModel, navController)
+                }
             }
 
             // Global Loader
@@ -1600,6 +1603,324 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                 selectedTab = "trips"
             }
         )
+    }
+}
+
+@Composable
+fun HostDashboard(viewModel: MainViewModel, navController: NavController) {
+    val context = LocalContext.current
+    val hostedRides by viewModel.hostedRides.collectAsState()
+    val currentUser by viewModel.currentUser.collectAsState()
+    var filterStatus by remember { mutableStateOf("all") } // all, active, completed, cancelled
+
+    val filteredRides = remember(hostedRides, filterStatus) {
+        when (filterStatus) {
+            "active" -> hostedRides.filter { it.status == "active" }
+            "completed" -> hostedRides.filter { it.status == "completed" }
+            "cancelled" -> hostedRides.filter { it.status == "cancelled" }
+            else -> hostedRides
+        }.sortedByDescending { it.departureTime }
+    }
+
+    val activeRides = remember(hostedRides) { hostedRides.filter { it.status == "active" } }
+    val totalPassengers = remember(hostedRides) { hostedRides.sumOf { it.passengers.size } }
+    val totalRevenue = remember(hostedRides) { hostedRides.sumOf { it.costPerRider * (it.totalSeats - it.seatsLeft) } }
+
+    Scaffold(
+        topBar = {
+            Column(
+                modifier = Modifier
+                    .background(SawaariDarkBg)
+                    .statusBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "Host Dashboard",
+                            color = SawaariTextPrimary,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                        Text(
+                            text = "Manage your hosted rides",
+                            color = SawaariLightGray,
+                            fontSize = 11.sp
+                        )
+                    }
+                    IconButton(
+                        onClick = { navController.popBackStack() },
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(SawaariIndigo.copy(alpha = 0.2f))
+                            .size(40.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = SawaariSaffron,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+            }
+        }
+    ) { innerPadding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(horizontal = 16.dp)
+        ) {
+            // Statistics Overview
+            item {
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    HostStatCard(
+                        label = "Active Rides",
+                        value = "${activeRides.size}",
+                        icon = Icons.Default.DirectionsCar,
+                        modifier = Modifier.weight(1f)
+                    )
+                    HostStatCard(
+                        label = "Total Passengers",
+                        value = "$totalPassengers",
+                        icon = Icons.Default.People,
+                        modifier = Modifier.weight(1f)
+                    )
+                    HostStatCard(
+                        label = "Revenue",
+                        value = "$${String.format("%.2f", totalRevenue)}",
+                        icon = Icons.Default.AttachMoney,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+
+            // Filter Chips
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf("all" to "All Rides", "active" to "Active", "completed" to "Completed", "cancelled" to "Cancelled").forEach { (status, label) ->
+                        FilterChip(
+                            selected = filterStatus == status,
+                            onClick = { filterStatus = status },
+                            label = { Text(label, fontSize = 12.sp) },
+                            modifier = Modifier.height(32.dp)
+                        )
+                    }
+                }
+            }
+
+            // Hosted Rides List
+            item {
+                if (filteredRides.isEmpty()) {
+                    Spacer(modifier = Modifier.height(24.dp))
+                    SawaariEmptyState(
+                        title = "No Hosted Rides",
+                        description = "You haven't posted any trip offers yet.",
+                        icon = Icons.Default.DirectionsCar,
+                        actionLabel = "Post a Ride",
+                        onActionClick = { navController.navigate("post_offer") }
+                    )
+                }
+            }
+
+            items(filteredRides) { offer ->
+                HostedRideScheduleCard(
+                    offer = offer,
+                    onCardClick = { navController.navigate("trip_detail/${offer.id}/offer") },
+                    onStatusChange = { newStatus ->
+                        viewModel.updateTripOfferStatus(offer.id, newStatus) {
+                            Toast.makeText(context, "Ride status updated!", Toast.LENGTH_SHORT).show()
+                            viewModel.refreshMyTrips()
+                        }
+                    }
+                )
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(100.dp))
+            }
+        }
+    }
+}
+
+@Composable
+fun HostStatCard(
+    label: String,
+    value: String,
+    icon: androidx.compose.material.icons.Icons,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = SawaariCardBg),
+        modifier = modifier
+            .border(1.dp, SawaariDivider, RoundedCornerShape(12.dp))
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(12.dp)
+                .fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = SawaariSaffron,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = value,
+                color = SawaariTextPrimary,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = label,
+                color = SawaariLightGray,
+                fontSize = 10.sp,
+                textAlign = TextAlign.Center
+            )
+        }
+    }
+}
+
+@Composable
+fun PassengerManagementCard(
+    passengerName: String,
+    passengerRating: Float,
+    passengerId: String,
+    offerRoute: String,
+    onMessageClick: () -> Unit,
+    onMarkNoShowClick: () -> Unit,
+    onViewProfileClick: () -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = SawaariCardBg),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, SawaariDivider, RoundedCornerShape(12.dp))
+            .padding(vertical = 8.dp)
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(SawaariIndigo),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Person,
+                            contentDescription = "Passenger",
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = passengerName,
+                            color = SawaariTextPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Star,
+                                contentDescription = "Rating",
+                                tint = Color(0xFFEAB308),
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = String.format("%.1f", passengerRating),
+                                color = SawaariTextPrimary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+                Icon(
+                    imageVector = Icons.Default.ChevronRight,
+                    contentDescription = "More",
+                    tint = SawaariLightGray,
+                    modifier = Modifier.clickable { onViewProfileClick() }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            HorizontalDivider(color = SawaariDivider, thickness = 1.dp)
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onMessageClick,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(36.dp),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.Chat,
+                        contentDescription = "Message",
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Message", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+
+                OutlinedButton(
+                    onClick = onMarkNoShowClick,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(36.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, Color(0xFFEF4444)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF4444))
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.WarningAmber,
+                        contentDescription = "No Show",
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("No Show", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
     }
 }
 
