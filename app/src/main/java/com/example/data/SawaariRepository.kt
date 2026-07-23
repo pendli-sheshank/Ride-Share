@@ -566,10 +566,14 @@ class SawaariRepository(private val context: Context) {
         vehicle: Vehicle? = null
     ): Result<Unit> = withContext(Dispatchers.IO) {
         val user = _currentUser.value ?: return@withContext Result.failure(Exception("No logged in user found."))
-        
+
+        if (name.trim().isEmpty() || lastInitial.trim().isEmpty() || communityId.isEmpty() || homeArea.isEmpty()) {
+            return@withContext Result.failure(Exception("All profile fields are required."))
+        }
+
         val updatedUser = user.copy(
-            name = name,
-            lastInitial = lastInitial,
+            name = name.trim(),
+            lastInitial = lastInitial.trim(),
             communityId = communityId,
             homeArea = homeArea
         )
@@ -578,7 +582,18 @@ class SawaariRepository(private val context: Context) {
         _currentUser.value = updatedUser
 
         saveList("users.json", _users.value.values.toList(), userListAdapter)
-        
+
+        // Sync to Firestore
+        if (isFirebaseEnabled && firebaseFirestore != null) {
+            try {
+                firebaseFirestore?.collection("users")?.document(user.id)?.set(updatedUser)?.awaitTask()
+                Log.d("SawaariShare", "User profile successfully saved to Firestore.")
+            } catch (e: Exception) {
+                Log.e("SawaariShare", "Failed to sync profile to Firestore: ${e.message}")
+                // Still succeeds locally even if Firestore fails
+            }
+        }
+
         if (vehicle != null) {
             saveVehicleInfo(vehicle)
         } else {
@@ -1191,6 +1206,47 @@ class SawaariRepository(private val context: Context) {
 
     fun getUserPublicProfile(userId: String): User? {
         return _users.value[userId]
+    }
+
+    suspend fun fetchUserProfileFromFirestore(userId: String): Result<User> = withContext(Dispatchers.IO) {
+        if (!isFirebaseEnabled || firebaseFirestore == null) {
+            val user = _users.value[userId]
+            return@withContext if (user != null) {
+                Result.success(user)
+            } else {
+                Result.failure(Exception("User not found locally"))
+            }
+        }
+
+        try {
+            val doc = firebaseFirestore!!.collection("users").document(userId).get().awaitTask()
+            val user = doc.toObject(User::class.java)
+            return@withContext if (user != null) {
+                _users.value = _users.value + (userId to user)
+                Result.success(user)
+            } else {
+                Result.failure(Exception("User profile not found"))
+            }
+        } catch (e: Exception) {
+            Log.e("SawaariShare", "Failed to fetch user profile from Firestore: ${e.message}")
+            val cachedUser = _users.value[userId]
+            return@withContext if (cachedUser != null) {
+                Result.success(cachedUser)
+            } else {
+                Result.failure(e)
+            }
+        }
+    }
+
+    suspend fun isValidCollegeEmail(email: String): Boolean = withContext(Dispatchers.IO) {
+        val domain = email.lowercase().substringAfter("@")
+        val knownCollegeDomains = setOf(
+            "northeastern.edu", "asu.edu", "utdallas.edu", "usc.edu", "indiana.edu",
+            "mit.edu", "harvard.edu", "stanford.edu", "caltech.edu", "yale.edu",
+            "columbia.edu", "upenn.edu", "dartmouth.edu", "brown.edu", "cornell.edu",
+            "emory.edu", "michigan.edu", "northwestern.edu", "duke.edu", "chicago.edu"
+        )
+        return@withContext knownCollegeDomains.contains(domain)
     }
 
     fun getTripOfferById(offerId: String): TripOffer? {
