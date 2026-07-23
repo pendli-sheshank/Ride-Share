@@ -24,4 +24,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "SawaariShare"
 
+include(":shared")
 include(":app")
+include(":iosApp")
