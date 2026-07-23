@@ -1578,6 +1578,232 @@ class SawaariRepository(private val context: Context) {
         }
     }
 
+    // --- Trip Matching (TripMatch Creation & Management) ---
+
+    suspend fun createTripMatch(offerId: String, requestId: String): Result<String> = withContext(Dispatchers.IO) {
+        val user = _currentUser.value ?: return@withContext Result.failure(Exception("Not logged in"))
+        val offer = _tripOffers.value[offerId] ?: return@withContext Result.failure(Exception("Offer not found"))
+        val request = _rideRequests.value[requestId] ?: return@withContext Result.failure(Exception("Request not found"))
+
+        // Validate offer and request are compatible
+        if (offer.status != "active" && offer.status != "full") {
+            return@withContext Result.failure(Exception("Offer is no longer active"))
+        }
+        if (offer.seatsLeft < request.seatsNeeded) {
+            return@withContext Result.failure(Exception("Not enough seats available"))
+        }
+        if (request.status != "active") {
+            return@withContext Result.failure(Exception("Request is no longer active"))
+        }
+
+        // Check if already matched
+        val existingMatch = _tripMatches.value.values.find {
+            it.offerId == offerId && it.requestId == requestId
+        }
+        if (existingMatch != null) {
+            return@withContext Result.failure(Exception("Already matched"))
+        }
+
+        // Create new match (driver accepts request)
+        val matchId = "match_${UUID.randomUUID().toString().take(8)}"
+        val match = TripMatch(
+            id = matchId,
+            offerId = offerId,
+            requestId = requestId,
+            hostId = offer.hostId,
+            riderId = request.riderId,
+            riderName = request.riderName,
+            riderRating = request.riderRating,
+            contribution = offer.costPerRider * request.seatsNeeded,
+            status = "pending", // pending → accepted → completed/cancelled
+            timestamp = System.currentTimeMillis()
+        )
+
+        _tripMatches.value = _tripMatches.value + (matchId to match)
+        saveList("trip_matches.json", _tripMatches.value.values.toList(), tripMatchListAdapter)
+
+        if (isFirebaseEnabled && firebaseFirestore != null) {
+            try {
+                firebaseFirestore?.collection("trip_matches")?.document(matchId)?.set(
+                    mapOf(
+                        "id" to match.id,
+                        "offerId" to match.offerId,
+                        "requestId" to match.requestId,
+                        "hostId" to match.hostId,
+                        "riderId" to match.riderId,
+                        "riderName" to match.riderName,
+                        "riderRating" to match.riderRating,
+                        "contribution" to match.contribution,
+                        "status" to match.status,
+                        "timestamp" to match.timestamp
+                    )
+                )?.awaitTask()
+                Log.d("SawaariShare", "TripMatch created: $matchId")
+            } catch (e: Exception) {
+                Log.e("SawaariShare", "Failed to create TripMatch in Firebase: ${e.message}")
+            }
+        }
+
+        // System message in chat
+        sendSystemMessage(matchId, "Match created! Waiting for driver to confirm.")
+
+        // Notify passenger that driver is interested
+        sendNotificationAlert(
+            targetUserId = request.riderId,
+            title = "Driver Interested! 🚗",
+            message = "${offer.hostName} is interested in your ${request.origin} → ${request.destination} request for \$${match.contribution}",
+            type = "match"
+        )
+
+        updateFeeds(_currentUser.value)
+        return@withContext Result.success(matchId)
+    }
+
+    suspend fun getUserMatches(userId: String = _currentUser.value?.id ?: ""): Result<Pair<List<TripMatch>, List<TripMatch>>> = withContext(Dispatchers.IO) {
+        if (userId.isEmpty()) {
+            return@withContext Result.failure(Exception("User ID required"))
+        }
+
+        val hostedMatches = _tripMatches.value.values.filter { it.hostId == userId }
+        val joinedMatches = _tripMatches.value.values.filter { it.riderId == userId }
+
+        // Fetch from Firestore if available
+        if (isFirebaseEnabled && firebaseFirestore != null) {
+            try {
+                firebaseFirestore?.collection("trip_matches")?.whereEqualTo("hostId", userId)?.get()?.awaitTask()?.documents?.mapNotNull {
+                    it.toObject(TripMatch::class.java)
+                }?.let { fbHosted ->
+                    _tripMatches.value = _tripMatches.value + fbHosted.associateBy { it.id }
+                }
+            } catch (e: Exception) {
+                Log.d("SawaariShare", "Could not fetch hosted matches from Firebase: ${e.message}")
+            }
+        }
+
+        return@withContext Result.success(Pair(hostedMatches, joinedMatches))
+    }
+
+    fun getTripMatchById(matchId: String): TripMatch? {
+        return _tripMatches.value[matchId]
+    }
+
+    suspend fun cancelMatch(matchId: String, reason: String = ""): Result<Unit> = withContext(Dispatchers.IO) {
+        val match = _tripMatches.value[matchId] ?: return@withContext Result.failure(Exception("Match not found"))
+        val user = _currentUser.value ?: return@withContext Result.failure(Exception("Not logged in"))
+
+        // Only requester or host can cancel
+        if (user.id != match.riderId && user.id != match.hostId) {
+            return@withContext Result.failure(Exception("Only host or rider can cancel"))
+        }
+
+        // If already accepted, revert seat count
+        if (match.status == "accepted") {
+            val offer = _tripOffers.value[match.offerId]
+            val request = _rideRequests.value[match.requestId]
+            if (offer != null && request != null) {
+                val updatedOffer = offer.copy(
+                    seatsLeft = (offer.seatsLeft + request.seatsNeeded).coerceAtMost(offer.totalSeats),
+                    passengers = offer.passengers - match.riderId,
+                    passengerNames = offer.passengerNames - match.riderName,
+                    status = if (offer.status == "full") "active" else offer.status
+                )
+                _tripOffers.value = _tripOffers.value + (offer.id to updatedOffer)
+                saveList("trip_offers.json", _tripOffers.value.values.toList(), tripOfferListAdapter)
+
+                if (isFirebaseEnabled && firebaseFirestore != null) {
+                    try {
+                        firebaseFirestore?.collection("trip_offers")?.document(offer.id)?.set(updatedOffer)?.awaitTask()
+                    } catch (e: Exception) {
+                        Log.e("SawaariShare", "Failed to sync seat count revert: ${e.message}")
+                    }
+                }
+            }
+        }
+
+        val updatedMatch = match.copy(status = "cancelled")
+        _tripMatches.value = _tripMatches.value + (matchId to updatedMatch)
+        saveList("trip_matches.json", _tripMatches.value.values.toList(), tripMatchListAdapter)
+
+        if (isFirebaseEnabled && firebaseFirestore != null) {
+            try {
+                firebaseFirestore?.collection("trip_matches")?.document(matchId)?.set(
+                    mapOf("status" to "cancelled", "id" to match.id, "offerId" to match.offerId, "requestId" to match.requestId, "hostId" to match.hostId, "riderId" to match.riderId, "riderName" to match.riderName, "riderRating" to match.riderRating, "contribution" to match.contribution, "timestamp" to match.timestamp)
+                )?.awaitTask()
+            } catch (e: Exception) {
+                Log.e("SawaariShare", "Failed to sync match cancellation: ${e.message}")
+            }
+        }
+
+        sendSystemMessage(matchId, "Match cancelled by ${user.displayName}${if (reason.isNotEmpty()) ": $reason" else ""}")
+
+        val otherUserId = if (user.id == match.hostId) match.riderId else match.hostId
+        val otherUserName = if (user.id == match.hostId) "Host" else match.riderName
+        sendNotificationAlert(
+            targetUserId = otherUserId,
+            title = "$otherUserName Cancelled Match ❌",
+            message = "Your trip from ${_tripOffers.value[match.offerId]?.origin} has been cancelled.",
+            type = "match"
+        )
+
+        updateFeeds(_currentUser.value)
+        return@withContext Result.success(Unit)
+    }
+
+    suspend fun getActiveMatches(): List<TripMatch> {
+        return _tripMatches.value.values.filter {
+            it.status == "pending" || it.status == "accepted"
+        }.sortedBy { it.timestamp }.reversed()
+    }
+
+    suspend fun getMatchConversation(matchId: String): Flow<List<Message>> = withContext(Dispatchers.IO) {
+        // Real-time message flow for a specific match
+        return@withContext MutableStateFlow<List<Message>>(emptyList()).apply {
+            scope.launch {
+                _messages.collect { allMessages ->
+                    value = allMessages.values
+                        .filter { it.matchId == matchId }
+                        .sortedBy { it.timestamp }
+                }
+            }
+        }
+    }
+
+    suspend fun markMessagesAsRead(matchId: String, readUntilTimestamp: Long = System.currentTimeMillis()) = withContext(Dispatchers.IO) {
+        val messages = _messages.value.values.filter {
+            it.matchId == matchId && it.timestamp <= readUntilTimestamp
+        }
+
+        // Mark notification alerts as read
+        _notifications.value = _notifications.value.map {
+            if (it.type == "new_message" && it.timestamp <= readUntilTimestamp) {
+                it.copy(isRead = true)
+            } else it
+        }
+        saveList("notifications.json", _notifications.value, notificationListAdapter)
+    }
+
+    suspend fun getMatchDetails(matchId: String): Result<MatchDetails> = withContext(Dispatchers.IO) {
+        val match = _tripMatches.value[matchId] ?: return@withContext Result.failure(Exception("Match not found"))
+        val offer = _tripOffers.value[match.offerId]
+        val request = _rideRequests.value[match.requestId]
+        val host = _users.value[match.hostId]
+        val rider = _users.value[match.riderId]
+
+        if (offer == null || request == null) {
+            return@withContext Result.failure(Exception("Match details incomplete"))
+        }
+
+        return@withContext Result.success(
+            MatchDetails(
+                match = match,
+                offer = offer,
+                request = request,
+                hostProfile = host,
+                riderProfile = rider
+            )
+        )
+    }
+
     suspend fun fetchGoogleMapsMatrix(origin: String, destination: String): MapsRouteMatrixResult {
         val result = GoogleMapsGroundingService.getMapsDistanceAndRouteMatrix(origin, destination)
         return result.getOrDefault(

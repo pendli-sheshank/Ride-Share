@@ -151,6 +151,14 @@ data class NotificationAlert(
     val isRead: Boolean = false
 )
 
+data class MatchDetails(
+    val match: TripMatch,
+    val offer: TripOffer,
+    val request: RideRequest,
+    val hostProfile: User?,
+    val riderProfile: User?
+)
+
 fun TripOffer.toMap(): Map<String, Any> = mapOf(
     "id" to id,
     "hostId" to hostId,
