@@ -657,15 +657,36 @@ class SawaariRepository(private val context: Context) {
     // --- Core Carpooling: Offers & Requests ---
 
     suspend fun postTripOffer(offer: TripOffer): Result<Unit> = withContext(Dispatchers.IO) {
+        val currentUser = _currentUser.value ?: return@withContext Result.failure(Exception("Please log in to post a ride."))
+
+        // Validation
+        if (offer.origin.trim().isEmpty() || offer.destination.trim().isEmpty()) {
+            return@withContext Result.failure(Exception("Origin and destination are required."))
+        }
+        if (offer.originLat == 0.0 || offer.originLng == 0.0 || offer.destLat == 0.0 || offer.destLng == 0.0) {
+            return@withContext Result.failure(Exception("Valid pickup and dropoff locations required."))
+        }
+        if (offer.departureTime <= System.currentTimeMillis()) {
+            return@withContext Result.failure(Exception("Departure time must be in the future."))
+        }
+        if (offer.totalSeats < 1 || offer.totalSeats > 8) {
+            return@withContext Result.failure(Exception("Total seats must be between 1 and 8."))
+        }
+        if (offer.costPerRider < 0.0) {
+            return@withContext Result.failure(Exception("Cost per rider cannot be negative."))
+        }
+
         val id = "offer_${UUID.randomUUID().toString().take(8)}"
         val finalOffer = offer.copy(
             id = id,
-            hostId = _currentUser.value?.id ?: "",
-            hostName = _currentUser.value?.name ?: "Host",
-            hostRating = _currentUser.value?.ratingAvg ?: 5.0f,
+            hostId = currentUser.id,
+            hostName = currentUser.name,
+            hostRating = currentUser.ratingAvg,
             originGeohash = GeoUtils.encodeGeohash(offer.originLat, offer.originLng, 7),
             destGeohash = GeoUtils.encodeGeohash(offer.destLat, offer.destLng, 7),
-            costEstimate = offer.costPerRider * offer.totalSeats
+            costEstimate = offer.costPerRider * offer.totalSeats,
+            seatsLeft = offer.totalSeats,
+            status = "active"
         )
 
         _tripOffers.value = _tripOffers.value + (id to finalOffer)
@@ -1251,6 +1272,67 @@ class SawaariRepository(private val context: Context) {
 
     fun getTripOfferById(offerId: String): TripOffer? {
         return _tripOffers.value[offerId]
+    }
+
+    suspend fun fetchTripOfferFromFirestore(offerId: String): Result<TripOffer> = withContext(Dispatchers.IO) {
+        if (!isFirebaseEnabled || firebaseFirestore == null) {
+            val offer = _tripOffers.value[offerId]
+            return@withContext if (offer != null) {
+                Result.success(offer)
+            } else {
+                Result.failure(Exception("Trip offer not found locally"))
+            }
+        }
+
+        try {
+            val doc = firebaseFirestore!!.collection("trip_offers").document(offerId).get().awaitTask()
+            val offer = doc.toTripOfferSafe()
+            return@withContext if (offer != null) {
+                _tripOffers.value = _tripOffers.value + (offerId to offer)
+                Result.success(offer)
+            } else {
+                Result.failure(Exception("Trip offer not found"))
+            }
+        } catch (e: Exception) {
+            Log.e("SawaariShare", "Failed to fetch trip offer from Firestore: ${e.message}")
+            val cachedOffer = _tripOffers.value[offerId]
+            return@withContext if (cachedOffer != null) {
+                Result.success(cachedOffer)
+            } else {
+                Result.failure(e)
+            }
+        }
+    }
+
+    fun getHostedRides(userId: String): List<TripOffer> {
+        return _tripOffers.value.values.filter { it.hostId == userId }.sortedByDescending { it.departureTime }
+    }
+
+    fun getActiveRides(): List<TripOffer> {
+        val now = System.currentTimeMillis()
+        return _tripOffers.value.values
+            .filter { it.status == "active" && it.departureTime > now }
+            .sortedBy { it.departureTime }
+    }
+
+    fun calculateCostSplit(costPerRider: Double, riders: Int): Double {
+        return costPerRider * riders
+    }
+
+    fun validateTripOffer(offer: TripOffer): Result<Unit> {
+        if (offer.origin.trim().isEmpty() || offer.destination.trim().isEmpty()) {
+            return Result.failure(Exception("Origin and destination are required."))
+        }
+        if (offer.departureTime <= System.currentTimeMillis()) {
+            return Result.failure(Exception("Departure time must be in the future."))
+        }
+        if (offer.totalSeats < 1 || offer.totalSeats > 8) {
+            return Result.failure(Exception("Total seats must be between 1 and 8."))
+        }
+        if (offer.costPerRider < 0.0) {
+            return Result.failure(Exception("Cost per rider cannot be negative."))
+        }
+        return Result.success(Unit)
     }
 
     fun recordNoShow(userId: String) {
