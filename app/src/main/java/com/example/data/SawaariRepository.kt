@@ -751,19 +751,70 @@ class SawaariRepository(private val context: Context) {
     }
 
     suspend fun postRideRequest(request: RideRequest): Result<Unit> = withContext(Dispatchers.IO) {
+        val currentUser = _currentUser.value ?: return@withContext Result.failure(Exception("Please log in to post a ride request."))
+
+        // Validation
+        if (request.origin.trim().isEmpty() || request.destination.trim().isEmpty()) {
+            return@withContext Result.failure(Exception("Pickup and dropoff locations are required."))
+        }
+        if (request.originLat == 0.0 || request.originLng == 0.0 || request.destLat == 0.0 || request.destLng == 0.0) {
+            return@withContext Result.failure(Exception("Valid pickup and dropoff coordinates required."))
+        }
+        if (request.departureTime <= System.currentTimeMillis()) {
+            return@withContext Result.failure(Exception("Departure time must be in the future."))
+        }
+        if (request.seatsNeeded < 1 || request.seatsNeeded > 8) {
+            return@withContext Result.failure(Exception("Seats needed must be between 1 and 8."))
+        }
+
         val id = "request_${UUID.randomUUID().toString().take(8)}"
         val finalRequest = request.copy(
             id = id,
-            riderId = _currentUser.value?.id ?: "",
-            riderName = _currentUser.value?.name ?: "Rider",
-            riderRating = _currentUser.value?.ratingAvg ?: 5.0f,
+            riderId = currentUser.id,
+            riderName = currentUser.name,
+            riderRating = currentUser.ratingAvg,
             originGeohash = GeoUtils.encodeGeohash(request.originLat, request.originLng, 7),
-            destGeohash = GeoUtils.encodeGeohash(request.destLat, request.destLng, 7)
+            destGeohash = GeoUtils.encodeGeohash(request.destLat, request.destLng, 7),
+            status = "active"
         )
 
         _rideRequests.value = _rideRequests.value + (id to finalRequest)
         saveList("ride_requests.json", _rideRequests.value.values.toList(), rideRequestListAdapter)
         updateFeeds(_currentUser.value)
+
+        // Evaluate matching notifications
+        val now = System.currentTimeMillis()
+        val matchingOffers = _tripOffers.value.values.filter { offer ->
+            offer.status == "active" &&
+            offer.seatsLeft >= finalRequest.seatsNeeded &&
+            offer.departureTime > now &&
+            (offer.origin.lowercase().trim() == finalRequest.origin.lowercase().trim() ||
+             offer.origin.lowercase().trim().contains(finalRequest.origin.lowercase().trim()) ||
+             finalRequest.origin.lowercase().trim().contains(offer.origin.lowercase().trim())) &&
+            (offer.destination.lowercase().trim() == finalRequest.destination.lowercase().trim() ||
+             offer.destination.lowercase().trim().contains(finalRequest.destination.lowercase().trim()) ||
+             finalRequest.destination.lowercase().trim().contains(offer.destination.lowercase().trim()))
+        }
+
+        matchingOffers.forEach { offer ->
+            val driver = _users.value[offer.hostId]
+            if (driver != null && driver.emailNotificationsEnabled) {
+                sendNotificationAlert(
+                    targetUserId = offer.hostId,
+                    title = "New Ride Request Matching Your Trip! 🚗",
+                    message = "${finalRequest.riderName} needs ${finalRequest.seatsNeeded} seat(s) from ${finalRequest.origin} to ${finalRequest.destination}.",
+                    type = "email"
+                )
+            }
+            if (driver != null && driver.pushNotificationsEnabled) {
+                sendNotificationAlert(
+                    targetUserId = offer.hostId,
+                    title = "Rider Looking for Your Route! 👥",
+                    message = "${finalRequest.riderName} needs ${finalRequest.seatsNeeded} seat(s) ${finalRequest.origin} → ${finalRequest.destination}",
+                    type = "push"
+                )
+            }
+        }
 
         if (isFirebaseEnabled && firebaseFirestore != null) {
             try {
@@ -1331,6 +1382,75 @@ class SawaariRepository(private val context: Context) {
         }
         if (offer.costPerRider < 0.0) {
             return Result.failure(Exception("Cost per rider cannot be negative."))
+        }
+        return Result.success(Unit)
+    }
+
+    suspend fun fetchRideRequestFromFirestore(requestId: String): Result<RideRequest> = withContext(Dispatchers.IO) {
+        if (!isFirebaseEnabled || firebaseFirestore == null) {
+            val request = _rideRequests.value[requestId]
+            return@withContext if (request != null) {
+                Result.success(request)
+            } else {
+                Result.failure(Exception("Ride request not found locally"))
+            }
+        }
+
+        try {
+            val doc = firebaseFirestore!!.collection("ride_requests").document(requestId).get().awaitTask()
+            val request = doc.toRideRequestSafe()
+            return@withContext if (request != null) {
+                _rideRequests.value = _rideRequests.value + (requestId to request)
+                Result.success(request)
+            } else {
+                Result.failure(Exception("Ride request not found"))
+            }
+        } catch (e: Exception) {
+            Log.e("SawaariShare", "Failed to fetch ride request from Firestore: ${e.message}")
+            val cachedRequest = _rideRequests.value[requestId]
+            return@withContext if (cachedRequest != null) {
+                Result.success(cachedRequest)
+            } else {
+                Result.failure(e)
+            }
+        }
+    }
+
+    fun getPassengerRequests(riderId: String): List<RideRequest> {
+        return _rideRequests.value.values.filter { it.riderId == riderId }.sortedByDescending { it.departureTime }
+    }
+
+    fun getActiveRequests(): List<RideRequest> {
+        val now = System.currentTimeMillis()
+        return _rideRequests.value.values
+            .filter { it.status == "active" && it.departureTime > now }
+            .sortedBy { it.departureTime }
+    }
+
+    fun findMatchingOffers(request: RideRequest): List<TripOffer> {
+        val now = System.currentTimeMillis()
+        return _tripOffers.value.values.filter { offer ->
+            offer.status == "active" &&
+            offer.seatsLeft >= request.seatsNeeded &&
+            offer.departureTime > now &&
+            (offer.origin.lowercase().trim() == request.origin.lowercase().trim() ||
+             offer.origin.lowercase().trim().contains(request.origin.lowercase().trim()) ||
+             request.origin.lowercase().trim().contains(offer.origin.lowercase().trim())) &&
+            (offer.destination.lowercase().trim() == request.destination.lowercase().trim() ||
+             offer.destination.lowercase().trim().contains(request.destination.lowercase().trim()) ||
+             request.destination.lowercase().trim().contains(offer.destination.lowercase().trim()))
+        }.sortedBy { it.departureTime }
+    }
+
+    fun validateRideRequest(request: RideRequest): Result<Unit> {
+        if (request.origin.trim().isEmpty() || request.destination.trim().isEmpty()) {
+            return Result.failure(Exception("Pickup and dropoff locations are required."))
+        }
+        if (request.departureTime <= System.currentTimeMillis()) {
+            return Result.failure(Exception("Departure time must be in the future."))
+        }
+        if (request.seatsNeeded < 1 || request.seatsNeeded > 8) {
+            return Result.failure(Exception("Seats needed must be between 1 and 8."))
         }
         return Result.success(Unit)
     }
