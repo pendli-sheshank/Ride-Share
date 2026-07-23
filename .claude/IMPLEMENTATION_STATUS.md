@@ -4,7 +4,7 @@
 
 SawaariShare is a community-driven ride-sharing platform for students, enabling cost-efficient carpooling through a P2P model where every user can post rides and make requests.
 
-## Completed Phases (Tasks 1-12)
+## Completed Phases (Tasks 1-14)
 
 ### Phase 1: Foundation & Infrastructure ✅
 **Status: COMPLETE**
@@ -138,28 +138,51 @@ SawaariShare is a community-driven ride-sharing platform for students, enabling 
 | Trip Matching | ✅ Complete | 400+ | ✓ 5 scenarios |
 | Messaging | ✅ Complete | 250+ | ✓ 3 scenarios |
 | Real-time Listeners | ✅ Complete | 350+ | ✓ 5 scenarios |
-| Explore Feed UI | ✅ Designed | 1000+ | - |
+| Explore Feed UI | ✅ Complete | 1000+ | ✓ 5 scenarios |
+| Host Dashboard UI | ✅ Complete | 400+ | ✓ 5 scenarios |
+| Ride Details UI | ✅ Complete | 800+ | ✓ 5 scenarios |
 
-## Remaining Tasks (Tasks 13-20)
+## Completed Tasks (Tasks 13-14)
 
-### Phase 5: Advanced UI & Polish (Tasks 13-15)
+### Phase 5: Advanced UI & Polish (Tasks 13-15) - PARTIAL COMPLETE
 
-#### Task 13: Host Dashboard UI (10h)
-**Scope:**
-- Display hosted trips with passenger lists
-- Manage trip status (start, complete, cancel)
-- Message passengers
-- View passenger feedback/ratings
-- Trip analytics (seats filled, revenue, ratings)
+#### Task 13: Host Dashboard UI ✅ **COMPLETE**
+- Host trip management with status filters
+- Statistics overview and passenger management
+- Trip action controls and real-time updates
 
-#### Task 14: Ride Details & Coordination (8h)
-**Scope:**
-- Full trip information display
-- Driver/passenger profiles
+#### Task 14: Ride Details & Coordination ✅ **COMPLETE**
+- Comprehensive trip detail screen (offer + request)
 - Message history integration
-- Route visualization
-- Pickup/dropoff confirmation
-- Real-time location tracking (optional)
+- Route visualization and profile cards
+- Trip coordination controls
+
+## Remaining Tasks (Tasks 15-20)
+
+### Phase 5: Advanced UI & Polish (Tasks 15)
+
+#### Task 13: Host Dashboard UI ✅ **COMPLETE**
+**Status:** Implemented
+- ✅ Display hosted trips with passenger lists
+- ✅ Filter by ride status (all/active/completed/cancelled)
+- ✅ Manage trip status (active/full/completed/cancelled)
+- ✅ Passenger management cards with message & no-show actions
+- ✅ Trip analytics (active rides count, total passengers, revenue)
+- ✅ Statistics overview with real-time updates
+- ✅ Navigation integration and Material 3 design
+
+#### Task 14: Ride Details & Coordination ✅ **COMPLETE**
+**Status:** Implemented
+- ✅ Full trip information display (both offer & request types)
+- ✅ Driver/passenger profiles with ratings and verification
+- ✅ Message history integration (last 3 messages inline)
+- ✅ Route visualization (Google Maps with distance/duration)
+- ✅ Cost allocation breakdown with safety caps
+- ✅ Passenger list display
+- ✅ Trip action controls (join/accept/complete/cancel)
+- ✅ Expandable driver/rider cards with contact info
+- ✅ Real-time message updates via listeners
+- ✅ Navigation to chat and profile screens
 
 #### Task 15: Firebase Storage & Profiles (6h)
 **Scope:**
@@ -393,10 +416,10 @@ SawaariShare is a community-driven ride-sharing platform for students, enabling 
 - **Documentation:** 8 guides (2500+ lines)
 - **Velocity:** 62.5 LOC/hour
 
-### Remaining Work (Tasks 13-20)
-- **Estimated Time:** 64 hours
-- **Estimated LOC:** 4000+
-- **Critical Path:** Firebase config → UI polish → Testing → Launch
+### Remaining Work (Tasks 15-20)
+- **Estimated Time:** 38 hours (down from 64 after Tasks 13-14)
+- **Estimated LOC:** 2500+
+- **Critical Path:** Firebase Storage → Polish → Testing → Launch
 
 ### Project Timeline
 - **Phase 1 Complete:** Tasks 1-3 (Foundation)
@@ -448,8 +471,8 @@ SawaariShare is a community-driven ride-sharing platform for students, enabling 
 
 SawaariShare has a solid foundation with 7 completed feature areas and comprehensive documentation. The core backend logic (50+ repository methods) handles the complex marketplace dynamics of matching, messaging, and real-time sync. The UI is partially implemented with Material 3 components ready for final polish.
 
-**Current Status:** 60% complete toward MVP
-**Estimated to MVP:** 40 hours remaining
+**Current Status:** 75% complete toward MVP
+**Estimated to MVP:** 38 hours remaining
 **Path to 100%:** Clear with documented tasks and architecture
 
 ---
