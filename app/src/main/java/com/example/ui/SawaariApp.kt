@@ -2,7 +2,11 @@
 package com.example.ui
 
 import android.content.Intent
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.widget.Toast
+import android.content.Context
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -149,6 +153,47 @@ fun ShimmerSkeleton(
             .clip(RoundedCornerShape(6.dp))
             .background(SawaariDivider.copy(alpha = alpha))
     )
+}
+
+// --- Haptic Feedback Utilities ---
+
+fun vibrate(context: Context, duration: Long = 50) {
+    try {
+        val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        if (vibrator?.hasVibrator() == true) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator.vibrate(
+                    VibrationEffect.createOneShot(
+                        duration,
+                        VibrationEffect.DEFAULT_AMPLITUDE
+                    )
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(duration)
+            }
+        }
+    } catch (e: Exception) {
+        // Silently fail if vibrator not available
+    }
+}
+
+fun vibrateSuccess(context: Context) {
+    try {
+        val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        if (vibrator?.hasVibrator() == true) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator.vibrate(
+                    VibrationEffect.createWaveform(longArrayOf(0, 30, 30, 100))
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(longArrayOf(0, 30, 30, 100))
+            }
+        }
+    } catch (e: Exception) {
+        // Silently fail if vibrator not available
+    }
 }
 
 @Composable
@@ -568,36 +613,43 @@ fun EmailPasswordLoginScreen(viewModel: MainViewModel, navController: NavControl
                 Button(
                     onClick = {
                         authButtonPressed = true
+                        vibrate(context, 50)
                         val emailTrimmed = email.trim()
                         val passTrimmed = password.trim()
                         if (emailTrimmed.isEmpty() || passTrimmed.isEmpty()) {
                             authButtonPressed = false
+                            vibrate(context, 100)
                             viewModel.setError("Email and password cannot be empty")
                             return@Button
                         }
                         if (!emailTrimmed.contains("@") || !emailTrimmed.contains(".")) {
                             authButtonPressed = false
+                            vibrate(context, 100)
                             viewModel.setError("Please enter a valid email address.")
                             return@Button
                         }
                         if (isSignUpMode) {
                             if (passTrimmed.length < 6) {
                                 authButtonPressed = false
+                                vibrate(context, 100)
                                 viewModel.setError("Password must be at least 6 characters")
                                 return@Button
                             }
                             if (passTrimmed != confirmPassword.trim()) {
                                 authButtonPressed = false
+                                vibrate(context, 100)
                                 viewModel.setError("Passwords do not match")
                                 return@Button
                             }
                             viewModel.signUpWithEmail(emailTrimmed, passTrimmed) { isNewUser ->
                                 authButtonPressed = false
+                                vibrateSuccess(context)
                                 // Navigates automatically based on global StateFlow observer
                             }
                         } else {
                             viewModel.loginWithEmail(emailTrimmed, passTrimmed) { isNewUser ->
                                 authButtonPressed = false
+                                vibrateSuccess(context)
                                 // Navigates automatically based on global StateFlow observer
                             }
                         }
@@ -3498,9 +3550,11 @@ fun TripOfferCard(
 
                             // Primary CTA / Status Pill
                             if (isJoinable && onJoinClick != null) {
+                                val context = LocalContext.current
                                 Button(
                                     onClick = {
                                         joinButtonPressed = true
+                                        vibrate(context, 50)
                                         onJoinClick()
                                     },
                                     modifier = Modifier
@@ -5342,8 +5396,10 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                     Button(
                                         onClick = {
                                             completeButtonPressed = true
+                                            vibrate(context, 50)
                                             viewModel.updateTripOfferStatus(offer.id, "completed") {
                                                 completeButtonPressed = false
+                                                vibrateSuccess(context)
                                                 Toast.makeText(context, "Sawaari completed!", Toast.LENGTH_SHORT).show()
                                             }
                                         },
@@ -5357,6 +5413,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                     Button(
                                         onClick = {
                                             cancelButtonPressed = true
+                                            vibrate(context, 50)
                                             viewModel.updateTripOfferStatus(offer.id, "cancelled") {
                                                 cancelButtonPressed = false
                                                 Toast.makeText(context, "Sawaari cancelled!", Toast.LENGTH_SHORT).show()
@@ -5438,8 +5495,10 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                     Button(
                                         onClick = {
                                             joinButtonPressed = true
+                                            vibrate(context, 50)
                                             viewModel.joinTripOfferDirect(offer.id) {
                                                 joinButtonPressed = false
+                                                vibrateSuccess(context)
                                                 Toast.makeText(context, "Successfully joined Sawaari!", Toast.LENGTH_LONG).show()
                                             }
                                         },
