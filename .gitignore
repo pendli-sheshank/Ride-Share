@@ -16,3 +16,8 @@
 local.properties
 .env
 debug.keystore
+
+# Task status tracking (local development use)
+status.json
+archived-tasks.json
+session-end-summary.txt
