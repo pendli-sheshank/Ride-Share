@@ -1,5 +1,8 @@
 [versions]
-agp = "8.8.0"
+# 8.13.2 is the newest stable AGP 8.x. Must be >= 8.9.1 because androidx.core 1.18.0 declares
+# that as its minimum; the earlier pin to 8.8.0 "for Gradle 8.14.3 compatibility" was a
+# misdiagnosis — AGP 8.13 requires Gradle 8.13+, which 8.14.3 satisfies.
+agp = "8.13.2"
 kotlin = "2.2.10"
 coreKtx = "1.18.0"
 junit = "4.13.2"
@@ -103,6 +106,10 @@ koin-test = { group = "io.insert-koin", name = "koin-test", version.ref = "koinT
 
 [plugins]
 kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
+# Required by AGP 8.x to compile Kotlin sources. AGP 9.x had this built in; when the project
+# was downgraded from AGP 9.1.1 to 8.8.0 this plugin was never added, so :app silently
+# compiled zero Kotlin classes. Do not remove.
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 android-application = { id = "com.android.application", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

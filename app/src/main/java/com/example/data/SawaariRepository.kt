@@ -7,7 +7,7 @@ import com.google.firebase.FirebaseOptions
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.storage.FirebaseStorage
-import com.example.BuildConfig
+import com.aistudio.sawaarishare.BuildConfig
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
@@ -242,9 +242,14 @@ class SawaariRepository(private val context: Context) {
     private fun setupRealtimeListeners() {
         // Enable offline persistence for seamless sync
         try {
-            firebaseFirestore?.firestoreSettings = com.google.firebase.firestore.FirestoreSettings.Builder()
-                .setPersistenceEnabled(true)
-                .build()
+            // The class is FirebaseFirestoreSettings (not FirestoreSettings), and
+            // setPersistenceEnabled is superseded by setLocalCacheSettings in the modern SDK.
+            firebaseFirestore?.firestoreSettings =
+                com.google.firebase.firestore.FirebaseFirestoreSettings.Builder()
+                    .setLocalCacheSettings(
+                        com.google.firebase.firestore.PersistentCacheSettings.newBuilder().build()
+                    )
+                    .build()
         } catch (e: Exception) {
             Log.w("SawaariShare", "Could not enable Firestore persistence: ${e.message}")
         }
@@ -1995,18 +2000,29 @@ class SawaariRepository(private val context: Context) {
         }
     }
 
-    suspend fun uploadProfilePicture(userId: String, imageFile: File): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun uploadProfilePicture(userId: String, imageFile: File): Result<String> {
         if (!isFirebaseEnabled) {
             // Fallback: return local path
-            return@withContext Result.success(imageFile.absolutePath)
+            return Result.success(imageFile.absolutePath)
+        }
+        return uploadProfilePicture(userId, android.net.Uri.fromFile(imageFile))
+    }
+
+    /**
+     * Uri overload used by the profile screen's image picker, which hands back a content:// Uri.
+     * Firebase Storage accepts a Uri directly, so no temporary file copy is needed.
+     */
+    suspend fun uploadProfilePicture(userId: String, imageUri: android.net.Uri): Result<String> = withContext(Dispatchers.IO) {
+        if (!isFirebaseEnabled) {
+            return@withContext Result.success(imageUri.toString())
         }
 
         try {
             val storageRef = firebaseStorage?.reference?.child("profile_pictures/$userId.jpg")
                 ?: return@withContext Result.failure(Exception("Storage not initialized"))
 
-            // Upload file to Firebase Storage
-            val uploadTask = storageRef.putFile(android.net.Uri.fromFile(imageFile))
+            // Upload to Firebase Storage
+            val uploadTask = storageRef.putFile(imageUri)
             uploadTask.awaitTask()
 
             // Get download URL
@@ -2023,7 +2039,7 @@ class SawaariRepository(private val context: Context) {
                 _users.value = _users.value.toMutableMap().apply {
                     put(userId, updatedUser)
                 }
-                saveUser(updatedUser, userAdapter)
+                saveList("users.json", _users.value.values.toList(), userListAdapter)
             }
 
             return@withContext Result.success(downloadUrl.toString())
@@ -2055,7 +2071,7 @@ class SawaariRepository(private val context: Context) {
                 _users.value = _users.value.toMutableMap().apply {
                     put(userId, updatedUser)
                 }
-                saveUser(updatedUser, userAdapter)
+                saveList("users.json", _users.value.values.toList(), userListAdapter)
             }
 
             return@withContext Result.success(Unit)
