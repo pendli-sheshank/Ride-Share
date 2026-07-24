@@ -297,10 +297,49 @@ its `R` import updated for the new namespace.
 **Lesson:** a test suite that has never been executed is not evidence of anything. The
 `ci.yml` unit-test job exists so this cannot happen again.
 
+### 2026-07-24 — `sdkmanager: command not found` (exit 127) on `ubuntu-latest`
+**Cause:** the runner image ships an Android SDK and sets `ANDROID_HOME`, but `sdkmanager`
+itself lives in `cmdline-tools` and is **not on `PATH`**.
+**Fix:** use `android-actions/setup-android@v3` with
+`packages: 'platforms;android-36 build-tools;36.0.0'` instead of calling `sdkmanager` directly.
+
+### 2026-07-24 — a workflow run appears with **zero jobs**, titled by filename instead of workflow name
+**Cause:** the workflow file failed validation, so GitHub could not read its `name:`. The
+specific error: **the `secrets` context is not permitted in `if:` conditions.** Steps had
+`if: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON != '' }}`.
+**Fix:** `secrets` *is* allowed in `jobs.<id>.env`. Hoist the presence checks to job-level env
+flags and gate steps on those:
+```yaml
+env:
+  HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+# then, on a step:
+if: env.HAS_KEYSTORE == 'true'
+```
+**Recognising it:** a run with 0 jobs and the file path as its title is *always* a workflow
+validation error, never a build failure. There are no logs to read — lint the file instead.
+
+### 2026-07-24 — `got unexpected character '+' while lexing expression`
+**Cause:** `${{ 1000 + github.run_number }}`. **GitHub Actions expressions have no arithmetic
+operators.** There is no `+`, `-`, `*` or `/`.
+**Fix:** compute in the shell and export through `$GITHUB_ENV`:
+```yaml
+- run: echo "VERSION_CODE=$(( 1000 + GITHUB_RUN_NUMBER ))" >> "$GITHUB_ENV"
+```
+
+> **Lint workflows before pushing.** All three failures above were caught in seconds by
+> [`actionlint`](https://github.com/rhysd/actionlint), versus a ~2 minute CI round trip each:
+> ```bash
+> curl -sSfL -o - https://github.com/rhysd/actionlint/releases/download/v1.7.7/actionlint_1.7.7_linux_amd64.tar.gz \
+>   | tar xz actionlint && ./actionlint -no-color -oneline
+> ```
+> It understands the context-availability rules and the expression grammar, so it catches
+> exactly the class of error that produces an unreadable zero-job run.
+
 ---
 
 ## 8. Pre-flight checklist before merging to `main`
 
+- [ ] `actionlint` clean, if any workflow file changed
 - [ ] `ci.yml` green on the PR
 - [ ] `verify-app-classes.sh` passed (it runs inside `ci.yml`)
 - [ ] `versionCode` will exceed the highest already on the internal track

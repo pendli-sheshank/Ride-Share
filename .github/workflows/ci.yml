@@ -31,10 +31,11 @@ jobs:
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
 
-      - name: Install Android SDK packages
-        run: |
-          yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      # Installs cmdline-tools and puts sdkmanager on PATH. The runner image ships an SDK
+      # but not sdkmanager itself, so calling it directly fails with exit 127.
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-36 build-tools;36.0.0'
 
       - name: Assemble debug
         run: ./gradlew :app:assembleDebug --stacktrace
@@ -68,10 +69,11 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Install Android SDK packages
-        run: |
-          yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      # Installs cmdline-tools and puts sdkmanager on PATH. The runner image ships an SDK
+      # but not sdkmanager itself, so calling it directly fails with exit 127.
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-36 build-tools;36.0.0'
 
       # Apple targets cannot be compiled on Linux, but compiling commonMain against the
       # *common* stdlib catches JVM-only APIs (System.currentTimeMillis, java.*, etc.)

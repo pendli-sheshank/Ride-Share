@@ -30,6 +30,14 @@ jobs:
   release:
     name: Build AAB & publish to internal testing
     runs-on: ubuntu-latest
+    # The `secrets` context cannot be used in `if:` conditions — doing so makes the whole
+    # workflow file fail validation, which GitHub reports as a run with zero jobs titled by
+    # filename rather than workflow name. `jobs.<id>.env` does allow it, so the presence
+    # checks are hoisted here and the steps gate on these flags instead.
+    env:
+      HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+      HAS_PLAY_SERVICE_ACCOUNT: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON != '' }}
+      HAS_GOOGLE_SERVICES: ${{ secrets.GOOGLE_SERVICES_JSON != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -40,10 +48,18 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Install Android SDK packages
+      # Installs cmdline-tools and puts sdkmanager on PATH. The runner image ships an SDK
+      # but not sdkmanager itself, so calling it directly fails with exit 127.
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-36 build-tools;36.0.0'
+
+      # GitHub Actions expressions have no arithmetic operators — `${{ 1000 + x }}` is a
+      # syntax error that fails the whole workflow. Compute in the shell and export instead.
+      - name: Compute version
         run: |
-          yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+          echo "VERSION_CODE=$(( 1000 + GITHUB_RUN_NUMBER ))" >> "$GITHUB_ENV"
+          echo "VERSION_NAME=1.0.$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
 
       # The Secrets Gradle Plugin reads .env from the repo root and turns these into
       # BuildConfig fields. SawaariRepository skips Firebase init if a value contains
@@ -59,7 +75,7 @@ jobs:
           EOF
 
       - name: Write google-services.json
-        if: ${{ secrets.GOOGLE_SERVICES_JSON != '' }}
+        if: env.HAS_GOOGLE_SERVICES == 'true'
         run: |
           cat > app/google-services.json <<'EOF'
           ${{ secrets.GOOGLE_SERVICES_JSON }}
@@ -67,22 +83,21 @@ jobs:
 
       # Written outside the workspace so it can never be swept into an artifact upload.
       - name: Decode upload keystore
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        if: env.HAS_KEYSTORE == 'true'
         run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/upload.jks"
 
       - name: Build release bundle
         env:
           # Left empty when no keystore secret is set; the build then produces an
           # unsigned bundle instead of failing, so PR-time validation still works.
-          KEYSTORE_PATH: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && format('{0}/upload.jks', runner.temp) || '' }}
+          KEYSTORE_PATH: ${{ env.HAS_KEYSTORE == 'true' && format('{0}/upload.jks', runner.temp) || '' }}
           STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          # Currently published versionCode is 2. The 1000 offset guarantees the value
-          # only ever increases. NOTE: github.run_number resets to 1 if this workflow
-          # file is renamed — bump the offset if you ever rename it.
-          VERSION_CODE: ${{ 1000 + github.run_number }}
-          VERSION_NAME: 1.0.${{ github.run_number }}
+          # VERSION_CODE / VERSION_NAME come from the Compute version step above.
+          # Currently published versionCode is 2; the 1000 offset guarantees the value only
+          # ever increases. NOTE: github.run_number resets to 1 if this workflow file is
+          # renamed — bump the offset if you ever rename it.
         run: ./gradlew :app:bundleRelease --stacktrace
 
       - name: Verify the AAB contains the app's own classes
@@ -99,7 +114,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Publish to Play internal testing
-        if: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON != '' && (github.event_name == 'push' || inputs.publish) }}
+        if: env.HAS_PLAY_SERVICE_ACCOUNT == 'true' && (github.event_name == 'push' || inputs.publish)
         uses: r0adkll/upload-google-play@v1.1.3
         with:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
@@ -107,10 +122,10 @@ jobs:
           releaseFiles: app/build/outputs/bundle/release/app-release.aab
           track: internal
           status: completed
-          releaseName: 1.0.${{ github.run_number }} (${{ 1000 + github.run_number }})
+          releaseName: ${{ env.VERSION_NAME }} (${{ env.VERSION_CODE }})
 
       - name: Explain skipped publish
-        if: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON == '' }}
+        if: env.HAS_PLAY_SERVICE_ACCOUNT != 'true'
         run: |
           echo "::warning::PLAY_SERVICE_ACCOUNT_JSON is not set — built the AAB but did not publish."
           echo "See .claude/skills/release-pipeline/SKILL.md for the Play API setup runbook."
