@@ -7,6 +7,8 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.widget.Toast
 import android.content.Context
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -826,6 +828,35 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            uploadingProfilePicture = true
+            coroutineScope.launch {
+                try {
+                    val user = viewModel.currentUser.value
+                    if (user != null) {
+                        val success = viewModel.uploadProfilePicture(user.id, uri)
+                        uploadingProfilePicture = false
+                        if (success) {
+                            selectedAvatarUrl = user.profilePictureUrl
+                            vibrate(context, 50)
+                            Toast.makeText(context, "Profile picture updated", Toast.LENGTH_SHORT).show()
+                        } else {
+                            vibrate(context, 100)
+                            Toast.makeText(context, "Failed to upload picture", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                } catch (e: Exception) {
+                    uploadingProfilePicture = false
+                    vibrate(context, 100)
+                    Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -868,6 +899,9 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(bottom = 24.dp)
+                    .clickable(enabled = !uploadingProfilePicture) {
+                        imagePickerLauncher.launch("image/*")
+                    }
             ) {
                 Column(
                     modifier = Modifier
@@ -883,7 +917,15 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
                     )
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    if (selectedAvatarUrl.isNotEmpty()) {
+                    if (uploadingProfilePicture) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(40.dp),
+                            color = SawaariSaffron,
+                            strokeWidth = 3.dp
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Uploading...", color = SawaariSaffron, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    } else if (selectedAvatarUrl.isNotEmpty()) {
                         StudentAvatar(
                             avatarUrl = selectedAvatarUrl,
                             name = name.ifEmpty { "?" },
@@ -2055,7 +2097,7 @@ fun HostDashboard(viewModel: MainViewModel, navController: NavController) {
 fun HostStatCard(
     label: String,
     value: String,
-    icon: androidx.compose.material.icons.Icons,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -2162,12 +2204,13 @@ fun PassengerManagementCard(
                         }
                     }
                 }
-                Icon(
-                    imageVector = Icons.Default.ChevronRight,
-                    contentDescription = "More",
-                    tint = SawaariLightGray,
-                    modifier = Modifier.clickable { onViewProfileClick() }
-                )
+                IconButton(onClick = onViewProfileClick) {
+                    Icon(
+                        imageVector = Icons.Default.ChevronRight,
+                        contentDescription = "View profile",
+                        tint = SawaariLightGray
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
