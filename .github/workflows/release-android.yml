@@ -1,0 +1,134 @@
+name: Release Android
+
+# Publishes to the Play Store "internal testing" track on every push to main.
+# Runs independently of the iOS release workflow: neither can block the other.
+#
+# Setup runbook and secret inventory: .claude/skills/release-pipeline/SKILL.md
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - '.claude/**'
+      - 'docs/**'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Upload the build to Play internal testing
+        type: boolean
+        default: false
+
+concurrency:
+  # Never cancel a run mid-upload; queue instead.
+  group: release-android-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Build AAB & publish to internal testing
+    runs-on: ubuntu-latest
+    # The `secrets` context cannot be used in `if:` conditions — doing so makes the whole
+    # workflow file fail validation, which GitHub reports as a run with zero jobs titled by
+    # filename rather than workflow name. `jobs.<id>.env` does allow it, so the presence
+    # checks are hoisted here and the steps gate on these flags instead.
+    env:
+      HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+      HAS_PLAY_SERVICE_ACCOUNT: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON != '' }}
+      HAS_GOOGLE_SERVICES: ${{ secrets.GOOGLE_SERVICES_JSON != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # JDK 21, not 17: Robolectric maps Android API 36 to a Java 21 requirement and throws
+      # UnsupportedOperationException ("Android SDK 36 requires Java 21") on anything lower.
+      # compileSdk/targetSdk are 36 and the Robolectric tests use @Config(sdk = [36]).
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # Installs cmdline-tools and puts sdkmanager on PATH. The runner image ships an SDK
+      # but not sdkmanager itself, so calling it directly fails with exit 127.
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-36 build-tools;36.0.0'
+
+      # GitHub Actions expressions have no arithmetic operators — `${{ 1000 + x }}` is a
+      # syntax error that fails the whole workflow. Compute in the shell and export instead.
+      - name: Compute version
+        run: |
+          echo "VERSION_CODE=$(( 1000 + GITHUB_RUN_NUMBER ))" >> "$GITHUB_ENV"
+          echo "VERSION_NAME=1.0.$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+
+      # The Secrets Gradle Plugin reads .env from the repo root and turns these into
+      # BuildConfig fields. SawaariRepository skips Firebase init if a value contains
+      # "PLACEHOLDER", so a missing secret yields a working but Firebase-less build.
+      - name: Write .env
+        run: |
+          cat > .env <<EOF
+          GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+          FIREBASE_API_KEY=${{ secrets.FIREBASE_API_KEY }}
+          FIREBASE_APP_ID=${{ secrets.FIREBASE_APP_ID }}
+          FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_STORAGE_BUCKET=${{ secrets.FIREBASE_STORAGE_BUCKET }}
+          EOF
+
+      - name: Write google-services.json
+        if: env.HAS_GOOGLE_SERVICES == 'true'
+        run: |
+          cat > app/google-services.json <<'EOF'
+          ${{ secrets.GOOGLE_SERVICES_JSON }}
+          EOF
+
+      # Written outside the workspace so it can never be swept into an artifact upload.
+      - name: Decode upload keystore
+        if: env.HAS_KEYSTORE == 'true'
+        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/upload.jks"
+
+      - name: Build release bundle
+        env:
+          # Left empty when no keystore secret is set; the build then produces an
+          # unsigned bundle instead of failing, so PR-time validation still works.
+          KEYSTORE_PATH: ${{ env.HAS_KEYSTORE == 'true' && format('{0}/upload.jks', runner.temp) || '' }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          # VERSION_CODE / VERSION_NAME come from the Compute version step above.
+          # Currently published versionCode is 2; the 1000 offset guarantees the value only
+          # ever increases. NOTE: github.run_number resets to 1 if this workflow file is
+          # renamed — bump the offset if you ever rename it.
+        run: ./gradlew :app:bundleRelease --stacktrace
+
+      - name: Verify the AAB contains the app's own classes
+        run: .github/scripts/verify-app-classes.sh app/build/outputs/bundle/release/app-release.aab base/dex/
+
+      - name: Upload AAB artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-aab
+          path: |
+            app/build/outputs/bundle/release/app-release.aab
+            app/build/outputs/mapping/release/mapping.txt
+          if-no-files-found: warn
+
+      - name: Publish to Play internal testing
+        if: env.HAS_PLAY_SERVICE_ACCOUNT == 'true' && (github.event_name == 'push' || inputs.publish)
+        uses: r0adkll/upload-google-play@v1.1.3
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: com.aistudio.sawaarishare.krqmzb
+          releaseFiles: app/build/outputs/bundle/release/app-release.aab
+          track: internal
+          status: completed
+          releaseName: ${{ env.VERSION_NAME }} (${{ env.VERSION_CODE }})
+
+      - name: Explain skipped publish
+        if: env.HAS_PLAY_SERVICE_ACCOUNT != 'true'
+        run: |
+          echo "::warning::PLAY_SERVICE_ACCOUNT_JSON is not set — built the AAB but did not publish."
+          echo "See .claude/skills/release-pipeline/SKILL.md for the Play API setup runbook."

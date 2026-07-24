@@ -1,0 +1,88 @@
+name: CI
+
+# Validation for pull requests and feature branches. Builds and tests only —
+# no secrets, no signing, no publishing. The release workflows handle that.
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    name: Build & test Android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # JDK 21, not 17: Robolectric maps Android API 36 to a Java 21 requirement and throws
+      # UnsupportedOperationException ("Android SDK 36 requires Java 21") on anything lower.
+      # compileSdk/targetSdk are 36 and the Robolectric tests use @Config(sdk = [36]).
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+
+      # Installs cmdline-tools and puts sdkmanager on PATH. The runner image ships an SDK
+      # but not sdkmanager itself, so calling it directly fails with exit 127.
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-36 build-tools;36.0.0'
+
+      - name: Assemble debug
+        run: ./gradlew :app:assembleDebug --stacktrace
+
+      # This is the check that would have caught the missing Kotlin Android plugin.
+      # Without Kotlin compilation the build still "succeeds" but the APK has no app code.
+      - name: Verify the APK contains the app's own classes
+        run: .github/scripts/verify-app-classes.sh app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Unit tests
+        run: ./gradlew :app:testDebugUnitTest --stacktrace
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-test-report
+          path: app/build/reports/tests/
+          if-no-files-found: ignore
+
+  shared-common:
+    name: Verify shared/commonMain is platform-agnostic
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # JDK 21, not 17: Robolectric maps Android API 36 to a Java 21 requirement and throws
+      # UnsupportedOperationException ("Android SDK 36 requires Java 21") on anything lower.
+      # compileSdk/targetSdk are 36 and the Robolectric tests use @Config(sdk = [36]).
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # Installs cmdline-tools and puts sdkmanager on PATH. The runner image ships an SDK
+      # but not sdkmanager itself, so calling it directly fails with exit 127.
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-36 build-tools;36.0.0'
+
+      # Apple targets cannot be compiled on Linux, but compiling commonMain against the
+      # *common* stdlib catches JVM-only APIs (System.currentTimeMillis, java.*, etc.)
+      # before they reach a macOS runner. Cheapest possible iOS-breakage check.
+      - name: Compile common metadata
+        run: ./gradlew :shared:compileCommonMainKotlinMetadata --stacktrace

@@ -413,6 +413,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Uploads a profile picture picked from the gallery. Returns true on success; the repository
+     * updates [currentUser] with the new avatarUrl as a side effect.
+     */
+    suspend fun uploadProfilePicture(userId: String, imageUri: android.net.Uri): Boolean {
+        return try {
+            repository.uploadProfilePicture(userId, imageUri).isSuccess
+        } catch (e: Exception) {
+            _uiError.value = e.message
+            false
+        }
+    }
+
     fun blockUser(blockedUserId: String, onSuccess: () -> Unit) {
         viewModelScope.launch {
             _isLoading.value = true

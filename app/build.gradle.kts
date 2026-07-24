@@ -2,40 +2,44 @@ import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesS
 
 plugins {
   alias(libs.plugins.android.application)
+  alias(libs.plugins.kotlin.android)
   alias(libs.plugins.kotlin.compose)
-  alias(libs.plugins.google.devtools.ksp)
   alias(libs.plugins.roborazzi)
   alias(libs.plugins.secrets)
   alias(libs.plugins.google.services)
 }
 
+// Release signing and versioning are driven by the environment so that CI can supply them
+// without any of it being committed. See .github/workflows/release.yml and
+// .claude/skills/release-pipeline.md. `providers.environmentVariable` is used rather than
+// `System.getenv` so the reads are declared inputs and the configuration cache stays valid.
+val releaseKeystorePath: String? = providers.environmentVariable("KEYSTORE_PATH").orNull
+
 android {
-  namespace = "com.example"
+  namespace = "com.aistudio.sawaarishare"
   compileSdk = 36
 
   defaultConfig {
     applicationId = "com.aistudio.sawaarishare.krqmzb"
     minSdk = 24
     targetSdk = 36
-    versionCode = 2
-    versionName = "1.0.1"
+    // Play rejects an upload whose versionCode does not exceed the published one (currently 2).
+    versionCode = providers.environmentVariable("VERSION_CODE").orElse("2").get().toInt()
+    versionName = providers.environmentVariable("VERSION_NAME").orElse("1.0.1").get()
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
   signingConfigs {
     create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
-      storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
-    }
-    create("debugConfig") {
-      storeFile = file("${rootDir}/debug.keystore")
-      storePassword = "android"
-      keyAlias = "androiddebugkey"
-      keyPassword = "android"
+      // Left unconfigured when KEYSTORE_PATH is absent, so local release builds produce an
+      // unsigned artifact instead of failing on a null password.
+      if (releaseKeystorePath != null) {
+        storeFile = file(releaseKeystorePath)
+        storePassword = providers.environmentVariable("STORE_PASSWORD").orNull
+        keyAlias = providers.environmentVariable("KEY_ALIAS").orElse("upload").get()
+        keyPassword = providers.environmentVariable("KEY_PASSWORD").orNull
+      }
     }
   }
 
@@ -44,11 +48,11 @@ android {
       isCrunchPngs = false
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      signingConfig = signingConfigs.getByName("release")
+      if (releaseKeystorePath != null) {
+        signingConfig = signingConfigs.getByName("release")
+      }
     }
-    debug {
-      signingConfig = signingConfigs.getByName("debugConfig")
-    }
+    // debug uses AGP's auto-generated debug keystore.
   }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
@@ -59,6 +63,15 @@ android {
     buildConfig = true
   }
   testOptions { unitTests { isIncludeAndroidResources = true } }
+}
+
+// Must match android.compileOptions above, or the build fails with
+// "Inconsistent JVM-target compatibility detected between compileDebugJavaWithJavac (11)
+// and compileDebugKotlin (1.8)".
+kotlin {
+  compilerOptions {
+    jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11
+  }
 }
 
 // Configure the Secrets Gradle Plugin to use .env and .env.example files
@@ -126,5 +139,6 @@ dependencies {
   androidTestImplementation(libs.androidx.runner)
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
-  "ksp"(libs.moshi.kotlin.codegen)
+  // Moshi codegen (and therefore KSP) removed: nothing in this project is annotated with
+  // @JsonClass — SawaariRepository uses the reflective KotlinJsonAdapterFactory instead.
 }

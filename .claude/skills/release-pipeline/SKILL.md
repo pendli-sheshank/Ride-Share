@@ -1,0 +1,377 @@
+---
+name: release-pipeline
+description: Build and publish SawaariShare to Google Play internal testing and Apple TestFlight from GitHub Actions. Use when working on release workflows, app signing, versionCode or build numbers, the Kotlin Multiplatform shared framework, the iOS Xcode project, or when a CI or release run fails.
+triggers:
+  - "release"
+  - "publish"
+  - "deploy"
+  - "play store"
+  - "internal testing"
+  - "testflight"
+  - "app store"
+  - "ipa"
+  - "aab"
+  - "signing"
+  - "keystore"
+  - "fastlane"
+  - "github actions"
+  - "ci failed"
+  - "workflow"
+---
+
+# SawaariShare Release Pipeline
+
+How this app gets from a push on `main` to testers on both stores, what has to be true for
+that to work, and every failure mode discovered so far.
+
+> **Append to "Known issues & fixes" whenever a run goes red.** That section is the point of
+> this skill: each entry saves the next person the debugging round trip. Record the symptom
+> exactly as it appears in the log, because that is what future-you will search for.
+
+---
+
+## 1. Architecture
+
+| Module | What it is | Builds to |
+|---|---|---|
+| `:app` | Android application. All UI (`SawaariApp.kt`, ~8,000 lines of Jetpack Compose), `MainViewModel`, `SawaariRepository` (Firebase). | APK / AAB |
+| `:shared` | Kotlin Multiplatform library — `androidTarget` + `iosX64` / `iosArm64` / `iosSimulatorArm64`. | JVM klib + (planned) `Shared.framework` |
+| `iosApp/` | Xcode project. **Not yet created.** | IPA |
+
+**Current state:** Android ships. iOS does not exist yet — there is no Xcode project, no
+Compose Multiplatform, and `:shared` holds only duplicated models plus dead use-case classes
+that `:app` does not depend on. The iOS half of this document describes the intended design,
+marked *(planned)*, and is not yet load-bearing.
+
+---
+
+## 2. Workflows
+
+| File | Trigger | Runner | Does |
+|---|---|---|---|
+| `.github/workflows/ci.yml` | PRs, non-`main` pushes | `ubuntu-latest` | assembleDebug, artifact class check, unit tests, `:shared:compileCommonMainKotlinMetadata` |
+| `.github/workflows/release-android.yml` | push to `main`, manual | `ubuntu-latest` | signed AAB → Play internal testing |
+| `.github/workflows/release-ios.yml` *(planned)* | push to `main`, manual | `macos-15` | archive → IPA → TestFlight |
+
+Android and iOS are **separate workflow files on purpose**: independent re-runs, independent
+concurrency, and the iOS workflow can be disabled in the Actions UI without touching Android.
+A red iOS build must never hold up a Play release.
+
+`concurrency` uses `cancel-in-progress: false` on release workflows — never cancel a run
+partway through a store upload.
+
+### The artifact class check — do not remove it
+
+`.github/scripts/verify-app-classes.sh` fails the build if the APK/AAB does not contain
+`com/example/ui/SawaariAppKt` in any dex. This exists because of the single worst bug found in
+this repo: with no Kotlin plugin applied, Gradle skipped every `.kt` file, reported
+**BUILD SUCCESSFUL**, and produced an installable artifact containing resources, a manifest,
+and none of the app. That ships green and crashes on launch. The check costs two seconds.
+
+It scans *every* dex, not `classes.dex` — app code landed in `classes6.dex` (APK) and
+`base/dex/classes2.dex` (AAB), and which dex holds a class is not stable across builds.
+
+---
+
+## 3. Required GitHub secrets
+
+Set at **Settings → Secrets and variables → Actions**. Publishing steps are gated on these
+being non-empty, so the pipeline builds and validates without them and only starts uploading
+once they exist.
+
+### Android
+
+| Secret | How to produce it |
+|---|---|
+| `ANDROID_KEYSTORE_BASE64` | `base64 -w0 my-upload-key.jks` — **must** be the original upload key (see §4) |
+| `ANDROID_KEYSTORE_PASSWORD` | keystore store password |
+| `ANDROID_KEY_PASSWORD` | key password |
+| `ANDROID_KEY_ALIAS` | key alias; defaults to `upload` if unset |
+| `PLAY_SERVICE_ACCOUNT_JSON` | full service-account JSON, raw (not base64) |
+| `GOOGLE_SERVICES_JSON` | contents of `google-services.json` (optional but recommended) |
+| `GEMINI_API_KEY` | → `.env` → `BuildConfig.GEMINI_API_KEY` |
+| `FIREBASE_API_KEY` | → `.env` |
+| `FIREBASE_APP_ID` | → `.env` |
+| `FIREBASE_PROJECT_ID` | → `.env` |
+| `FIREBASE_STORAGE_BUCKET` | → `.env` |
+
+⚠ **Use `base64 -w0`.** Line-wrapped base64 is the single most common first-run failure; it
+decodes to a corrupt keystore and the error message does not mention wrapping.
+
+⚠ **A wrong Firebase secret fails quietly.** `SawaariRepository` skips Firebase init when a
+value contains `PLACEHOLDER`, so a typo'd secret yields a working-looking build with no
+backend rather than a crash. If testers report "nothing loads", check these first.
+
+### iOS *(planned)*
+
+| Secret | How to produce it |
+|---|---|
+| `ASC_KEY_ID` | App Store Connect API key ID |
+| `ASC_ISSUER_ID` | App Store Connect issuer ID |
+| `ASC_PRIVATE_KEY_BASE64` | `base64 -w0 AuthKey_XXXX.p8` — downloadable exactly once |
+| `APPLE_TEAM_ID` | 10-character team ID |
+| `MATCH_PASSWORD` | passphrase encrypting the certificates repo |
+| `MATCH_GIT_URL` | private certs repo, e.g. `https://github.com/<you>/ios-certificates.git` |
+| `MATCH_GIT_BASIC_AUTHORIZATION` | `base64 -w0 <<< "<user>:<PAT>"` |
+
+---
+
+## 4. Manual setup runbooks
+
+### Google Play — one-time
+
+1. **Find the original upload keystore.** The app is already live on internal testing, so it
+   was signed with a specific upload key. Play rejects any AAB signed with a different one
+   (`403: Your Android App Bundle is signed with the wrong key`). If it is genuinely lost:
+   Play Console → Setup → App integrity → App signing → **request an upload key reset**. Do
+   not just generate a new keystore and hope.
+2. Play Console → **Setup → API access** → link or create a Google Cloud project.
+3. In that GCP project: enable the **Google Play Android Developer API**; IAM → Service
+   Accounts → create one → Keys → Add key → **JSON** → download.
+4. Play Console → **Users and permissions → Invite new user** → the service account's email.
+   Grant, for this app: *Release to testing tracks* and *View app information*.
+5. Paste the JSON into `PLAY_SERVICE_ACCOUNT_JSON`.
+6. **Permission propagation takes up to 24 hours.** A 403 on the first attempt is expected;
+   wait before debugging anything else.
+7. Play requires **at least one manual upload per track** before the API will accept one. If
+   the internal track has never received an AAB, upload one by hand first.
+
+### Apple — one-time *(planned)*
+
+1. Active **paid** Apple Developer Program membership. TestFlight is impossible without it.
+2. App Store Connect → Users and Access → Integrations → **App Store Connect API** →
+   generate a team key with the **Admin** role. App Manager is *not* enough — it cannot create
+   the signing certificate that `fastlane match` needs on its first run. Download the `.p8`
+   (one chance only) and record the Key ID and Issuer ID.
+3. developer.apple.com → Certificates, Identifiers & Profiles → **Identifiers** → register the
+   bundle ID. Android's `applicationId` is frozen by the existing Play listing, but iOS is
+   greenfield — prefer a clean `com.sawaarishare.app` over the AI Studio-generated
+   `com.aistudio.sawaarishare.krqmzb`.
+4. App Store Connect → **Apps → +** → create the app record. Uploads to a nonexistent record
+   fail.
+5. TestFlight → **Internal Testing** → create a group and add testers. Internal testing needs
+   no App Review.
+6. Create a **private** repo for `fastlane match` to store encrypted certificates, plus a
+   fine-grained PAT with `contents:write` on it.
+7. Set `ITSAppUsesNonExemptEncryption = false` in `Info.plist`, or every single build stalls
+   waiting for a manual export-compliance answer.
+
+### Why `fastlane match` and not Xcode automatic signing
+
+Automatic signing with `-allowProvisioningUpdates` needs no Mac, which is appealing here — but
+each ephemeral runner mints a **new** Apple Distribution certificate and discards the private
+key. Apple caps distribution certificates at 2 per account, so the third run fails and needs
+manual cleanup in the portal. `match` generates the key and CSR locally via OpenSSL and
+registers it through the ASC API — also no Mac required — then reuses one stable certificate
+forever. Keep automatic signing as an emergency fallback only.
+
+---
+
+## 5. Versioning
+
+| | Android | iOS *(planned)* |
+|---|---|---|
+| Build number | `versionCode = 1000 + github.run_number` | `CURRENT_PROJECT_VERSION = github.run_number` |
+| Display | `versionName = 1.0.<run_number>` | `MARKETING_VERSION` |
+
+Both read from environment variables in `app/build.gradle.kts` via
+`providers.environmentVariable(...)` — not `System.getenv(...)`, so the reads are declared
+build inputs and the configuration cache stays valid.
+
+- The published `versionCode` was **2**; the `1000` offset guarantees the value only ever
+  increases and leaves headroom.
+- ⚠ **`github.run_number` resets to 1 if the workflow file is renamed.** Renaming
+  `release-android.yml` silently reintroduces version collisions. Bump the offset if you ever
+  rename it.
+- Store build numbers can never be reused, even after deleting a release.
+
+---
+
+## 6. Local verification (Linux, no Mac)
+
+```bash
+./gradlew :app:assembleDebug                          # compiles Kotlin — see Known issue #1
+.github/scripts/verify-app-classes.sh app/build/outputs/apk/debug/app-debug.apk
+./gradlew :app:testDebugUnitTest
+./gradlew :shared:compileCommonMainKotlinMetadata     # best proxy for "will iOS compile?"
+```
+
+Release path with a throwaway key (never use this artifact for anything):
+```bash
+keytool -genkeypair -v -keystore /tmp/test.jks -alias upload -keyalg RSA -keysize 2048 \
+  -validity 100 -storepass testpass -keypass testpass -dname "CN=Test,O=Test,C=US"
+KEYSTORE_PATH=/tmp/test.jks STORE_PASSWORD=testpass KEY_PASSWORD=testpass \
+KEY_ALIAS=upload VERSION_CODE=1001 VERSION_NAME=1.0.99 ./gradlew :app:bundleRelease
+```
+
+**Android SDK is not preinstalled in the Claude Code container.** Install it once:
+```bash
+curl -sSfL -o /tmp/cmdline.zip \
+  https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip
+mkdir -p /opt/android-sdk/cmdline-tools && unzip -q /tmp/cmdline.zip -d /opt/android-sdk/cmdline-tools
+mv /opt/android-sdk/cmdline-tools/cmdline-tools /opt/android-sdk/cmdline-tools/latest
+export ANDROID_HOME=/opt/android-sdk PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+yes | sdkmanager --licenses > /dev/null
+sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+echo "sdk.dir=/opt/android-sdk" > local.properties     # gitignored
+```
+
+**Apple targets cannot be compiled on Linux at all** — not a configuration problem, a
+Kotlin/Native platform restriction. Anything Xcode-related must be validated by pushing and
+watching the macOS runner. Budget for slow iteration and prefer the unsigned simulator build
+in `ci.yml` while shaking out project-structure problems, because it costs nothing in Apple
+account state.
+
+---
+
+## 7. Known issues & fixes
+
+Append-only log. Format: symptom as logged → cause → fix.
+
+### 2026-07-24 — `BUILD SUCCESSFUL` but the app crashes instantly on launch
+**Cause:** `:app` never applied `org.jetbrains.kotlin.android`. AGP 9.x compiles Kotlin
+natively; when the project was downgraded to AGP 8.8.0 the plugin was never added, so no
+`compileDebugKotlin` task existed and Gradle silently skipped all 16,000 lines of Kotlin. The
+build produced an artifact with resources and a manifest but zero app classes.
+**Fix:** added `kotlin-android` to the version catalog, root build, and `:app`; added
+`.github/scripts/verify-app-classes.sh` so this can never recur silently.
+**Check for it:** `./gradlew :app:tasks --all | grep compileDebugKotlin` — if that prints
+nothing, Kotlin is not being compiled.
+
+### 2026-07-24 — `Dependency 'androidx.core:core-ktx:1.18.0' requires Android Gradle plugin 8.9.1 or higher`
+**Cause:** AGP pinned to 8.8.0, allegedly "for Gradle 8.14.3 compatibility" — a misdiagnosis.
+AGP 8.13 requires Gradle 8.13+, which 8.14.3 satisfies.
+**Fix:** AGP → 8.13.2.
+
+### 2026-07-24 — `Configuration ':app:debugRuntimeClasspath' contains AndroidX dependencies, but the android.useAndroidX property is not enabled`
+**Cause:** `android.useAndroidX=true` was never set, despite an entirely AndroidX graph. Hidden
+until Kotlin compilation was switched on. Presents confusingly as a *configuration cache
+serialization* error, because that is where the failure surfaces.
+**Fix:** added `android.useAndroidX=true` to `gradle.properties`.
+
+### 2026-07-24 — 134 Kotlin compile errors on the first real compilation
+**Cause:** the code had never been compiled by anything, so errors accumulated freely. Two were
+brace-balance bugs in `SawaariApp.kt`: a duplicated `}` inside `TripDetailScreen` and a missing
+`}` on a `Card { Column { Row {` block. Together they detached `ChatScreen`, `StudentAvatar`,
+`GoogleMapsMatrixCard` and 15 other composables into a nested scope, making them unresolvable
+from their own call sites and cascading into ~100 downstream errors.
+**Fix:** repaired both braces (134 → 70 → 31 errors), then the genuine API mismatches.
+**Technique worth reusing:** compare computed brace depth against indentation to locate the
+break — the file is consistently indented 4 spaces per level, so the first line where
+`indent/4 != depth` is where the imbalance was introduced. Far faster than reading 8,000 lines.
+
+### 2026-07-24 — `Unresolved reference 'FirestoreSettings'`
+**Cause:** the class is `FirebaseFirestoreSettings`, and `setPersistenceEnabled` is superseded.
+**Fix:** `FirebaseFirestoreSettings.Builder().setLocalCacheSettings(PersistentCacheSettings.newBuilder().build())`.
+
+### 2026-07-24 — `.MainActivity` would crash after a namespace change
+**Cause:** `namespace` was the placeholder `com.example` while `applicationId` was real.
+Changing `namespace` to `com.aistudio.sawaarishare` also changes what the manifest's
+`android:name=".MainActivity"` shorthand resolves to — it would have pointed at a class that
+does not exist, crashing on launch with `ClassNotFoundException`.
+**Fix:** fully qualified it as `com.example.MainActivity` in `AndroidManifest.xml`.
+**Lesson:** the `.Foo` shorthand resolves against `namespace`, *not* `applicationId`. Any
+namespace change must be checked against the manifest and against `R` / `BuildConfig` imports.
+
+### 2026-07-24 — `AndroidManifest.xml` had no `INTERNET` permission
+**Cause:** never added, despite Firebase, OkHttp and the Gemini API. The app could not have
+worked on a real device.
+**Fix:** added `INTERNET` and `ACCESS_NETWORK_STATE`.
+
+### 2026-07-24 — artifact class check reported a false failure
+**Cause:** `unzip -p … | grep -qa` under `set -o pipefail`. `grep -q` exits on first match,
+closing the pipe; `unzip` dies of SIGPIPE (141); pipefail propagates that, so a **successful
+match** looked like a failed pipeline.
+**Fix:** extract each dex to a temp file and grep the file. Applies to any
+`producer | grep -q` under pipefail.
+
+### 2026-07-24 — 157 compile errors in the unit and instrumented test suites
+**Cause:** the suites import `com.example.data.models.*` (no such package) and
+`com.example.data.MainViewModel` (wrong package — it is `com.example.ui.MainViewModel`), and
+call ~50 repository methods that do not exist (`createTripOffer`, `postTripOffer`,
+`getTripOffers`, …). They were written against an imagined API and never compiled, so their
+green PR descriptions meant nothing.
+**Status:** unresolved — see the repo's open follow-ups. They cannot be "fixed"; they need
+rewriting against the real API. `ExampleRobolectricTest` was a genuine test and only needed
+its `R` import updated for the new namespace.
+**Lesson:** a test suite that has never been executed is not evidence of anything. The
+`ci.yml` unit-test job exists so this cannot happen again.
+
+### 2026-07-24 — `sdkmanager: command not found` (exit 127) on `ubuntu-latest`
+**Cause:** the runner image ships an Android SDK and sets `ANDROID_HOME`, but `sdkmanager`
+itself lives in `cmdline-tools` and is **not on `PATH`**.
+**Fix:** use `android-actions/setup-android@v3` with
+`packages: 'platforms;android-36 build-tools;36.0.0'` instead of calling `sdkmanager` directly.
+
+### 2026-07-24 — a workflow run appears with **zero jobs**, titled by filename instead of workflow name
+**Cause:** the workflow file failed validation, so GitHub could not read its `name:`. The
+specific error: **the `secrets` context is not permitted in `if:` conditions.** Steps had
+`if: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON != '' }}`.
+**Fix:** `secrets` *is* allowed in `jobs.<id>.env`. Hoist the presence checks to job-level env
+flags and gate steps on those:
+```yaml
+env:
+  HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+# then, on a step:
+if: env.HAS_KEYSTORE == 'true'
+```
+**Recognising it:** a run with 0 jobs and the file path as its title is *always* a workflow
+validation error, never a build failure. There are no logs to read — lint the file instead.
+
+### 2026-07-24 — `got unexpected character '+' while lexing expression`
+**Cause:** `${{ 1000 + github.run_number }}`. **GitHub Actions expressions have no arithmetic
+operators.** There is no `+`, `-`, `*` or `/`.
+**Fix:** compute in the shell and export through `$GITHUB_ENV`:
+```yaml
+- run: echo "VERSION_CODE=$(( 1000 + GITHUB_RUN_NUMBER ))" >> "$GITHUB_ENV"
+```
+
+### 2026-07-24 — `java.lang.UnsupportedOperationException at DefaultSdkProvider.java:170` in Robolectric tests
+**Symptom:** `ExampleRobolectricTest > classMethod FAILED` and `GreetingScreenshotTest >
+classMethod FAILED`, both with a bare `UnsupportedOperationException` and no useful message.
+Passed locally, failed on CI — the tell-tale sign of a toolchain difference, not a code bug.
+**Cause:** Robolectric requires a minimum JDK *per Android API level*, and throws
+`"Android SDK %d requires Java %d (have Java %d)"`. Its table:
+
+| Android API | Minimum JDK |
+|---|---|
+| 33 and below | 8–9 |
+| 34 (Android 14) | 17 |
+| 35 (Android 15) | 17 |
+| **36 (Android 16)** | **21** |
+
+`compileSdk`/`targetSdk` are 36 and both tests use `@Config(sdk = [36])`, so JDK 21 is
+required. CI was pinned to JDK 17; the container happened to have JDK 21, which is exactly why
+it reproduced only on CI.
+**Fix:** `java-version: '21'` in every workflow. `compileOptions` stays at Java 11 — that is the
+bytecode target and is unrelated to the JDK running Gradle.
+**Lesson:** when something passes locally and fails on CI, diff the *toolchain* before the code.
+Keep the CI JDK and the local JDK equal.
+
+> **Lint workflows before pushing.** All three failures above were caught in seconds by
+> [`actionlint`](https://github.com/rhysd/actionlint), versus a ~2 minute CI round trip each:
+> ```bash
+> curl -sSfL -o - https://github.com/rhysd/actionlint/releases/download/v1.7.7/actionlint_1.7.7_linux_amd64.tar.gz \
+>   | tar xz actionlint && ./actionlint -no-color -oneline
+> ```
+> It understands the context-availability rules and the expression grammar, so it catches
+> exactly the class of error that produces an unreadable zero-job run.
+
+---
+
+## 8. Pre-flight checklist before merging to `main`
+
+- [ ] `actionlint` clean, if any workflow file changed
+- [ ] `ci.yml` green on the PR
+- [ ] `verify-app-classes.sh` passed (it runs inside `ci.yml`)
+- [ ] `versionCode` will exceed the highest already on the internal track
+- [ ] No new JVM-only APIs in `shared/src/commonMain` — `:shared:compileCommonMainKotlinMetadata` passes
+- [ ] Secrets referenced by any new workflow step actually exist in repo settings
+- [ ] If the release workflow file was renamed, the `run_number` offset was bumped
+
+## 9. Rollback
+
+- **Play:** the API cannot un-publish. Halt or discard the release in Play Console → Testing →
+  Internal testing. Then ship a forward fix with a higher `versionCode`.
+- **TestFlight:** expire the build in App Store Connect.
+- Never attempt to reuse a version number; both stores reject it permanently.

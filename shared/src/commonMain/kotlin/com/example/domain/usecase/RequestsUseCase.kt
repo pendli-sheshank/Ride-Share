@@ -1,5 +1,7 @@
 package com.example.domain.usecase
 
+import kotlinx.datetime.Clock
+
 import com.example.data.RideRequest
 import com.example.domain.repository.SawaariRepository
 import kotlinx.coroutines.flow.StateFlow
@@ -31,7 +33,7 @@ class RequestsUseCase(private val repository: SawaariRepository) {
         if (seatsNeeded <= 0) {
             return Result.failure(IllegalArgumentException("Seats needed must be positive"))
         }
-        if (departureTime <= System.currentTimeMillis()) {
+        if (departureTime <= Clock.System.now().toEpochMilliseconds()) {
             return Result.failure(IllegalArgumentException("Departure time must be in the future"))
         }
 

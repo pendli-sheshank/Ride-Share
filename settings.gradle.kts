@@ -26,4 +26,5 @@ rootProject.name = "SawaariShare"
 
 include(":shared")
 include(":app")
-include(":iosApp")
+// :iosApp was a Gradle module with no sources that only duplicated :shared's iOS targets.
+// The iOS app is an Xcode project under iosApp/, linking Shared.framework from :shared.

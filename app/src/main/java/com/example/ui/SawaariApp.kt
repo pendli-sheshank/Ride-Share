@@ -33,6 +33,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -52,6 +53,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -62,7 +64,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.compose.ui.window.Dialog
-import com.example.R
+import com.aistudio.sawaarishare.R
 import com.example.data.*
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -186,11 +188,11 @@ fun vibrateSuccess(context: Context) {
         if (vibrator?.hasVibrator() == true) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 vibrator.vibrate(
-                    VibrationEffect.createWaveform(longArrayOf(0, 30, 30, 100))
+                    VibrationEffect.createWaveform(longArrayOf(0, 30, 30, 100), -1)
                 )
             } else {
                 @Suppress("DEPRECATION")
-                vibrator.vibrate(longArrayOf(0, 30, 30, 100))
+                vibrator.vibrate(longArrayOf(0, 30, 30, 100), -1)
             }
         }
     } catch (e: Exception) {
@@ -840,7 +842,7 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
                         val success = viewModel.uploadProfilePicture(user.id, uri)
                         uploadingProfilePicture = false
                         if (success) {
-                            selectedAvatarUrl = user.profilePictureUrl
+                            selectedAvatarUrl = viewModel.currentUser.value?.avatarUrl ?: ""
                             vibrate(context, 50)
                             Toast.makeText(context, "Profile picture updated", Toast.LENGTH_SHORT).show()
                         } else {
@@ -5020,7 +5022,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
 
         // Coordination state
         val matchMessages = existingMatch?.let { match ->
-            remember(match.id) { viewModel.repository.messages.value.filter { it.matchId == match.id }.takeLast(3) }
+            remember(match.id) { viewModel.repository.allMessages.value.filter { it.matchId == match.id }.takeLast(3) }
         } ?: emptyList()
 
         val hostUser = remember(offer.hostId) { viewModel.getUserPublicProfile(offer.hostId) }
@@ -5253,7 +5255,6 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                 }
                             }
                         }
-                    }
                     }
                 }
 
@@ -5772,6 +5773,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                             Icon(imageVector = Icons.Default.Block, contentDescription = "Block Rider", tint = Color.Red.copy(alpha = 0.6f))
                         }
                     }
+                }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
