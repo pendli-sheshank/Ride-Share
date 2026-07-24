@@ -2,6 +2,7 @@ package com.example.domain.usecase
 
 import com.example.data.User
 import com.example.domain.repository.SawaariRepository
+import kotlinx.coroutines.flow.StateFlow
 
 class AuthenticationUseCase(private val repository: SawaariRepository) {
 

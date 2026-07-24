@@ -1,5 +1,7 @@
 package com.example.domain.usecase
 
+import kotlinx.datetime.Clock
+
 import com.example.data.TripOffer
 import com.example.domain.repository.SawaariRepository
 import kotlinx.coroutines.flow.StateFlow
@@ -32,7 +34,7 @@ class TripsUseCase(private val repository: SawaariRepository) {
         if (costPerRider < 0) {
             return Result.failure(IllegalArgumentException("Cost per rider cannot be negative"))
         }
-        if (departureTime <= System.currentTimeMillis()) {
+        if (departureTime <= Clock.System.now().toEpochMilliseconds()) {
             return Result.failure(IllegalArgumentException("Departure time must be in the future"))
         }
 
