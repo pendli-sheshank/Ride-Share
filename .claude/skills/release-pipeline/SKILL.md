@@ -196,6 +196,12 @@ build inputs and the configuration cache stays valid.
 ./gradlew :shared:compileCommonMainKotlinMetadata     # best proxy for "will iOS compile?"
 ```
 
+**Both optional-input states must be tested, not just one:**
+```bash
+env KEYSTORE_PATH= ./gradlew :app:bundleRelease    # empty  -> unsigned AAB, must SUCCEED
+./gradlew :app:bundleRelease                       # absent -> unsigned AAB, must SUCCEED
+```
+
 Release path with a throwaway key (never use this artifact for anything):
 ```bash
 keytool -genkeypair -v -keystore /tmp/test.jks -alias upload -keyalg RSA -keysize 2048 \
@@ -347,6 +353,35 @@ it reproduced only on CI.
 bytecode target and is unrelated to the JDK running Gradle.
 **Lesson:** when something passes locally and fails on CI, diff the *toolchain* before the code.
 Keep the CI JDK and the local JDK equal.
+
+### 2026-07-24 — `Cannot convert '' to File.` on the first real release run against `main`
+**Symptom:** `Release Android` failed in ~1 minute at the *Build release bundle* step, before any
+task ran. The `--stacktrace` output is all `BuildScriptProcessor` / `LifecycleProjectEvaluator` /
+`prepareProjects` frames, which is the signature of a **configuration-time** failure while
+evaluating `app/build.gradle.kts` — not a task failure.
+**Cause:** the workflow computes the keystore path conditionally:
+```yaml
+KEYSTORE_PATH: ${{ env.HAS_KEYSTORE == 'true' && format('{0}/upload.jks', runner.temp) || '' }}
+```
+With no keystore secret this sets the variable to an **empty string**, not to nothing. Gradle's
+`providers.environmentVariable(...).orNull` returns `""` for a set-but-empty variable — it only
+returns `null` when the variable is genuinely absent. So the `!= null` guard passed and
+`file("")` threw.
+**Fix:** treat blank as absent in `app/build.gradle.kts`:
+```kotlin
+providers.environmentVariable("KEYSTORE_PATH").orNull?.takeIf { it.isNotBlank() }
+```
+Also gate the publish step on `HAS_KEYSTORE` as well as `HAS_PLAY_SERVICE_ACCOUNT`, so an
+unsigned bundle is never offered to Play.
+**Lesson — this is the one that got through:** the local verification had only ever exercised
+*keystore present* (real path) and *keystore variable absent* (plain `assembleDebug`). CI hit a
+third state, *present-but-empty*, that no local run had. **When a build input is optional,
+test the empty string, not just set-vs-unset** — a conditional YAML expression produces empty,
+never absent.
+```bash
+# the check that would have caught it
+env KEYSTORE_PATH= ./gradlew :app:bundleRelease   # must succeed, producing an unsigned AAB
+```
 
 > **Lint workflows before pushing.** All three failures above were caught in seconds by
 > [`actionlint`](https://github.com/rhysd/actionlint), versus a ~2 minute CI round trip each:
