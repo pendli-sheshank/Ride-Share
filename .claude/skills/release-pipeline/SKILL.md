@@ -326,6 +326,28 @@ operators.** There is no `+`, `-`, `*` or `/`.
 - run: echo "VERSION_CODE=$(( 1000 + GITHUB_RUN_NUMBER ))" >> "$GITHUB_ENV"
 ```
 
+### 2026-07-24 — `java.lang.UnsupportedOperationException at DefaultSdkProvider.java:170` in Robolectric tests
+**Symptom:** `ExampleRobolectricTest > classMethod FAILED` and `GreetingScreenshotTest >
+classMethod FAILED`, both with a bare `UnsupportedOperationException` and no useful message.
+Passed locally, failed on CI — the tell-tale sign of a toolchain difference, not a code bug.
+**Cause:** Robolectric requires a minimum JDK *per Android API level*, and throws
+`"Android SDK %d requires Java %d (have Java %d)"`. Its table:
+
+| Android API | Minimum JDK |
+|---|---|
+| 33 and below | 8–9 |
+| 34 (Android 14) | 17 |
+| 35 (Android 15) | 17 |
+| **36 (Android 16)** | **21** |
+
+`compileSdk`/`targetSdk` are 36 and both tests use `@Config(sdk = [36])`, so JDK 21 is
+required. CI was pinned to JDK 17; the container happened to have JDK 21, which is exactly why
+it reproduced only on CI.
+**Fix:** `java-version: '21'` in every workflow. `compileOptions` stays at Java 11 — that is the
+bytecode target and is unrelated to the JDK running Gradle.
+**Lesson:** when something passes locally and fails on CI, diff the *toolchain* before the code.
+Keep the CI JDK and the local JDK equal.
+
 > **Lint workflows before pushing.** All three failures above were caught in seconds by
 > [`actionlint`](https://github.com/rhysd/actionlint), versus a ~2 minute CI round trip each:
 > ```bash

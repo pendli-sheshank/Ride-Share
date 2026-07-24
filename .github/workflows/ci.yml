@@ -22,10 +22,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # JDK 21, not 17: Robolectric maps Android API 36 to a Java 21 requirement and throws
+      # UnsupportedOperationException ("Android SDK 36 requires Java 21") on anything lower.
+      # compileSdk/targetSdk are 36 and the Robolectric tests use @Config(sdk = [36]).
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
       - uses: gradle/actions/setup-gradle@v4
         with:
@@ -62,10 +65,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # JDK 21, not 17: Robolectric maps Android API 36 to a Java 21 requirement and throws
+      # UnsupportedOperationException ("Android SDK 36 requires Java 21") on anything lower.
+      # compileSdk/targetSdk are 36 and the Robolectric tests use @Config(sdk = [36]).
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
       - uses: gradle/actions/setup-gradle@v4
 
