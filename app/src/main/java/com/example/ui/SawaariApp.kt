@@ -2,7 +2,13 @@
 package com.example.ui
 
 import android.content.Intent
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.widget.Toast
+import android.content.Context
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -35,6 +41,8 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.animation.core.*
+import androidx.compose.animation.core.EaseInOutQuad
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
@@ -71,6 +79,174 @@ val SawaariDivider = Color(0xFFE2E8F0)
 
 val SawaariTextPrimary = Color(0xFF0F172A)
 val SawaariTextSecondary = Color(0xFF64748B)
+
+// --- Material 3 Animation Utilities ---
+
+@Composable
+fun AnimatedButtonScale(
+    isPressed: Boolean,
+    enabled: Boolean = true
+): Float {
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed && enabled) 0.95f else 1f,
+        animationSpec = spring(dampingRatio = 0.8f, stiffness = 400f),
+        label = "button_scale"
+    )
+    return scale
+}
+
+@Composable
+fun rememberButtonPressState(): MutableState<Boolean> {
+    return remember { mutableStateOf(false) }
+}
+
+fun Modifier.withButtonScale(scale: Float): Modifier {
+    return this.graphicsLayer { scaleX = scale; scaleY = scale }
+}
+
+@Composable
+fun SawaariLoadingSpinner(
+    modifier: Modifier = Modifier,
+    size: Dp = 48.dp
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "spinner")
+    val rotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "rotation"
+    )
+
+    Box(
+        modifier = modifier
+            .size(size)
+            .graphicsLayer { rotationZ = rotation }
+    ) {
+        CircularProgressIndicator(
+            modifier = Modifier.fillMaxSize(),
+            color = SawaariSaffron,
+            strokeWidth = 4.dp
+        )
+    }
+}
+
+@Composable
+fun ShimmerSkeleton(
+    modifier: Modifier = Modifier
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "shimmer")
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.9f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = EaseInOutQuad),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "shimmer_alpha"
+    )
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(12.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(SawaariDivider.copy(alpha = alpha))
+    )
+}
+
+// --- Haptic Feedback Utilities ---
+
+fun vibrate(context: Context, duration: Long = 50) {
+    try {
+        val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        if (vibrator?.hasVibrator() == true) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator.vibrate(
+                    VibrationEffect.createOneShot(
+                        duration,
+                        VibrationEffect.DEFAULT_AMPLITUDE
+                    )
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(duration)
+            }
+        }
+    } catch (e: Exception) {
+        // Silently fail if vibrator not available
+    }
+}
+
+fun vibrateSuccess(context: Context) {
+    try {
+        val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        if (vibrator?.hasVibrator() == true) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator.vibrate(
+                    VibrationEffect.createWaveform(longArrayOf(0, 30, 30, 100))
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(longArrayOf(0, 30, 30, 100))
+            }
+        }
+    } catch (e: Exception) {
+        // Silently fail if vibrator not available
+    }
+}
+
+@Composable
+fun ExpandableCard(
+    title: String,
+    isExpanded: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .animateContentSize(
+                animationSpec = spring(
+                    dampingRatio = 0.8f,
+                    stiffness = 500f
+                )
+            )
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onToggle() },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(title, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = SawaariTextPrimary)
+                Icon(
+                    imageVector = if (isExpanded)
+                        Icons.Default.ExpandLess
+                    else
+                        Icons.Default.ExpandMore,
+                    contentDescription = "Toggle",
+                    modifier = Modifier.rotate(if (isExpanded) 0f else 180f)
+                )
+            }
+
+            AnimatedVisibility(
+                visible = isExpanded,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                Column(modifier = Modifier.padding(top = 8.dp)) {
+                    content()
+                }
+            }
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -109,19 +285,39 @@ fun SawaariApp(viewModel: MainViewModel = viewModel()) {
                 startDestination = if (currentUser == null) "login" else "dashboard",
                 modifier = Modifier.fillMaxSize()
             ) {
-                composable("login") {
+                composable(
+                    "login",
+                    enterTransition = { fadeIn() + slideInHorizontally { 1000 } },
+                    exitTransition = { fadeOut() + slideOutHorizontally { -1000 } }
+                ) {
                     EmailPasswordLoginScreen(viewModel, navController)
                 }
-                composable("profile_setup") {
+                composable(
+                    "profile_setup",
+                    enterTransition = { fadeIn() + slideInHorizontally { 1000 } },
+                    exitTransition = { fadeOut() + slideOutHorizontally { -1000 } }
+                ) {
                     ProfileSetupScreen(viewModel, navController)
                 }
-                composable("dashboard") {
+                composable(
+                    "dashboard",
+                    enterTransition = { fadeIn() + slideInHorizontally { 1000 } },
+                    exitTransition = { fadeOut() + slideOutHorizontally { -1000 } }
+                ) {
                     DashboardScreen(viewModel, navController)
                 }
-                composable("post_offer") {
+                composable(
+                    "post_offer",
+                    enterTransition = { fadeIn() + slideInHorizontally { 1000 } },
+                    exitTransition = { fadeOut() + slideOutHorizontally { -1000 } }
+                ) {
                     PostOfferScreen(viewModel, navController)
                 }
-                composable("post_request") {
+                composable(
+                    "post_request",
+                    enterTransition = { fadeIn() + slideInHorizontally { 1000 } },
+                    exitTransition = { fadeOut() + slideOutHorizontally { -1000 } }
+                ) {
                     PostRequestScreen(viewModel, navController)
                 }
                 composable(
@@ -129,23 +325,41 @@ fun SawaariApp(viewModel: MainViewModel = viewModel()) {
                     arguments = listOf(
                         navArgument("id") { type = NavType.StringType },
                         navArgument("type") { type = NavType.StringType }
-                    )
+                    ),
+                    enterTransition = { fadeIn() + slideInHorizontally { 1000 } },
+                    exitTransition = { fadeOut() + slideOutHorizontally { -1000 } }
                 ) { backStackEntry ->
                     val id = backStackEntry.arguments?.getString("id") ?: ""
                     val type = backStackEntry.arguments?.getString("type") ?: ""
                     TripDetailScreen(id, type, viewModel, navController)
                 }
-                composable("chat/{matchId}") { backStackEntry ->
+                composable(
+                    "chat/{matchId}",
+                    enterTransition = { fadeIn() + slideInHorizontally { 1000 } },
+                    exitTransition = { fadeOut() + slideOutHorizontally { -1000 } }
+                ) { backStackEntry ->
                     val matchId = backStackEntry.arguments?.getString("matchId") ?: ""
                     ChatScreen(matchId, viewModel, navController)
                 }
-                composable("profile") {
+                composable(
+                    "profile",
+                    enterTransition = { fadeIn() + slideInHorizontally { 1000 } },
+                    exitTransition = { fadeOut() + slideOutHorizontally { -1000 } }
+                ) {
                     ProfileScreen(viewModel, navController)
                 }
-                composable("blocked_list") {
+                composable(
+                    "blocked_list",
+                    enterTransition = { fadeIn() + slideInHorizontally { 1000 } },
+                    exitTransition = { fadeOut() + slideOutHorizontally { -1000 } }
+                ) {
                     BlockedListScreen(viewModel, navController)
                 }
-                composable("host_dashboard") {
+                composable(
+                    "host_dashboard",
+                    enterTransition = { fadeIn() + slideInHorizontally { 1000 } },
+                    exitTransition = { fadeOut() + slideOutHorizontally { -1000 } }
+                ) {
                     HostDashboard(viewModel, navController)
                 }
             }
@@ -220,6 +434,7 @@ fun EmailPasswordLoginScreen(viewModel: MainViewModel, navController: NavControl
     var isSignUpMode by remember { mutableStateOf(false) }
     var passwordVisible by remember { mutableStateOf(false) }
     var confirmPasswordVisible by remember { mutableStateOf(false) }
+    var authButtonPressed by remember { mutableStateOf(false) }
     val isFirebaseEnabled = viewModel.repository.isFirebaseEnabled
     val context = LocalContext.current
 
@@ -396,32 +611,47 @@ fun EmailPasswordLoginScreen(viewModel: MainViewModel, navController: NavControl
                     )
                 }
 
+                val authScale = AnimatedButtonScale(authButtonPressed)
                 Button(
                     onClick = {
+                        authButtonPressed = true
+                        vibrate(context, 50)
                         val emailTrimmed = email.trim()
                         val passTrimmed = password.trim()
                         if (emailTrimmed.isEmpty() || passTrimmed.isEmpty()) {
+                            authButtonPressed = false
+                            vibrate(context, 100)
                             viewModel.setError("Email and password cannot be empty")
                             return@Button
                         }
                         if (!emailTrimmed.contains("@") || !emailTrimmed.contains(".")) {
+                            authButtonPressed = false
+                            vibrate(context, 100)
                             viewModel.setError("Please enter a valid email address.")
                             return@Button
                         }
                         if (isSignUpMode) {
                             if (passTrimmed.length < 6) {
+                                authButtonPressed = false
+                                vibrate(context, 100)
                                 viewModel.setError("Password must be at least 6 characters")
                                 return@Button
                             }
                             if (passTrimmed != confirmPassword.trim()) {
+                                authButtonPressed = false
+                                vibrate(context, 100)
                                 viewModel.setError("Passwords do not match")
                                 return@Button
                             }
                             viewModel.signUpWithEmail(emailTrimmed, passTrimmed) { isNewUser ->
+                                authButtonPressed = false
+                                vibrateSuccess(context)
                                 // Navigates automatically based on global StateFlow observer
                             }
                         } else {
                             viewModel.loginWithEmail(emailTrimmed, passTrimmed) { isNewUser ->
+                                authButtonPressed = false
+                                vibrateSuccess(context)
                                 // Navigates automatically based on global StateFlow observer
                             }
                         }
@@ -429,7 +659,8 @@ fun EmailPasswordLoginScreen(viewModel: MainViewModel, navController: NavControl
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(54.dp)
-                        .testTag("auth_submit_button"),
+                        .testTag("auth_submit_button")
+                        .withButtonScale(authScale),
                     colors = ButtonDefaults.buttonColors(containerColor = SawaariSaffron),
                     shape = RoundedCornerShape(12.dp)
                 ) {
@@ -468,6 +699,7 @@ fun EmailPasswordLoginScreen(viewModel: MainViewModel, navController: NavControl
 @Composable
 fun InviteCodeScreen(viewModel: MainViewModel, navController: NavController) {
     var inviteCode by remember { mutableStateOf("") }
+    var redeemButtonPressed by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     Column(
@@ -542,10 +774,13 @@ fun InviteCodeScreen(viewModel: MainViewModel, navController: NavController) {
 
         Spacer(modifier = Modifier.height(24.dp))
 
+        val redeemScale = AnimatedButtonScale(redeemButtonPressed)
         Button(
             onClick = {
                 if (inviteCode.isNotEmpty()) {
+                    redeemButtonPressed = true
                     viewModel.redeemInviteCode(inviteCode) {
+                        redeemButtonPressed = false
                         // Routing handled by state flow
                     }
                 }
@@ -553,7 +788,8 @@ fun InviteCodeScreen(viewModel: MainViewModel, navController: NavController) {
             modifier = Modifier
                 .fillMaxWidth()
                 .height(54.dp)
-                .testTag("redeem_invite_button"),
+                .testTag("redeem_invite_button")
+                .withButtonScale(redeemScale),
             colors = ButtonDefaults.buttonColors(containerColor = SawaariSaffron),
             shape = RoundedCornerShape(12.dp)
         ) {
@@ -591,6 +827,35 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
     var uploadingProfilePicture by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            uploadingProfilePicture = true
+            coroutineScope.launch {
+                try {
+                    val user = viewModel.currentUser.value
+                    if (user != null) {
+                        val success = viewModel.uploadProfilePicture(user.id, uri)
+                        uploadingProfilePicture = false
+                        if (success) {
+                            selectedAvatarUrl = user.profilePictureUrl
+                            vibrate(context, 50)
+                            Toast.makeText(context, "Profile picture updated", Toast.LENGTH_SHORT).show()
+                        } else {
+                            vibrate(context, 100)
+                            Toast.makeText(context, "Failed to upload picture", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                } catch (e: Exception) {
+                    uploadingProfilePicture = false
+                    vibrate(context, 100)
+                    Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -634,6 +899,9 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(bottom = 24.dp)
+                    .clickable(enabled = !uploadingProfilePicture) {
+                        imagePickerLauncher.launch("image/*")
+                    }
             ) {
                 Column(
                     modifier = Modifier
@@ -649,7 +917,15 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
                     )
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    if (selectedAvatarUrl.isNotEmpty()) {
+                    if (uploadingProfilePicture) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(40.dp),
+                            color = SawaariSaffron,
+                            strokeWidth = 3.dp
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Uploading...", color = SawaariSaffron, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    } else if (selectedAvatarUrl.isNotEmpty()) {
                         StudentAvatar(
                             avatarUrl = selectedAvatarUrl,
                             name = name.ifEmpty { "?" },
@@ -1821,7 +2097,7 @@ fun HostDashboard(viewModel: MainViewModel, navController: NavController) {
 fun HostStatCard(
     label: String,
     value: String,
-    icon: androidx.compose.material.icons.Icons,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -1928,12 +2204,13 @@ fun PassengerManagementCard(
                         }
                     }
                 }
-                Icon(
-                    imageVector = Icons.Default.ChevronRight,
-                    contentDescription = "More",
-                    tint = SawaariLightGray,
-                    modifier = Modifier.clickable { onViewProfileClick() }
-                )
+                IconButton(onClick = onViewProfileClick) {
+                    Icon(
+                        imageVector = Icons.Default.ChevronRight,
+                        contentDescription = "View profile",
+                        tint = SawaariLightGray
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -3152,6 +3429,8 @@ fun TripOfferCard(
 ) {
     val formatter = remember { SimpleDateFormat("EEE, d MMM • h:mm a", Locale.US) }
     val dateStr = formatter.format(Date(offer.departureTime))
+    var joinButtonPressed by remember { mutableStateOf(false) }
+    val joinScale = AnimatedButtonScale(joinButtonPressed)
 
     Card(
         onClick = onClick,
@@ -3314,12 +3593,18 @@ fun TripOfferCard(
 
                             // Primary CTA / Status Pill
                             if (isJoinable && onJoinClick != null) {
+                                val context = LocalContext.current
                                 Button(
-                                    onClick = onJoinClick,
+                                    onClick = {
+                                        joinButtonPressed = true
+                                        vibrate(context, 50)
+                                        onJoinClick()
+                                    },
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(36.dp)
-                                        .testTag("card_join_button_${offer.id}"),
+                                        .testTag("card_join_button_${offer.id}")
+                                        .withButtonScale(joinScale),
                                     colors = ButtonDefaults.buttonColors(containerColor = SawaariSaffron),
                                     shape = RoundedCornerShape(8.dp),
                                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
@@ -4725,6 +5010,14 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
         var isHostCardExpanded by remember { mutableStateOf(false) }
         var showDriverModal by remember { mutableStateOf(false) }
 
+        // Animation state for action buttons
+        var completeButtonPressed by remember { mutableStateOf(false) }
+        var cancelButtonPressed by remember { mutableStateOf(false) }
+        var joinButtonPressed by remember { mutableStateOf(false) }
+        val completeScale = AnimatedButtonScale(completeButtonPressed)
+        val cancelScale = AnimatedButtonScale(cancelButtonPressed)
+        val joinScale = AnimatedButtonScale(joinButtonPressed)
+
         // Coordination state
         val matchMessages = existingMatch?.let { match ->
             remember(match.id) { viewModel.repository.messages.value.filter { it.matchId == match.id }.takeLast(3) }
@@ -4961,6 +5254,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                             }
                         }
                     }
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -5144,12 +5438,16 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                 if (offer.status != "completed") {
                                     Button(
                                         onClick = {
+                                            completeButtonPressed = true
+                                            vibrate(context, 50)
                                             viewModel.updateTripOfferStatus(offer.id, "completed") {
+                                                completeButtonPressed = false
+                                                vibrateSuccess(context)
                                                 Toast.makeText(context, "Sawaari completed!", Toast.LENGTH_SHORT).show()
                                             }
                                         },
                                         colors = ButtonDefaults.buttonColors(containerColor = SawaariEmerald),
-                                        modifier = Modifier.weight(1f).testTag("host_status_completed_btn")
+                                        modifier = Modifier.weight(1f).testTag("host_status_completed_btn").withButtonScale(completeScale)
                                     ) {
                                         Text("Complete", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                     }
@@ -5157,12 +5455,15 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                 if (offer.status != "cancelled") {
                                     Button(
                                         onClick = {
+                                            cancelButtonPressed = true
+                                            vibrate(context, 50)
                                             viewModel.updateTripOfferStatus(offer.id, "cancelled") {
+                                                cancelButtonPressed = false
                                                 Toast.makeText(context, "Sawaari cancelled!", Toast.LENGTH_SHORT).show()
                                             }
                                         },
                                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
-                                        modifier = Modifier.weight(1f).testTag("host_status_cancelled_btn")
+                                        modifier = Modifier.weight(1f).testTag("host_status_cancelled_btn").withButtonScale(cancelScale)
                                     ) {
                                         Text("Cancel", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                     }
@@ -5236,14 +5537,19 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                     // Show Direct Join Button
                                     Button(
                                         onClick = {
+                                            joinButtonPressed = true
+                                            vibrate(context, 50)
                                             viewModel.joinTripOfferDirect(offer.id) {
+                                                joinButtonPressed = false
+                                                vibrateSuccess(context)
                                                 Toast.makeText(context, "Successfully joined Sawaari!", Toast.LENGTH_LONG).show()
                                             }
                                         },
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .height(54.dp)
-                                            .testTag("direct_join_button"),
+                                            .testTag("direct_join_button")
+                                            .withButtonScale(joinScale),
                                         colors = ButtonDefaults.buttonColors(containerColor = SawaariSaffron),
                                         shape = RoundedCornerShape(12.dp)
                                     ) {
@@ -5433,8 +5739,15 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                     modifier = Modifier
                         .fillMaxWidth()
                         .border(1.dp, SawaariDivider, RoundedCornerShape(16.dp))
+                        .animateContentSize(
+                            animationSpec = spring(
+                                dampingRatio = 0.8f,
+                                stiffness = 500f
+                            )
+                        )
                 ) {
-                    Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column {
+                        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
                                 .size(48.dp)

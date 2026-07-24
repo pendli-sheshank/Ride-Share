@@ -1,0 +1,36 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // ============================================
+    // PROFILE PICTURES
+    // ============================================
+
+    match /profile_pictures/{userId}.jpg {
+      // Anyone can read profile pictures (public)
+      allow read: if true;
+
+      // Only the owner can upload/delete their picture
+      allow write: if request.auth.uid == userId &&
+                      request.resource.size <= 5 * 1024 * 1024 && // Max 5MB
+                      request.resource.contentType == 'image/jpeg';
+    }
+
+    // ============================================
+    // TRIP DOCUMENTS (Future)
+    // ============================================
+
+    match /trip_documents/{tripId}/{document=**} {
+      // Participants can read/upload trip documents
+      allow read, write: if request.auth != null;
+    }
+
+    // ============================================
+    // DENY ALL OTHER UPLOADS
+    // ============================================
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

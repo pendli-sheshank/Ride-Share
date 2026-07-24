@@ -87,6 +87,9 @@ class SawaariRepository(private val context: Context) {
     private val _notifications = MutableStateFlow<List<NotificationAlert>>(emptyList())
     val notifications: StateFlow<List<NotificationAlert>> = _notifications.asStateFlow()
 
+    private val _allMessages = MutableStateFlow<List<Message>>(emptyList())
+    val allMessages: StateFlow<List<Message>> = _allMessages.asStateFlow()
+
     // --- Adapters for local storage ---
     private val userListAdapter = moshi.adapter<List<User>>(Types.newParameterizedType(List::class.java, User::class.java))
     private val inviteListAdapter = moshi.adapter<List<Invite>>(Types.newParameterizedType(List::class.java, Invite::class.java))
@@ -157,6 +160,7 @@ class SawaariRepository(private val context: Context) {
         _rideRequests.value = loadList<RideRequest>("ride_requests.json", rideRequestListAdapter).associateBy { it.id }
         _tripMatches.value = loadList<TripMatch>("trip_matches.json", tripMatchListAdapter).associateBy { it.id }
         _messages.value = loadList<Message>("messages.json", messageListAdapter).associateBy { it.id }
+        _allMessages.value = _messages.value.values.toList()
         _ratings.value = loadList<Rating>("ratings.json", ratingListAdapter).associateBy { it.id }
         _blocks.value = loadList<Block>("blocks.json", blockListAdapter).associateBy { it.id }
         _credentials.value = loadList<LocalCredential>("credentials.json", localCredentialAdapter).associateBy { it.email.lowercase() }
@@ -358,27 +362,30 @@ class SawaariRepository(private val context: Context) {
 
         // Listen to notifications in real-time
         try {
-            val notificationsListener = firebaseFirestore?.collection("notifications")?.addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    Log.e("SawaariShare", "Listen to notifications failed: ${error.message}")
-                    _isConnected.value = false
-                    return@addSnapshotListener
-                }
-                _isConnected.value = true
-                if (snapshot != null) {
-                    val currentUserId = _currentUser.value?.id ?: ""
-                    val alerts = snapshot.documents
-                        .mapNotNull { doc -> doc.toNotificationAlertSafe() }
-                        .filter { it.userId == currentUserId || it.userId.isEmpty() }
-                        .sortedByDescending { it.timestamp }
-                    if (alerts.isNotEmpty() || snapshot.isEmpty) {
-                        _notifications.value = alerts
-                        saveList("notifications.json", _notifications.value, notificationListAdapter)
-                        _lastSyncTime.value = System.currentTimeMillis()
+            val currentUserId = _currentUser.value?.id ?: ""
+            if (currentUserId.isNotEmpty()) {
+                val notificationsListener = firebaseFirestore?.collection("notifications")
+                    ?.whereEqualTo("userId", currentUserId)
+                    ?.addSnapshotListener { snapshot, error ->
+                        if (error != null) {
+                            Log.e("SawaariShare", "Listen to notifications failed: ${error.message}")
+                            _isConnected.value = false
+                            return@addSnapshotListener
+                        }
+                        _isConnected.value = true
+                        if (snapshot != null) {
+                            val alerts = snapshot.documents
+                                .mapNotNull { doc -> doc.toNotificationAlertSafe() }
+                                .sortedByDescending { it.timestamp }
+                            if (alerts.isNotEmpty() || snapshot.isEmpty) {
+                                _notifications.value = alerts
+                                saveList("notifications.json", _notifications.value, notificationListAdapter)
+                                _lastSyncTime.value = System.currentTimeMillis()
+                            }
+                        }
                     }
-                }
+                if (notificationsListener != null) listenerRegistrations.add(notificationsListener)
             }
-            if (notificationsListener != null) listenerRegistrations.add(notificationsListener)
         } catch (e: Exception) {
             Log.e("SawaariShare", "Failed to register notifications listener: ${e.message}")
         }
@@ -1468,8 +1475,8 @@ class SawaariRepository(private val context: Context) {
             .sortedBy { it.departureTime }
     }
 
-    fun calculateCostSplit(costPerRider: Double, riders: Int): Double {
-        return costPerRider * riders
+    fun calculateCostSplit(totalCost: Double, riders: Int): Double {
+        return if (riders > 0) totalCost / riders else 0.0
     }
 
     fun validateTripOffer(offer: TripOffer): Result<Unit> {
