@@ -13,7 +13,12 @@ plugins {
 // without any of it being committed. See .github/workflows/release.yml and
 // .claude/skills/release-pipeline.md. `providers.environmentVariable` is used rather than
 // `System.getenv` so the reads are declared inputs and the configuration cache stays valid.
-val releaseKeystorePath: String? = providers.environmentVariable("KEYSTORE_PATH").orNull
+// takeIf(isNotBlank) is load-bearing: a workflow that computes this value conditionally sets
+// the variable to an EMPTY STRING rather than leaving it unset, and `orNull` then returns ""
+// rather than null. Without this, the block below runs with a blank path and file("") throws
+// while the project is being evaluated — failing the build before any task runs.
+val releaseKeystorePath: String? =
+  providers.environmentVariable("KEYSTORE_PATH").orNull?.takeIf { it.isNotBlank() }
 
 android {
   namespace = "com.aistudio.sawaarishare"

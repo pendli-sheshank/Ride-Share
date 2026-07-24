@@ -117,7 +117,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Publish to Play internal testing
-        if: env.HAS_PLAY_SERVICE_ACCOUNT == 'true' && (github.event_name == 'push' || inputs.publish)
+        if: env.HAS_PLAY_SERVICE_ACCOUNT == 'true' && env.HAS_KEYSTORE == 'true' && (github.event_name == 'push' || inputs.publish)
         uses: r0adkll/upload-google-play@v1.1.3
         with:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
@@ -127,8 +127,10 @@ jobs:
           status: completed
           releaseName: ${{ env.VERSION_NAME }} (${{ env.VERSION_CODE }})
 
+      # always(), so the reason is still reported when an earlier step failed.
       - name: Explain skipped publish
-        if: env.HAS_PLAY_SERVICE_ACCOUNT != 'true'
+        if: always() && (env.HAS_PLAY_SERVICE_ACCOUNT != 'true' || env.HAS_KEYSTORE != 'true')
         run: |
-          echo "::warning::PLAY_SERVICE_ACCOUNT_JSON is not set — built the AAB but did not publish."
-          echo "See .claude/skills/release-pipeline/SKILL.md for the Play API setup runbook."
+          echo "::warning::Did not publish. HAS_KEYSTORE=$HAS_KEYSTORE HAS_PLAY_SERVICE_ACCOUNT=$HAS_PLAY_SERVICE_ACCOUNT"
+          echo "Both the upload keystore and the Play service account are required to publish."
+          echo "See .claude/skills/release-pipeline/SKILL.md for the setup runbooks."
