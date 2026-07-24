@@ -1,0 +1,175 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ============================================
+    // HELPER FUNCTIONS
+    // ============================================
+
+    // Check if user is authenticated
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    // Check if user owns the resource
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+
+    // Check if user is a participant in a match
+    function isMatchParticipant(matchId) {
+      return get(/databases/$(database)/documents/trip_matches/$(matchId)).data.hostId == request.auth.uid ||
+             get(/databases/$(database)/documents/trip_matches/$(matchId)).data.riderId == request.auth.uid;
+    }
+
+    // ============================================
+    // COLLECTION: users
+    // ============================================
+
+    match /users/{userId} {
+      // Anyone can read public user profiles (for display in feeds/matches)
+      allow read: if true;
+
+      // Users can only write to their own profile
+      allow write: if isAuth() && isOwner(userId);
+
+      // Nested: blocked users list (private)
+      match /blockedUsers/{blockedId} {
+        allow read, write: if isAuth() && isOwner(userId);
+      }
+    }
+
+    // ============================================
+    // COLLECTION: trip_offers
+    // ============================================
+
+    match /trip_offers/{offerId} {
+      // Anyone can read active trip offers
+      allow read: if true;
+
+      // Only authenticated users can create
+      allow create: if isAuth() && request.resource.data.hostId == request.auth.uid;
+
+      // Only the host can update their own offer
+      allow update, delete: if isAuth() && resource.data.hostId == request.auth.uid;
+    }
+
+    // ============================================
+    // COLLECTION: ride_requests
+    // ============================================
+
+    match /ride_requests/{requestId} {
+      // Anyone can read active ride requests
+      allow read: if true;
+
+      // Only authenticated users can create
+      allow create: if isAuth() && request.resource.data.riderId == request.auth.uid;
+
+      // Only the rider can update their own request
+      allow update, delete: if isAuth() && resource.data.riderId == request.auth.uid;
+    }
+
+    // ============================================
+    // COLLECTION: trip_matches
+    // ============================================
+
+    match /trip_matches/{matchId} {
+      // Only participants can read match details
+      allow read: if isAuth() && isMatchParticipant(matchId);
+
+      // Only authenticated users can create (backend validates)
+      allow create: if isAuth();
+
+      // Only participants can update
+      allow update, delete: if isAuth() && isMatchParticipant(matchId);
+    }
+
+    // ============================================
+    // COLLECTION: messages
+    // ============================================
+
+    match /messages/{messageId} {
+      // Only match participants can read messages
+      allow read: if isAuth() &&
+        exists(/databases/$(database)/documents/trip_matches/$(resource.data.matchId)) &&
+        isMatchParticipant(resource.data.matchId);
+
+      // Only authenticated users can create
+      allow create: if isAuth() && request.resource.data.senderId == request.auth.uid;
+
+      // Users can only update their own messages (for read receipts)
+      allow update: if isAuth() && isOwner(resource.data.senderId);
+
+      // Only the sender can delete
+      allow delete: if isAuth() && isOwner(resource.data.senderId);
+    }
+
+    // ============================================
+    // COLLECTION: notifications
+    // ============================================
+
+    match /notifications/{notificationId} {
+      // Users can only read their own notifications
+      allow read: if isAuth() && isOwner(resource.data.userId);
+
+      // Backend creates notifications (no direct client writes)
+      allow create: if false;
+
+      // Users can mark as read
+      allow update: if isAuth() && isOwner(resource.data.userId);
+
+      // Users can delete their notifications
+      allow delete: if isAuth() && isOwner(resource.data.userId);
+    }
+
+    // ============================================
+    // COLLECTION: ratings
+    // ============================================
+
+    match /ratings/{ratingId} {
+      // Anyone can read ratings
+      allow read: if true;
+
+      // Only authenticated users can create ratings
+      allow create: if isAuth() && request.resource.data.raterId == request.auth.uid;
+
+      // Only the rater can update
+      allow update: if isAuth() && resource.data.raterId == request.auth.uid;
+
+      // Only the rater can delete
+      allow delete: if isAuth() && resource.data.raterId == request.auth.uid;
+    }
+
+    // ============================================
+    // COLLECTION: communities
+    // ============================================
+
+    match /communities/{communityId} {
+      // Anyone can read community info
+      allow read: if true;
+
+      // Only administrators can modify (backend controlled)
+      allow write: if false;
+    }
+
+    // ============================================
+    // COLLECTION: invites
+    // ============================================
+
+    match /invites/{inviteId} {
+      // Authenticated users can read invites (to redeem)
+      allow read: if isAuth();
+
+      // Only backend can create/modify invites
+      allow write: if false;
+    }
+
+    // ============================================
+    // DENY ALL OTHER COLLECTIONS
+    // ============================================
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
