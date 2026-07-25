@@ -143,7 +143,7 @@ cd /home/user/Ride-Share
 ./gradlew test
 
 # Run specific test class
-./gradlew test --tests com.example.data.SawaariRepositoryTest
+./gradlew test --tests com.splitcruiser.app.data.SawaariRepositoryTest
 
 # Run with coverage report
 ./gradlew testDebugUnitTest --coverage
@@ -162,12 +162,12 @@ cd /home/user/Ride-Share
 ./gradlew connectedAndroidTest
 
 # Run specific test
-./gradlew connectedAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.example.ui.AuthenticationScreensTest
+./gradlew connectedAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.splitcruiser.app.ui.AuthenticationScreensTest
 
 # Run with device
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-adb shell am instrument -w com.example.test/androidx.test.runner.AndroidJUnitRunner
+adb shell am instrument -w com.splitcruiser.app.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
 ### Build and Run Integration Tests
@@ -177,10 +177,10 @@ adb shell am instrument -w com.example.test/androidx.test.runner.AndroidJUnitRun
 ./gradlew connectedAndroidTest
 
 # Run specific integration test
-./gradlew connectedAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.example.ui.RideFlowIntegrationTest
+./gradlew connectedAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.splitcruiser.app.ui.RideFlowIntegrationTest
 
 # Filter by test method
-./gradlew connectedAndroidTest -Pandroid.testInstrumentationRunnerArguments.testFile=com.example.ui.RideFlowIntegrationTest#testHostPostsRideAndRiderMatches
+./gradlew connectedAndroidTest -Pandroid.testInstrumentationRunnerArguments.testFile=com.splitcruiser.app.ui.RideFlowIntegrationTest#testHostPostsRideAndRiderMatches
 ```
 
 ---
@@ -400,7 +400,7 @@ fun setupEmulators() {
 
 ```bash
 # CPU profiling
-adb shell am start -n com.example/com.example.ui.SawaariApp
+adb shell am start -n com.splitcruiser.app/com.splitcruiser.app.ui.SawaariApp
 # In Android Studio: Profiler → CPU
 
 # Memory profiling

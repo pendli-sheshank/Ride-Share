@@ -21,11 +21,11 @@ val releaseKeystorePath: String? =
   providers.environmentVariable("KEYSTORE_PATH").orNull?.takeIf { it.isNotBlank() }
 
 android {
-  namespace = "com.aistudio.sawaarishare"
+  namespace = "com.splitcruiser.app"
   compileSdk = 36
 
   defaultConfig {
-    applicationId = "com.aistudio.sawaarishare.krqmzb"
+    applicationId = "com.splitcruiser.app"
     minSdk = 24
     targetSdk = 36
     // Play rejects an upload whose versionCode does not exceed the published one (currently 2).

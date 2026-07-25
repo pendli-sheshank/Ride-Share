@@ -271,11 +271,11 @@ break — the file is consistently indented 4 spaces per level, so the first lin
 **Fix:** `FirebaseFirestoreSettings.Builder().setLocalCacheSettings(PersistentCacheSettings.newBuilder().build())`.
 
 ### 2026-07-24 — `.MainActivity` would crash after a namespace change
-**Cause:** `namespace` was the placeholder `com.example` while `applicationId` was real.
+**Cause:** `namespace` was the placeholder `com.splitcruiser.app` while `applicationId` was real.
 Changing `namespace` to `com.aistudio.sawaarishare` also changes what the manifest's
 `android:name=".MainActivity"` shorthand resolves to — it would have pointed at a class that
 does not exist, crashing on launch with `ClassNotFoundException`.
-**Fix:** fully qualified it as `com.example.MainActivity` in `AndroidManifest.xml`.
+**Fix:** fully qualified it as `com.splitcruiser.app.MainActivity` in `AndroidManifest.xml`.
 **Lesson:** the `.Foo` shorthand resolves against `namespace`, *not* `applicationId`. Any
 namespace change must be checked against the manifest and against `R` / `BuildConfig` imports.
 
@@ -292,8 +292,8 @@ match** looked like a failed pipeline.
 `producer | grep -q` under pipefail.
 
 ### 2026-07-24 — 157 compile errors in the unit and instrumented test suites
-**Cause:** the suites import `com.example.data.models.*` (no such package) and
-`com.example.data.MainViewModel` (wrong package — it is `com.example.ui.MainViewModel`), and
+**Cause:** the suites import `com.splitcruiser.app.data.models.*` (no such package) and
+`com.splitcruiser.app.data.MainViewModel` (wrong package — it is `com.splitcruiser.app.ui.MainViewModel`), and
 call ~50 repository methods that do not exist (`createTripOffer`, `postTripOffer`,
 `getTripOffers`, …). They were written against an imagined API and never compiled, so their
 green PR descriptions meant nothing.
