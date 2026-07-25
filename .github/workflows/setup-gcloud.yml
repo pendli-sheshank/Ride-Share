@@ -1,4 +1,4 @@
-name: One-Time Setup — Google Cloud Project
+name: One-Time Setup — Google Cloud Project (Fixed)
 
 # This workflow automates the creation of a Google Cloud project and service account
 # for Play Store + Firebase. Run it once via workflow_dispatch, then use the outputs
@@ -33,6 +33,8 @@ jobs:
   setup:
     name: Create GCP Project & Service Account
     runs-on: ubuntu-latest
+    env:
+      HAS_BILLING_ACCOUNT: ${{ secrets.SETUP_BILLING_ACCOUNT_ID != '' }}
     outputs:
       service_account_json: ${{ steps.create-key.outputs.key_json }}
       service_account_email: ${{ steps.create-sa.outputs.sa_email }}
@@ -55,7 +57,7 @@ jobs:
           echo "project_id=$PROJECT_ID" >> "$GITHUB_OUTPUT"
 
       - name: Link to Billing Account (if specified)
-        if: ${{ secrets.SETUP_BILLING_ACCOUNT_ID != '' }}
+        if: env.HAS_BILLING_ACCOUNT == 'true'
         run: |
           gcloud billing projects link ${{ inputs.app_project_id }} \
             --billing-account=${{ secrets.SETUP_BILLING_ACCOUNT_ID }}
