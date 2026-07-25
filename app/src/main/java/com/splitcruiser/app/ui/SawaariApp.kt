@@ -64,7 +64,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.compose.ui.window.Dialog
-import com.aistudio.sawaarishare.R
+import com.splitcruiser.app.R
 import com.splitcruiser.app.data.*
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -7600,7 +7600,7 @@ fun LocationAutoCompleteTextField(
     leadingIcon: @Composable (() -> Unit)? = null
 ) {
     var expanded by remember { mutableStateOf(false) }
-    var photonResults by remember { mutableStateOf<List<com.example.data.PhotonPlaceResult>>(emptyList()) }
+    var photonResults by remember { mutableStateOf<List<PhotonPlaceResult>>(emptyList()) }
     var isSearchingPhoton by remember { mutableStateOf(false) }
     var isReverseGeocodingGps by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -7610,7 +7610,7 @@ fun LocationAutoCompleteTextField(
         if (value.length >= 2) {
             isSearchingPhoton = true
             kotlinx.coroutines.delay(250) // Debounce
-            val results = com.example.data.OsmLocationService.autocompletePhoton(value)
+            val results = OsmLocationService.autocompletePhoton(value)
             photonResults = results
             isSearchingPhoton = false
         } else {
@@ -7749,7 +7749,7 @@ fun LocationAutoCompleteTextField(
                                         scope.launch {
                                             val gpsLat = 42.3383
                                             val gpsLon = -71.0881
-                                            val revResult = com.example.data.OsmLocationService.reverseGeocodeNominatim(gpsLat, gpsLon)
+                                            val revResult = OsmLocationService.reverseGeocodeNominatim(gpsLat, gpsLon)
                                             val placeName = revResult?.road?.let { "$it (Northeastern Univ)" } ?: revResult?.displayName ?: "Snell Library, Boston"
                                             val placeAddr = revResult?.displayName ?: "360 Huntington Ave, Boston, MA"
                                             val gpsPlace = LocationPlace(placeName, placeAddr, "Nominatim GPS", gpsLat, gpsLon)
@@ -7873,7 +7873,7 @@ fun GoogleMapsMatrixCard(
     modifier: Modifier = Modifier
 ) {
     var isLoading by remember { mutableStateOf(false) }
-    var matrixResult by remember { mutableStateOf<com.example.data.MapsRouteMatrixResult?>(null) }
+    var matrixResult by remember { mutableStateOf<MapsRouteMatrixResult?>(null) }
     val scope = rememberCoroutineScope()
 
     if (origin.isBlank() || destination.isBlank()) return
@@ -7935,7 +7935,7 @@ fun GoogleMapsMatrixCard(
                     onClick = {
                         isLoading = true
                         scope.launch {
-                            val res = com.example.data.GoogleMapsGroundingService.getMapsDistanceAndRouteMatrix(origin, destination)
+                            val res = GoogleMapsGroundingService.getMapsDistanceAndRouteMatrix(origin, destination)
                             matrixResult = res.getOrNull()
                             isLoading = false
                         }
