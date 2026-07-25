@@ -53,6 +53,10 @@ jobs:
         run: |
           PROJECT_ID="${{ inputs.app_project_id }}"
           echo "Creating project $PROJECT_ID..."
+          # If you have an organization, add: --organization=YOUR_ORG_ID
+          # To find org ID: gcloud organizations list
+          # Then uncomment the next line and replace YOUR_ORG_ID
+          # gcloud projects create "$PROJECT_ID" --name="${{ inputs.app_name }}" --organization=YOUR_ORG_ID
           gcloud projects create "$PROJECT_ID" --name="${{ inputs.app_name }}"
           echo "project_id=$PROJECT_ID" >> "$GITHUB_OUTPUT"
 
