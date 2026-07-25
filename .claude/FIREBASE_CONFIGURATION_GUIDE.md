@@ -21,7 +21,7 @@ This guide covers complete Firebase project setup, security rules, email configu
 
 **Steps:**
 1. In Firebase Console, click "Add app" → Android
-2. Package name: `com.example`
+2. Package name: `com.splitcruiser.app`
 3. App nickname: `SawaariShare`
 4. Debug SHA-1: Run `./gradlew signingReport` (see instructions below)
 5. Register app

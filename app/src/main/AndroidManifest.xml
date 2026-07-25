@@ -14,10 +14,8 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.MyApplication">
-        <!-- Fully qualified: the ".Foo" shorthand resolves against `namespace`
-             (com.aistudio.sawaarishare), but the class lives in com.example. -->
         <activity
-            android:name="com.example.MainActivity"
+            android:name="com.splitcruiser.app.MainActivity"
             android:exported="true"
             android:label="@string/app_name"
             android:theme="@style/Theme.MyApplication">

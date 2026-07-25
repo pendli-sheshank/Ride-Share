@@ -39,7 +39,7 @@ kotlin {
 }
 
 android {
-  namespace = "com.example.shared"
+  namespace = "com.splitcruiser.app.shared"
   compileSdk = 36
 
   defaultConfig {
