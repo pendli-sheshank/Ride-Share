@@ -1,4 +1,4 @@
-name: One-Time Setup — Google Cloud Project
+name: One-Time Setup — Google Cloud Project (Fixed)
 
 # This workflow automates the creation of a Google Cloud project and service account
 # for Play Store + Firebase. Run it once via workflow_dispatch, then use the outputs
