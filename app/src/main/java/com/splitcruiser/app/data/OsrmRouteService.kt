@@ -17,6 +17,16 @@ data class RouteInfo(
     val coordinates: List<Pair<Double, Double>> = emptyList()
 )
 
+data class MapsRouteMatrixResult(
+    val distanceText: String,
+    val durationText: String,
+    val routeSummary: String,
+    val pickupRecommendation: String,
+    val dropoffRecommendation: String,
+    val universityContext: String,
+    val fullGroundedText: String
+)
+
 object OsrmRouteService {
 
     private val client = OkHttpClient.Builder()

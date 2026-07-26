@@ -7867,6 +7867,81 @@ fun LocationAutoCompleteTextField(
 }
 
 @Composable
+private suspend fun calculateRouteMatrix(origin: String, destination: String): MapsRouteMatrixResult {
+    try {
+        val originResults = OsmLocationService.autocompletePhoton(origin, limit = 1)
+        if (originResults.isEmpty()) {
+            return MapsRouteMatrixResult(
+                distanceText = "Unknown",
+                durationText = "Unknown",
+                routeSummary = "Could not find route from $origin to $destination",
+                pickupRecommendation = "Origin location not found",
+                dropoffRecommendation = "Destination location not found",
+                universityContext = "Location search failed",
+                fullGroundedText = "Unable to geocode locations"
+            )
+        }
+
+        val destResults = OsmLocationService.autocompletePhoton(destination, limit = 1)
+        if (destResults.isEmpty()) {
+            return MapsRouteMatrixResult(
+                distanceText = "Unknown",
+                durationText = "Unknown",
+                routeSummary = "Could not find route from $origin to $destination",
+                pickupRecommendation = "Origin location found",
+                dropoffRecommendation = "Destination location not found",
+                universityContext = "Location search failed",
+                fullGroundedText = "Unable to geocode destination"
+            )
+        }
+
+        val originPlace = originResults[0]
+        val destPlace = destResults[0]
+
+        val routeResult = OsrmRouteService.getRoute(
+            originLat = originPlace.lat,
+            originLon = originPlace.lon,
+            destLat = destPlace.lat,
+            destLon = destPlace.lon
+        )
+
+        if (routeResult.isSuccess) {
+            val route = routeResult.getOrThrow()
+            return MapsRouteMatrixResult(
+                distanceText = route.distanceText,
+                durationText = route.durationText,
+                routeSummary = "Route from ${originPlace.name} to ${destPlace.name}",
+                pickupRecommendation = originPlace.formattedAddress,
+                dropoffRecommendation = destPlace.formattedAddress,
+                universityContext = "Route between ${originPlace.city ?: "the area"} and ${destPlace.city ?: "the area"}",
+                fullGroundedText = "Distance: ${route.distanceText}, Duration: ${route.durationText}"
+            )
+        } else {
+            val straightDist = GeoUtils.distanceInMiles(originPlace.lat, originPlace.lon, destPlace.lat, destPlace.lon)
+            val estimatedTime = straightDist * 1.3
+            return MapsRouteMatrixResult(
+                distanceText = "~%.1f mi".format(straightDist),
+                durationText = "~%.0f min".format(estimatedTime),
+                routeSummary = "Estimated route from ${originPlace.name} to ${destPlace.name}",
+                pickupRecommendation = originPlace.formattedAddress,
+                dropoffRecommendation = destPlace.formattedAddress,
+                universityContext = "Route between ${originPlace.city ?: "the area"} and ${destPlace.city ?: "the area"}",
+                fullGroundedText = "Estimated distance: ~%.1f mi".format(straightDist)
+            )
+        }
+    } catch (e: Exception) {
+        return MapsRouteMatrixResult(
+            distanceText = "Error",
+            durationText = "Error",
+            routeSummary = "Failed to calculate route",
+            pickupRecommendation = origin,
+            dropoffRecommendation = destination,
+            universityContext = "Route calculation failed",
+            fullGroundedText = "Error: ${e.message}"
+        )
+    }
+}
+
 fun GoogleMapsMatrixCard(
     origin: String,
     destination: String,
@@ -7935,7 +8010,7 @@ fun GoogleMapsMatrixCard(
                     onClick = {
                         isLoading = true
                         scope.launch {
-                            matrixResult = repository.fetchRouteMatrix(origin, destination)
+                            matrixResult = calculateRouteMatrix(origin, destination)
                             isLoading = false
                         }
                     },
