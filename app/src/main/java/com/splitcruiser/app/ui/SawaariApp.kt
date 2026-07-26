@@ -7935,8 +7935,7 @@ fun GoogleMapsMatrixCard(
                     onClick = {
                         isLoading = true
                         scope.launch {
-                            val res = GoogleMapsGroundingService.getMapsDistanceAndRouteMatrix(origin, destination)
-                            matrixResult = res.getOrNull()
+                            matrixResult = repository.fetchRouteMatrix(origin, destination)
                             isLoading = false
                         }
                     },
@@ -7951,7 +7950,7 @@ fun GoogleMapsMatrixCard(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        "Calculate Distance & University Matrix",
+                        "Calculate Distance & Route",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -7971,7 +7970,7 @@ fun GoogleMapsMatrixCard(
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        "Fetching Google Maps Grounded Matrix...",
+                        "Calculating route...",
                         color = SawaariLightGray,
                         fontSize = 12.sp
                     )
