@@ -13,8 +13,13 @@ set -euo pipefail
 
 ARCHIVE="${1:?usage: verify-app-classes.sh <archive> [dex-prefix]}"
 PREFIX="${2:-}"
-# A class that only exists if the project's own Kotlin sources were compiled.
-NEEDLE='com/example/ui/SawaariAppKt'
+# Classes that only exist if the project's own sources were compiled.
+# Check for any of these to be resilient to refactoring.
+NEEDLES=(
+  'com/splitcruiser/app/MainActivity'
+  'com/splitcruiser/app/ui/SawaariAppKt'
+  'com/splitcruiser/app/data/SawaariRepository'
+)
 
 if [ ! -f "$ARCHIVE" ]; then
   echo "::error::Artifact not found: $ARCHIVE"
@@ -38,12 +43,15 @@ trap 'rm -rf "$TMPDIR_DEX"' EXIT
 
 for dex in "${DEX_FILES[@]}"; do
   unzip -p "$ARCHIVE" "$dex" > "$TMPDIR_DEX/dex.bin"
-  if grep -qa "$NEEDLE" "$TMPDIR_DEX/dex.bin"; then
-    echo "OK: found $NEEDLE in $dex (${#DEX_FILES[@]} dex files total)"
-    exit 0
-  fi
+  for needle in "${NEEDLES[@]}"; do
+    if grep -qa "$needle" "$TMPDIR_DEX/dex.bin"; then
+      echo "OK: found $needle in $dex (${#DEX_FILES[@]} dex files total)"
+      exit 0
+    fi
+  done
 done
 
-echo "::error::$ARCHIVE has ${#DEX_FILES[@]} dex files but none contain $NEEDLE."
+echo "::error::$ARCHIVE has ${#DEX_FILES[@]} dex files but none contain any expected app classes."
+echo "::error::Expected one of: ${NEEDLES[*]}"
 echo "::error::The app's own code was not compiled into the artifact."
 exit 1
