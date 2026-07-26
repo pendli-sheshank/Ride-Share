@@ -1918,19 +1918,142 @@ class SawaariRepository(private val context: Context) {
         )
     }
 
-    suspend fun fetchGoogleMapsMatrix(origin: String, destination: String): MapsRouteMatrixResult {
-        val result = GoogleMapsGroundingService.getMapsDistanceAndRouteMatrix(origin, destination)
-        return result.getOrDefault(
-            MapsRouteMatrixResult(
-                distanceText = "~5.0 miles",
-                durationText = "~15 mins drive",
-                routeSummary = "Driving route connecting $origin and $destination",
-                pickupRecommendation = "Designated campus hub at $origin",
-                dropoffRecommendation = "Main entrance dropoff at $destination",
-                universityContext = "University commuter route",
-                fullGroundedText = "Google Maps route info for $origin to $destination."
+    /**
+     * Calculate route distance and duration between two locations using OSRM.
+     * Geocodes location names to coordinates first, then calls OSRM routing engine.
+     */
+    suspend fun fetchRouteMatrix(origin: String, destination: String): MapsRouteMatrixResult = withContext(Dispatchers.IO) {
+        try {
+            // Geocode origin location
+            val originResults = OsmLocationService.autocompletePhoton(origin, limit = 1)
+            if (originResults.isEmpty()) {
+                return@withContext MapsRouteMatrixResult(
+                    distanceText = "Unknown",
+                    durationText = "Unknown",
+                    routeSummary = "Could not find route from $origin to $destination",
+                    pickupRecommendation = "Origin location not found",
+                    dropoffRecommendation = "Destination location not found",
+                    universityContext = "Location search failed",
+                    fullGroundedText = "Unable to geocode locations"
+                )
+            }
+
+            // Geocode destination location
+            val destResults = OsmLocationService.autocompletePhoton(destination, limit = 1)
+            if (destResults.isEmpty()) {
+                return@withContext MapsRouteMatrixResult(
+                    distanceText = "Unknown",
+                    durationText = "Unknown",
+                    routeSummary = "Could not find route from $origin to $destination",
+                    pickupRecommendation = "Origin location found",
+                    dropoffRecommendation = "Destination location not found",
+                    universityContext = "Location search failed",
+                    fullGroundedText = "Unable to geocode destination"
+                )
+            }
+
+            val originPlace = originResults[0]
+            val destPlace = destResults[0]
+
+            // Call OSRM routing service
+            val routeResult = OsrmRouteService.getRoute(
+                originLat = originPlace.lat,
+                originLon = originPlace.lon,
+                destLat = destPlace.lat,
+                destLon = destPlace.lon
             )
-        )
+
+            if (routeResult.isSuccess) {
+                val route = routeResult.getOrThrow()
+                return@withContext MapsRouteMatrixResult(
+                    distanceText = route.distanceText,
+                    durationText = route.durationText,
+                    routeSummary = "Route from ${originPlace.name} to ${destPlace.name}",
+                    pickupRecommendation = originPlace.formattedAddress,
+                    dropoffRecommendation = destPlace.formattedAddress,
+                    universityContext = buildUniversityContext(originPlace, destPlace),
+                    fullGroundedText = "Distance: ${route.distanceText}, Duration: ${route.durationText}"
+                )
+            } else {
+                // Fallback to straight-line distance
+                val straightDist = GeoUtils.distanceInMiles(originPlace.lat, originPlace.lon, destPlace.lat, destPlace.lon)
+                val estimatedTime = straightDist * 1.3 // ~1.3 minutes per mile average
+
+                return@withContext MapsRouteMatrixResult(
+                    distanceText = formatDistance(straightDist),
+                    durationText = formatDuration(estimatedTime),
+                    routeSummary = "Estimated route from ${originPlace.name} to ${destPlace.name}",
+                    pickupRecommendation = originPlace.formattedAddress,
+                    dropoffRecommendation = destPlace.formattedAddress,
+                    universityContext = buildUniversityContext(originPlace, destPlace),
+                    fullGroundedText = "Estimated distance: ${formatDistance(straightDist)}"
+                )
+            }
+        } catch (e: Exception) {
+            Log.e("SawaariRepository", "Error fetching route matrix: ${e.message}", e)
+            return@withContext MapsRouteMatrixResult(
+                distanceText = "Error",
+                durationText = "Error",
+                routeSummary = "Failed to calculate route",
+                pickupRecommendation = origin,
+                dropoffRecommendation = destination,
+                universityContext = "Route calculation failed",
+                fullGroundedText = "Error: ${e.message}"
+            )
+        }
+    }
+
+    /**
+     * Calculate route distance and duration between two coordinates using OSRM.
+     */
+    suspend fun fetchRouteMatrixByCoordinates(
+        originLat: Double,
+        originLon: Double,
+        destLat: Double,
+        destLon: Double
+    ): RouteInfo = withContext(Dispatchers.IO) {
+        val result = OsrmRouteService.getRoute(originLat, originLon, destLat, destLon)
+        result.getOrElse {
+            // Fallback to straight-line distance
+            val straightDist = GeoUtils.distanceInMiles(originLat, originLon, destLat, destLon)
+            RouteInfo(
+                distanceMiles = straightDist,
+                durationMinutes = straightDist * 1.3,
+                distanceText = formatDistance(straightDist),
+                durationText = formatDuration(straightDist * 1.3)
+            )
+        }
+    }
+
+    private fun buildUniversityContext(originPlace: PhotonPlaceResult, destPlace: PhotonPlaceResult): String {
+        val originCity = originPlace.city?.takeIf { it.isNotBlank() } ?: "the area"
+        val destCity = destPlace.city?.takeIf { it.isNotBlank() } ?: "the area"
+        return "Route between $originCity and $destCity"
+    }
+
+    private fun formatDistance(miles: Double): String {
+        return when {
+            miles < 0.1 -> "< 0.1 mi"
+            miles < 10 -> "%.1f mi".format(miles)
+            else -> "%.0f mi".format(miles)
+        }
+    }
+
+    private fun formatDuration(minutes: Double): String {
+        return when {
+            minutes < 1 -> "< 1 min"
+            minutes < 60 -> "%.0f min".format(minutes)
+            else -> {
+                val hours = (minutes / 60).toInt()
+                val mins = (minutes % 60).toInt()
+                if (mins == 0) "$hours h" else "$hours h $mins min"
+            }
+        }
+    }
+
+    @Deprecated("Use fetchRouteMatrix or fetchRouteMatrixByCoordinates instead")
+    suspend fun fetchGoogleMapsMatrix(origin: String, destination: String): MapsRouteMatrixResult {
+        return fetchRouteMatrix(origin, destination)
     }
 
     suspend fun syncDataWithFirestore(): Result<Unit> = withContext(Dispatchers.IO) {

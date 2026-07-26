@@ -7935,8 +7935,67 @@ fun GoogleMapsMatrixCard(
                     onClick = {
                         isLoading = true
                         scope.launch {
-                            val res = GoogleMapsGroundingService.getMapsDistanceAndRouteMatrix(origin, destination)
-                            matrixResult = res.getOrNull()
+                            try {
+                                val originResults = OsmLocationService.autocompletePhoton(origin, limit = 1)
+                                val destResults = OsmLocationService.autocompletePhoton(destination, limit = 1)
+
+                                if (originResults.isNotEmpty() && destResults.isNotEmpty()) {
+                                    val originPlace = originResults[0]
+                                    val destPlace = destResults[0]
+
+                                    val routeResult = OsrmRouteService.getRoute(
+                                        originLat = originPlace.lat,
+                                        originLon = originPlace.lon,
+                                        destLat = destPlace.lat,
+                                        destLon = destPlace.lon
+                                    )
+
+                                    matrixResult = if (routeResult.isSuccess) {
+                                        val route = routeResult.getOrThrow()
+                                        MapsRouteMatrixResult(
+                                            distanceText = route.distanceText,
+                                            durationText = route.durationText,
+                                            routeSummary = "Route from ${originPlace.name} to ${destPlace.name}",
+                                            pickupRecommendation = originPlace.formattedAddress,
+                                            dropoffRecommendation = destPlace.formattedAddress,
+                                            universityContext = "Route between ${originPlace.city ?: "the area"} and ${destPlace.city ?: "the area"}",
+                                            fullGroundedText = "Distance: ${route.distanceText}, Duration: ${route.durationText}"
+                                        )
+                                    } else {
+                                        val straightDist = GeoUtils.distanceInMiles(originPlace.lat, originPlace.lon, destPlace.lat, destPlace.lon)
+                                        val estimatedTime = straightDist * 1.3
+                                        MapsRouteMatrixResult(
+                                            distanceText = "~%.1f mi".format(straightDist),
+                                            durationText = "~%.0f min".format(estimatedTime),
+                                            routeSummary = "Estimated route from ${originPlace.name} to ${destPlace.name}",
+                                            pickupRecommendation = originPlace.formattedAddress,
+                                            dropoffRecommendation = destPlace.formattedAddress,
+                                            universityContext = "Route between ${originPlace.city ?: "the area"} and ${destPlace.city ?: "the area"}",
+                                            fullGroundedText = "Estimated distance: ~%.1f mi".format(straightDist)
+                                        )
+                                    }
+                                } else {
+                                    matrixResult = MapsRouteMatrixResult(
+                                        distanceText = "Unknown",
+                                        durationText = "Unknown",
+                                        routeSummary = "Could not find route from $origin to $destination",
+                                        pickupRecommendation = origin,
+                                        dropoffRecommendation = destination,
+                                        universityContext = "Location search failed",
+                                        fullGroundedText = "Unable to geocode locations"
+                                    )
+                                }
+                            } catch (e: Exception) {
+                                matrixResult = MapsRouteMatrixResult(
+                                    distanceText = "Error",
+                                    durationText = "Error",
+                                    routeSummary = "Failed to calculate route",
+                                    pickupRecommendation = origin,
+                                    dropoffRecommendation = destination,
+                                    universityContext = "Route calculation failed",
+                                    fullGroundedText = "Error: ${e.message}"
+                                )
+                            }
                             isLoading = false
                         }
                     },
@@ -7951,7 +8010,7 @@ fun GoogleMapsMatrixCard(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        "Calculate Distance & University Matrix",
+                        "Calculate Distance & Route",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -7971,7 +8030,7 @@ fun GoogleMapsMatrixCard(
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        "Fetching Google Maps Grounded Matrix...",
+                        "Calculating route...",
                         color = SawaariLightGray,
                         fontSize = 12.sp
                     )
