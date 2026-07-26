@@ -70,11 +70,11 @@ jobs:
       - name: Write .env
         run: |
           cat > .env <<EOF
-          GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
-          FIREBASE_API_KEY=${{ secrets.FIREBASE_API_KEY }}
-          FIREBASE_APP_ID=${{ secrets.FIREBASE_APP_ID }}
-          FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }}
-          FIREBASE_STORAGE_BUCKET=${{ secrets.FIREBASE_STORAGE_BUCKET }}
+          GEMINI_API_KEY="${{ secrets.GEMINI_API_KEY || 'PLACEHOLDER' }}"
+          FIREBASE_API_KEY="${{ secrets.FIREBASE_API_KEY || 'PLACEHOLDER' }}"
+          FIREBASE_APP_ID="${{ secrets.FIREBASE_APP_ID || 'PLACEHOLDER' }}"
+          FIREBASE_PROJECT_ID="${{ secrets.FIREBASE_PROJECT_ID || 'PLACEHOLDER' }}"
+          FIREBASE_STORAGE_BUCKET="${{ secrets.FIREBASE_STORAGE_BUCKET || 'PLACEHOLDER' }}"
           EOF
 
       - name: Write google-services.json
