@@ -53,17 +53,8 @@ jobs:
             ls -la iosApp.xcodeproj/
           fi
 
-      # Step 3: Install CocoaPods dependencies
-      - name: Install CocoaPods
-        run: |
-          sudo gem install cocoapods
-          echo "✅ CocoaPods installed"
-
-      - name: Install Pod dependencies
-        run: |
-          cd iosApp
-          pod install --repo-update
-          echo "✅ Pod dependencies installed"
+      # Step 3: Skip CocoaPods install - no pods configured
+      # (Shared.framework is linked directly by Xcode project, not via CocoaPods)
 
       # Step 4: Build iOS app for simulator
       - name: Build iOS App (Simulator)
