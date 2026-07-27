@@ -35,9 +35,9 @@ jobs:
       # Step 1: Build Shared.framework for iOS
       - name: Build Shared.framework
         run: |
-          ./gradlew :shared:assembleSharedXCFramework -x test --stacktrace
+          ./gradlew :shared:linkReleaseFrameworkIosFat -x test --stacktrace
           echo "✅ Shared.framework built successfully"
-          ls -lh shared/build/XCFrameworks/
+          ls -lh shared/build/bin/ios/
 
       # Step 2: Install CocoaPods dependencies
       - name: Install CocoaPods
