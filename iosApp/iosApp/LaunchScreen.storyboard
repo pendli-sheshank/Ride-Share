@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="22.0" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" launchScreen="YES" useTraitCollections="YES" useSafeAreaLayoutGuide="YES" colorToolbarSystemColor="YES">
+    <device id="retina6_1" orientation="portrait" appearance="light"/>
+    <dependencies>
+        <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="22"/>
+        <capability name="Safe area layout guides" minToolsVersion="9.0"/>
+        <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
+    </dependencies>
+    <scenes>
+        <scene sceneID="lse-01-pbJ">
+            <objects>
+                <viewController id="01J-lp-oVM" sceneMemberID="viewController">
+                    <view key="view" contentMode="scaleToFill" id="Ze5-6b-2t3">
+                        <rect key="frame" x="0.0" y="0.0" width="414" height="896"/>
+                        <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                        <subviews>
+                            <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="SawaariShare" textAlignment="center" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" adjustsFontSizeToFitWidth="YES" translatesAutoresizingMaskIntoConstraints="NO" id="GJd-yN-r27">
+                                <rect key="frame" x="50" y="375.5" width="314" height="145"/>
+                                <fontDescription key="fontDescription" type="boldSystem" pointSize="48"/>
+                                <nil key="textColor"/>
+                                <nil key="highlightedColor"/>
+                            </label>
+                            <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="Community Rideshare" textAlignment="center" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" adjustsFontSizeToFitWidth="YES" translatesAutoresizingMaskIntoConstraints="NO" id="0ZN-3S-UUF">
+                                <rect key="frame" x="50" y="530.5" width="314" height="21"/>
+                                <fontDescription key="fontDescription" type="system" pointSize="17"/>
+                                <color key="textColor" white="0.5" alpha="1" colorSpace="calibratedWhite"/>
+                                <nil key="highlightedColor"/>
+                            </label>
+                        </subviews>
+                        <viewLayoutGuide key="safeArea" id="Bcu-3y-fBC"/>
+                        <color key="backgroundColor" systemColor="systemBackgroundColor"/>
+                        <constraints>
+                            <constraint firstItem="Bcu-3y-fBC" firstAttribute="centerX" secondItem="GJd-yN-r27" secondAttribute="centerX" id="GEk-41-0wH"/>
+                            <constraint firstItem="GJd-yN-r27" firstAttribute="centerY" secondItem="Ze5-6b-2t3" secondAttribute="centerY" id="cyl-2r-s0l"/>
+                            <constraint firstItem="Bcu-3y-fBC" firstAttribute="centerX" secondItem="0ZN-3S-UUF" secondAttribute="centerX" id="mOE-HS-jpa"/>
+                            <constraint firstItem="0ZN-3S-UUF" firstAttribute="top" secondItem="GJd-yN-r27" secondAttribute="bottom" constant="10" id="tDe-5t-sRN"/>
+                            <constraint firstItem="GJd-yN-r27" firstAttribute="leading" secondItem="Bcu-3y-fBC" secondAttribute="leading" constant="50" id="xfz-td-P8E"/>
+                            <constraint firstItem="Bcu-3y-fBC" firstAttribute="trailing" secondItem="GJd-yN-r27" secondAttribute="trailing" constant="50" id="yXg-6A-rtJ"/>
+                        </constraints>
+                    </view>
+                    <point key="canvasLocation" x="53" y="375"/>
+                </viewController>
+                <placeholder placeholderIdentifier="IBFirstResponder" id="iYj-Kq-Ea1" userLabel="First Responder" sceneMemberID="firstResponder"/>
+            </objects>
+            <point key="canvasLocation" x="53" y="375"/>
+        </scene>
+    </scenes>
+    <resources>
+        <systemColor name="systemBackgroundColor">
+            <color red="1" green="1" blue="1" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+        </systemColor>
+    </resources>
+</document>
