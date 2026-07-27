@@ -16,7 +16,7 @@ fi
 # Step 2: Build the Shared.framework for all iOS targets
 echo "📦 Building Shared.framework..."
 cd ..
-./gradlew :shared:assembleSharedXCFramework -x test
+./gradlew :shared:linkReleaseFrameworkIosFat -x test
 
 # Step 3: Install CocoaPods dependencies
 echo "📱 Installing CocoaPods dependencies..."

@@ -37,9 +37,23 @@ jobs:
         run: |
           ./gradlew :shared:linkReleaseFrameworkIosFat -x test --stacktrace
           echo "✅ Shared.framework built successfully"
-          ls -lh shared/build/bin/ios/
 
-      # Step 2: Install CocoaPods dependencies
+      # Step 2: Create/validate Xcode project FIRST (needed before pod install)
+      - name: Create Xcode project
+        run: |
+          cd iosApp
+
+          # Check if .xcodeproj exists
+          if [ ! -d "iosApp.xcodeproj" ]; then
+            echo "📝 Creating Xcode project using generator script..."
+            bash ./create-xcode-project.sh
+            echo "✅ Xcode project created"
+          else
+            echo "✅ Xcode project already exists"
+            ls -la iosApp.xcodeproj/
+          fi
+
+      # Step 3: Install CocoaPods dependencies
       - name: Install CocoaPods
         run: |
           sudo gem install cocoapods
@@ -51,27 +65,10 @@ jobs:
           pod install --repo-update
           echo "✅ Pod dependencies installed"
 
-      # Step 3: Validate Xcode project exists or create it
-      - name: Check/Create Xcode project
-        run: |
-          cd iosApp
-
-          # Check if .xcodeproj exists
-          if [ ! -d "iosApp.xcodeproj" ]; then
-            echo "ℹ️  Creating Xcode project..."
-            # Create a minimal Xcode project using xcodebuild
-            mkdir -p iosApp.xcodeproj/project.xcworkspace
-            touch iosApp.xcodeproj/project.pbxproj
-            echo "⚠️  Warning: Basic Xcode project structure created. Full setup needed in IDE."
-            echo "    Run 'xcode-select --install' if Xcode CLI tools not found."
-          else
-            echo "✅ Xcode project found"
-            ls -la iosApp.xcodeproj/
-          fi
-
       # Step 4: Build iOS app for simulator
       - name: Build iOS App (Simulator)
         run: |
+          set -o pipefail
           cd iosApp
           xcodebuild -workspace iosApp.xcworkspace \
             -scheme iosApp \
@@ -79,14 +76,7 @@ jobs:
             -sdk iphonesimulator \
             -derivedDataPath build \
             -verbose 2>&1 | tee build.log
-
-          # Check for build success
-          if grep -q "BUILD SUCCESSFUL" build.log || grep -q "** BUILD SUCCEEDED **" build.log; then
-            echo "✅ iOS app built successfully"
-          else
-            echo "⚠️  Build completed (check logs for warnings)"
-          fi
-        continue-on-error: true
+          echo "✅ iOS app built successfully"
 
       # Step 5: Upload build artifacts
       - name: Upload iOS build artifacts

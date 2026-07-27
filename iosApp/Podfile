@@ -4,8 +4,8 @@ target 'iosApp' do
   use_frameworks!
   use_modular_headers!
 
-  # Kotlin Multiplatform framework
-  pod 'shared', :path => '../shared'
+  # Shared.framework is built by Gradle and linked by Xcode project directly
+  # (not via CocoaPods, as :shared module doesn't have CocoaPods plugin)
 
   target 'iosAppTests' do
     inherit! :search_paths
