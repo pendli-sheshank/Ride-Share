@@ -85,7 +85,7 @@ def create_xcode_project():
 		{ids['contentview_swift']} /* ContentView.swift in Sources */ = {{isa = PBXBuildFile; fileRef = {ids['contentview_swift_ref']} /* ContentView.swift */; }};
 		{ids['assets']} /* Assets.xcassets in Resources */ = {{isa = PBXBuildFile; fileRef = {ids['assets_ref']} /* Assets.xcassets */; }};
 		{ids['launchscreen']} /* LaunchScreen.storyboard in Resources */ = {{isa = PBXBuildFile; fileRef = {ids['launchscreen_ref']} /* LaunchScreen.storyboard */; }};
-		{ids['shared_framework_build']} /* Shared.framework in Frameworks */ = {{isa = PBXBuildFile; fileRef = {ids['shared_framework_ref']} /* Shared.framework */; }};
+		{ids['shared_framework_build']} /* Shared.xcframework in Frameworks */ = {{isa = PBXBuildFile; fileRef = {ids['shared_framework_ref']} /* Shared.xcframework */; }};
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -95,7 +95,7 @@ def create_xcode_project():
 		{ids['info_plist_ref']} /* Info.plist */ = {{isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; }};
 		{ids['assets_ref']} /* Assets.xcassets */ = {{isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; }};
 		{ids['launchscreen_ref']} /* LaunchScreen.storyboard */ = {{isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; }};
-		{ids['shared_framework_ref']} /* Shared.framework */ = {{isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = ../shared/build/XCFrameworks/release/Shared.xcframework; sourceTree = SOURCE_ROOT; }};
+		{ids['shared_framework_ref']} /* Shared.xcframework */ = {{isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = ../shared/build/XCFrameworks/release/Shared.xcframework; sourceTree = SOURCE_ROOT; }};
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -103,7 +103,7 @@ def create_xcode_project():
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				{ids['shared_framework_build']} /* Shared.framework in Frameworks */,
+				{ids['shared_framework_build']} /* Shared.xcframework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		}};
@@ -150,7 +150,7 @@ def create_xcode_project():
 		{ids['frameworks_group']} /* Frameworks */ = {{
 			isa = PBXGroup;
 			children = (
-				{ids['shared_framework_ref']} /* Shared.framework */,
+				{ids['shared_framework_ref']} /* Shared.xcframework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";

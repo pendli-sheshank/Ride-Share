@@ -484,6 +484,21 @@ retained so the file still appears in the project navigator.
 expected, one per configuration. Note that `verify-xcodeproj.py` does *not* catch this: the
 reference graph was perfectly intact, the setting was simply absent.
 
+### 2026-07-27 — Swift finally compiled, and failed with `error: no such module 'Shared'`
+**Cause:** the pbxproj declared the framework as `lastKnownFileType = wrapper.framework` while
+its path pointed at `Shared.xcframework`. An `.xcframework` is a *container* of per-slice
+`.framework` bundles (`Shared.xcframework/ios-arm64/Shared.framework`). Typed as a plain
+framework wrapper, Xcode never runs the `ProcessXCFramework` step that resolves the right
+slice into `BUILT_PRODUCTS_DIR`, so `-F .../XCFrameworks/release` found no `.framework` to
+import. The give-away in the log is the *absence* of a `ProcessXCFramework` line — the
+`-F` search path was present and correct, which makes the error thoroughly misleading.
+**Fix:** `lastKnownFileType = wrapper.xcframework`. Added a check to
+`verify-xcodeproj.py`: any `PBXFileReference` whose path ends in `.xcframework` must be
+declared `wrapper.xcframework`.
+**Note:** this is the third distinct iOS-project bug that the *previous* guard did not catch.
+The reference-graph check, the build-settings check and this one are independent failure
+modes. Do not assume a green `verify-xcodeproj.py` means the project is sound.
+
 ---
 
 ## 8. Pre-flight checklist before merging to `main`
