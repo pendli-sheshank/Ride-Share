@@ -1,23 +1,32 @@
 package com.splitcruiser.app.data
 
-import com.splitcruiser.app.data.SawaariRepository
 import kotlinx.coroutines.test.runTest
 import org.junit.Before
 import org.junit.Test
-import kotlin.test.*
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+import kotlin.test.assertNotEquals
 
 /**
  * Tests for SawaariRepository
  * Verifies repository methods, state management, and error handling
  */
+@RunWith(RobolectricTestRunner::class)
 class SawaariRepositoryTest {
 
     private lateinit var repository: SawaariRepository
 
     @Before
     fun setup() {
-        // Initialize repository without Firebase
-        repository = SawaariRepository(context = null)
+        // Initialize repository with test context (Robolectric provides test context)
+        val testContext = RuntimeEnvironment.getApplication()
+        repository = SawaariRepository(context = testContext)
     }
 
     @Test
