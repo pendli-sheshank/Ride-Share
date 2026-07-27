@@ -61,7 +61,7 @@ jobs:
         run: |
           set -o pipefail
           cd iosApp
-          xcodebuild -workspace iosApp.xcworkspace \
+          xcodebuild -project iosApp.xcodeproj \
             -scheme iosApp \
             -configuration Debug \
             -sdk iphonesimulator \
