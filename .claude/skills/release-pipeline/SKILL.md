@@ -436,6 +436,36 @@ longer runs CocoaPods — with nothing to install it only forces `-workspace` ov
 **Also:** `FRAMEWORK_SEARCH_PATHS` was `"$(inherited)"` in both configurations, so `import
 Shared` could not have resolved even once the framework existed. Now set per configuration.
 
+### 2026-07-27 — first real TestFlight run: "The project 'iosApp' is damaged and cannot be opened"
+**Symptom:** `xcodebuild archive` failed after 4 seconds with
+`The project contains no build configurations - it may have been damaged`, naming no file,
+line or ID. Everything before it succeeded — XCFramework built and verified, certificate
+imported ("1 valid identities found"), profile UUID resolved, build number set.
+**Cause:** `generate-project.py` called `generate_id()` inline at each emission site, so an
+object's *definition* and every *reference* to it drew different random UUIDs. 12 references
+dangled: all five app files (each had three disagreeing ids — the `PBXBuildFile.fileRef`, the
+`PBXFileReference` definition, and the `PBXGroup` child) plus both `buildConfigurationList`
+pointers. Xcode fails the entire project on a single unresolved reference, and reports only
+"damaged".
+**Fix:** gave every object a stable id in the `ids` dict keyed by role, and made
+`generate_id()` deterministic via `uuid5` off a fixed namespace. Added
+`.github/scripts/verify-xcodeproj.py`, which resolves every reference and names the dangling
+ones, plus a CI step asserting the committed pbxproj is byte-identical to a fresh generation.
+**Check for it:** `python3 .github/scripts/verify-xcodeproj.py iosApp/iosApp.xcodeproj/project.pbxproj`.
+Runs on Linux in milliseconds; the macOS archive that catches it otherwise costs ~3 minutes.
+**Why it hid so long:** because ids were random, regenerating rewrote the whole file, so a
+diff against a fresh generation was pure UUID churn and told you nothing. Determinism is what
+makes the drift check possible.
+
+### 2026-07-27 — no shared scheme existed, and `xcodebuild archive` has no `-target` form
+**Cause:** the generator emitted `project.pbxproj` and `contents.xcworkspacedata` but no
+`xcshareddata/xcschemes/iosApp.xcscheme`. Whether `xcodebuild` autocreates a scheme for a
+project with no shared schemes is version- and setting-dependent, so `-scheme iosApp` is a
+coin flip on a runner. Archiving cannot fall back to `-target`.
+**Fix:** the generator now writes a shared scheme whose `BlueprintIdentifier` is the real
+`PBXNativeTarget` id and whose `ArchiveAction` is `Release`.
+**Note:** this was found by inspection before it cost a run, unlike the one above.
+
 ---
 
 ## 8. Pre-flight checklist before merging to `main`
