@@ -50,6 +50,24 @@ def main(path):
             if found not in defined:
                 dangling.setdefault(found, []).append((number, line.strip()))
 
+    # An .xcframework is a container of per-slice .framework bundles. Declared as
+    # wrapper.framework, Xcode silently skips the ProcessXCFramework step that resolves the
+    # slice, and the build dies much later at `error: no such module 'X'` — which points at
+    # the import, not at the project file that actually caused it.
+    mistyped = []
+    for number, line in enumerate(lines, start=1):
+        if ".xcframework;" in line and "isa = PBXFileReference" in line:
+            if "wrapper.xcframework" not in line:
+                mistyped.append((number, line.strip()))
+
+    if mistyped:
+        print(f"FAIL: {path}")
+        print("  .xcframework reference(s) not declared as wrapper.xcframework:\n")
+        for number, text in mistyped:
+            print(f"  line {number}: {text[:140]}")
+        print("\nThis surfaces at build time as \"no such module\", far from the real cause.")
+        return 1
+
     if dangling:
         print(f"FAIL: {path}")
         print(f"  {len(defined)} objects defined, {len(dangling)} reference(s) resolve to nothing.\n")

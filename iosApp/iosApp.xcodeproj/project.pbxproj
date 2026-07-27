@@ -10,7 +10,7 @@
 		00117EF9E3F752CC92FFC020 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3213C9ECB6B259AEA2B8D1BB /* ContentView.swift */; };
 		41842331DC585BB2A741E495 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3D8261F990D35581B391804F /* Assets.xcassets */; };
 		C184793FE5BA565897EAA63B /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = F65FD96E2BE4530ABB6CC5CC /* LaunchScreen.storyboard */; };
-		FE3CC1D9C1405115968A1DFD /* Shared.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4D78B6A376685539B5276587 /* Shared.framework */; };
+		FE3CC1D9C1405115968A1DFD /* Shared.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4D78B6A376685539B5276587 /* Shared.xcframework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -20,7 +20,7 @@
 		FD81299CF3F35F7D9D3BE2F2 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		3D8261F990D35581B391804F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F65FD96E2BE4530ABB6CC5CC /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
-		4D78B6A376685539B5276587 /* Shared.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = ../shared/build/XCFrameworks/release/Shared.xcframework; sourceTree = SOURCE_ROOT; };
+		4D78B6A376685539B5276587 /* Shared.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = ../shared/build/XCFrameworks/release/Shared.xcframework; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -28,7 +28,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				FE3CC1D9C1405115968A1DFD /* Shared.framework in Frameworks */,
+				FE3CC1D9C1405115968A1DFD /* Shared.xcframework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -75,7 +75,7 @@
 		91F3AE5BA8CF5C5BA9D1FC40 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
-				4D78B6A376685539B5276587 /* Shared.framework */,
+				4D78B6A376685539B5276587 /* Shared.xcframework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
