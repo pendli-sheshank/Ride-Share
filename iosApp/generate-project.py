@@ -50,6 +50,7 @@ def create_xcode_project():
         "resources_build_phase": generate_id("resources_build_phase"),
         "iosapp_swift": generate_id("iosapp_swift"),
         "contentview_swift": generate_id("contentview_swift"),
+        "viewmodel_swift": generate_id("viewmodel_swift"),
         "info_plist": generate_id("info_plist"),
         "assets": generate_id("assets"),
         "launchscreen": generate_id("launchscreen"),
@@ -63,6 +64,9 @@ def create_xcode_project():
         # PBXFileReference ids, distinct from the PBXBuildFile ids above.
         "iosapp_swift_ref": generate_id("iosapp_swift_ref"),
         "contentview_swift_ref": generate_id("contentview_swift_ref"),
+        # ViewModel.swift existed on disk and defined AppViewModel, but was never added to the
+        # project, so it was never compiled and ContentView could not resolve AppViewModel.
+        "viewmodel_swift_ref": generate_id("viewmodel_swift_ref"),
         "info_plist_ref": generate_id("info_plist_ref"),
         "assets_ref": generate_id("assets_ref"),
         "launchscreen_ref": generate_id("launchscreen_ref"),
@@ -83,6 +87,7 @@ def create_xcode_project():
 /* Begin PBXBuildFile section */
 		{ids['iosapp_swift']} /* iOSApp.swift in Sources */ = {{isa = PBXBuildFile; fileRef = {ids['iosapp_swift_ref']} /* iOSApp.swift */; }};
 		{ids['contentview_swift']} /* ContentView.swift in Sources */ = {{isa = PBXBuildFile; fileRef = {ids['contentview_swift_ref']} /* ContentView.swift */; }};
+		{ids['viewmodel_swift']} /* ViewModel.swift in Sources */ = {{isa = PBXBuildFile; fileRef = {ids['viewmodel_swift_ref']} /* ViewModel.swift */; }};
 		{ids['assets']} /* Assets.xcassets in Resources */ = {{isa = PBXBuildFile; fileRef = {ids['assets_ref']} /* Assets.xcassets */; }};
 		{ids['launchscreen']} /* LaunchScreen.storyboard in Resources */ = {{isa = PBXBuildFile; fileRef = {ids['launchscreen_ref']} /* LaunchScreen.storyboard */; }};
 		{ids['shared_framework_build']} /* Shared.xcframework in Frameworks */ = {{isa = PBXBuildFile; fileRef = {ids['shared_framework_ref']} /* Shared.xcframework */; }};
@@ -92,6 +97,7 @@ def create_xcode_project():
 		{ids['app_product']} /* iosApp.app */ = {{isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = iosApp.app; sourceTree = BUILT_PRODUCTS_DIR; }};
 		{ids['iosapp_swift_ref']} /* iOSApp.swift */ = {{isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp.swift; sourceTree = "<group>"; }};
 		{ids['contentview_swift_ref']} /* ContentView.swift */ = {{isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; }};
+		{ids['viewmodel_swift_ref']} /* ViewModel.swift */ = {{isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewModel.swift; sourceTree = "<group>"; }};
 		{ids['info_plist_ref']} /* Info.plist */ = {{isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; }};
 		{ids['assets_ref']} /* Assets.xcassets */ = {{isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; }};
 		{ids['launchscreen_ref']} /* LaunchScreen.storyboard */ = {{isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; }};
@@ -132,6 +138,7 @@ def create_xcode_project():
 			children = (
 				{ids['iosapp_swift_ref']} /* iOSApp.swift */,
 				{ids['contentview_swift_ref']} /* ContentView.swift */,
+				{ids['viewmodel_swift_ref']} /* ViewModel.swift */,
 				{ids['resources_group']} /* Resources */,
 			);
 			path = iosApp;
@@ -228,6 +235,7 @@ def create_xcode_project():
 			files = (
 				{ids['iosapp_swift']} /* iOSApp.swift in Sources */,
 				{ids['contentview_swift']} /* ContentView.swift in Sources */,
+				{ids['viewmodel_swift']} /* ViewModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		}};

@@ -8,6 +8,7 @@
 /* Begin PBXBuildFile section */
 		ADDBC3DFFBF25EEFB82A1B3D /* iOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C635C5E2CDDD511A937B1BE4 /* iOSApp.swift */; };
 		00117EF9E3F752CC92FFC020 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3213C9ECB6B259AEA2B8D1BB /* ContentView.swift */; };
+		136897E3F6FD5E1CA21CB28A /* ViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D3D2A92B3975171BBB525B1 /* ViewModel.swift */; };
 		41842331DC585BB2A741E495 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3D8261F990D35581B391804F /* Assets.xcassets */; };
 		C184793FE5BA565897EAA63B /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = F65FD96E2BE4530ABB6CC5CC /* LaunchScreen.storyboard */; };
 		FE3CC1D9C1405115968A1DFD /* Shared.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4D78B6A376685539B5276587 /* Shared.xcframework */; };
@@ -17,6 +18,7 @@
 		6C71546D770452B782C55EC1 /* iosApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = iosApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C635C5E2CDDD511A937B1BE4 /* iOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp.swift; sourceTree = "<group>"; };
 		3213C9ECB6B259AEA2B8D1BB /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		3D3D2A92B3975171BBB525B1 /* ViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewModel.swift; sourceTree = "<group>"; };
 		FD81299CF3F35F7D9D3BE2F2 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		3D8261F990D35581B391804F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F65FD96E2BE4530ABB6CC5CC /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
@@ -57,6 +59,7 @@
 			children = (
 				C635C5E2CDDD511A937B1BE4 /* iOSApp.swift */,
 				3213C9ECB6B259AEA2B8D1BB /* ContentView.swift */,
+				3D3D2A92B3975171BBB525B1 /* ViewModel.swift */,
 				FA323A44D82D57B182964EE0 /* Resources */,
 			);
 			path = iosApp;
@@ -153,6 +156,7 @@
 			files = (
 				ADDBC3DFFBF25EEFB82A1B3D /* iOSApp.swift in Sources */,
 				00117EF9E3F752CC92FFC020 /* ContentView.swift in Sources */,
+				136897E3F6FD5E1CA21CB28A /* ViewModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -84,8 +84,40 @@ def main(path):
     return 0
 
 
+def check_sources_compiled(pbxproj_path, sources_dir):
+    """Every .swift file on disk must actually be compiled.
+
+    A source file can sit in the directory, be committed, and be silently absent from the
+    Sources build phase — in which case its types simply do not exist, and the failure shows up
+    as "cannot find X in scope" at the *use* site, in a different file.
+    """
+    import os
+
+    text = open(pbxproj_path, encoding="utf-8").read()
+    missing = []
+    for entry in sorted(os.listdir(sources_dir)):
+        if not entry.endswith(".swift"):
+            continue
+        if f"{entry} in Sources */," not in text:
+            missing.append(entry)
+
+    if missing:
+        print(f"FAIL: {pbxproj_path}")
+        print(f"  {len(missing)} Swift file(s) in {sources_dir} are not compiled by any target:\n")
+        for name in missing:
+            print(f"    {name}")
+        print("\nAdd them to the Sources build phase in iosApp/generate-project.py.")
+        return 1
+
+    print(f"OK: every .swift file in {sources_dir} is in a Sources build phase.")
+    return 0
+
+
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
+    if len(sys.argv) not in (2, 3):
         print(__doc__)
         sys.exit(2)
-    sys.exit(main(sys.argv[1]))
+    status = main(sys.argv[1])
+    if status == 0 and len(sys.argv) == 3:
+        status = check_sources_compiled(sys.argv[1], sys.argv[2])
+    sys.exit(status)

@@ -499,6 +499,26 @@ declared `wrapper.xcframework`.
 The reference-graph check, the build-settings check and this one are independent failure
 modes. Do not assume a green `verify-xcodeproj.py` means the project is sound.
 
+### 2026-07-27 — `ViewModel.swift` was on disk, committed, and never compiled
+**Symptom:** `** ARCHIVE FAILED **` on `CompileSwift normal arm64`, after `import Shared`
+finally resolved.
+**Cause:** `generate-project.py` only ever added `iOSApp.swift` and `ContentView.swift` to the
+Sources build phase. `ViewModel.swift` — which defines `AppViewModel`, referenced five times by
+`ContentView.swift` — was never in the project at all. The give-away is in the build log
+itself: `Compiling iOSApp.swift, ContentView.swift, GeneratedAssetSymbols.swift`, three files
+where the directory holds four.
+**Fix:** added `ViewModel.swift` to the generator (PBXBuildFile, PBXFileReference, group child,
+Sources build phase). Extended `verify-xcodeproj.py` with an optional sources-directory
+argument: every `.swift` on disk must appear in a Sources build phase. CI now passes
+`iosApp/iosApp`.
+**Check for it:** read the `Compiling ...` line in any archive log and count the files against
+`ls iosApp/iosApp/*.swift`. A file that is not listed does not exist as far as the compiler is
+concerned, and the error surfaces at the *use* site in another file.
+**Pattern worth internalising:** four iOS-project bugs, four different guards — dangling
+references, a missing build setting, a wrong file type, and an uncompiled source file. Each was
+invisible to the guard written for the previous one. When a generated project misbehaves, do
+not assume the existing checks narrow it down.
+
 ---
 
 ## 8. Pre-flight checklist before merging to `main`
