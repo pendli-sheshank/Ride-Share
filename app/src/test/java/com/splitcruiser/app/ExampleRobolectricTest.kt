@@ -2,7 +2,7 @@ package com.splitcruiser.app
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
-import com.aistudio.sawaarishare.R
+import com.splitcruiser.app.R
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
