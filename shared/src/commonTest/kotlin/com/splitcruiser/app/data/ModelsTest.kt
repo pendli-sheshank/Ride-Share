@@ -292,7 +292,8 @@ class ModelsTest {
         val user = User()
         assertEquals("", user.id)
         assertEquals("", user.name)
-        assertEquals("guest", user.verifiedTier)
+        // Models.kt defaults new users to "vouched", not "guest".
+        assertEquals("vouched", user.verifiedTier)
 
         val offer = TripOffer()
         assertEquals("active", offer.status)

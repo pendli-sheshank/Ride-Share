@@ -17,7 +17,7 @@ This document outlines the complete process for building, testing, and releasing
 
 3. **App Information**
    - **App Name:** SawaariShare
-   - **Bundle ID:** com.splitcruiser.app.ios
+   - **Bundle ID:** com.splitcruiser.app
    - **Category:** Transportation
    - **Minimum iOS Version:** 14.0+
    - **Supported Devices:** iPhone & iPad
@@ -53,7 +53,7 @@ git config --global credential.helper osxkeychain
 ### Xcode Project Settings
 
 **General Tab:**
-- Bundle Identifier: `com.splitcruiser.app.ios`
+- Bundle Identifier: `com.splitcruiser.app`
 - Minimum Deployment Target: `iOS 14.0`
 - Team: [Your Developer Team]
 - Signing Certificate: Select distribution certificate
@@ -263,112 +263,59 @@ Perfect for commuting to campus, airport runs, or road trips!
 
 ## GitHub Actions Workflow
 
-**File:** `.github/workflows/ios-release.yml`
+The pipeline lives in `.github/workflows/ios-release.yml`. It is **manual dispatch only** —
+a build number can never be reused in App Store Connect even if the build is later deleted,
+so this must never fire automatically on push.
 
-```yaml
-name: iOS App Release Pipeline
+Run it from Actions → *iOS App Release Pipeline* → Run workflow, choosing:
 
-on:
-  workflow_dispatch:
-    inputs:
-      release_type:
-        description: 'Release type'
-        required: true
-        default: 'beta'
-        type: choice
-        options:
-          - beta
-          - production
+| `release_type` | What it does |
+|---|---|
+| `beta` | Uploads the build. Assign it to a TestFlight group in App Store Connect afterwards. |
+| `production` | Uploads the build. Attach it to the App Store version and submit for review afterwards. |
 
-env:
-  DEVELOPER_DIR: /Applications/Xcode.app/contents/developer
+Both paths upload the same signed binary; the difference is what you do with it in App Store
+Connect. The workflow does not submit for review on your behalf.
 
-jobs:
-  build-and-release:
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
+### What the workflow does
 
-      - name: Setup Xcode
-        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+1. Builds `Shared.xcframework` via `./gradlew :shared:assembleSharedReleaseXCFramework`, then
+   asserts it exists at `shared/build/XCFrameworks/release/Shared.xcframework` — the path the
+   Xcode project links by `FRAMEWORK_SEARCH_PATHS`.
+2. Imports the distribution certificate into a throwaway keychain and installs the
+   provisioning profile, reading the profile's UUID out of it rather than hardcoding one.
+3. Sets `CFBundleVersion` to `github.run_number`, which is monotonic and so never collides
+   with a build number App Store Connect has already seen.
+4. Archives with `-destination 'generic/platform=iOS'` and manual signing, then exports with a
+   generated `exportOptions.plist` (generated, not committed, so the team ID stays out of git).
+5. Uploads with `xcrun altool --upload-app` authenticated by an App Store Connect API key.
+6. Deletes the keychain and the private key in an `if: always()` step.
 
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
+### Required repository secrets
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
+The workflow checks all seven up front and fails with the names of any that are missing,
+rather than surfacing an opaque `xcodebuild` error several minutes in.
 
-      - name: Build Shared Framework
-        run: |
-          ./gradlew :shared:linkReleaseFrameworkIosFat -x test --stacktrace
+| Secret | What it is | Where to get it |
+|---|---|---|
+| `APPLE_TEAM_ID` | 10-character team identifier | Apple Developer → Membership details |
+| `IOS_DIST_CERT_P12_BASE64` | Apple Distribution cert + private key, `.p12`, base64-encoded | Export from Keychain Access, then `base64 -i cert.p12 \| pbcopy` |
+| `IOS_DIST_CERT_PASSWORD` | The password set when exporting that `.p12` | You choose it at export time |
+| `IOS_PROVISIONING_PROFILE_BASE64` | App Store provisioning profile, base64-encoded | Developer portal → Profiles → Distribution → App Store |
+| `APPSTORE_CONNECT_KEY_ID` | API key ID (10 characters) | App Store Connect → Users and Access → Integrations → App Store Connect API |
+| `APPSTORE_CONNECT_ISSUER_ID` | Issuer UUID, shown once per team on that same page | Same page as above |
+| `APPSTORE_CONNECT_PRIVATE_KEY` | Full contents of the `AuthKey_XXXXXXXXXX.p8` file, including the BEGIN/END lines | Downloadable exactly once when the key is created |
 
-      - name: Install Dependencies
-        run: |
-          cd iosApp
-          pod repo update
-          pod install
+An App Store Connect API key is strongly preferable to an Apple ID plus app-specific password:
+it is scoped, revocable, and not tied to one person's account or 2FA device.
 
-      - name: Create Archive
-        run: |
-          cd iosApp
-          xcodebuild archive \
-            -scheme iosApp \
-            -configuration Release \
-            -archivePath "./build/iosApp.xcarchive" \
-            -derivedDataPath "./build/DerivedData" \
-            -allowProvisioningUpdates
+### Framework task: use the XCFramework, never the fat framework
 
-      - name: Export App
-        run: |
-          cd iosApp
-          xcodebuild -exportArchive \
-            -archivePath "./build/iosApp.xcarchive" \
-            -exportPath "./build/export" \
-            -exportOptionsPlist "./exportOptions.plist"
-
-      - name: Upload to TestFlight
-        if: github.event.inputs.release_type == 'beta'
-        run: |
-          xcrun altool --upload-app \
-            -f "iosApp/build/export/iosApp.ipa" \
-            -t ios \
-            -u "${{ secrets.APPSTORE_USERNAME }}" \
-            -p "${{ secrets.APPSTORE_PASSWORD }}"
-
-      - name: Submit to App Store
-        if: github.event.inputs.release_type == 'production'
-        run: |
-          xcrun altool --upload-app \
-            -f "iosApp/build/export/iosApp.ipa" \
-            -t ios \
-            -u "${{ secrets.APPSTORE_USERNAME }}" \
-            -p "${{ secrets.APPSTORE_PASSWORD }}"
-
-      - name: Upload Build Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: ios-release-build
-          path: iosApp/build/export/iosApp.ipa
-
-  notify-release:
-    needs: build-and-release
-    runs-on: ubuntu-latest
-    steps:
-      - name: Notify Slack
-        run: |
-          # TODO: Send Slack notification with release status
-```
-
-**GitHub Secrets Required:**
-- `APPSTORE_USERNAME` - Apple ID email
-- `APPSTORE_PASSWORD` - App-specific password (not regular password!)
-  - Generate at [appleid.apple.com/account/security](https://appleid.apple.com/account/security)
-- `DEVELOPER_TEAM_ID` - Team ID from Apple Developer
-- `CODESIGN_CERTIFICATE` - Base64-encoded distribution certificate
-- `CODESIGN_CERTIFICATE_PASSWORD` - Certificate password
+`./gradlew :shared:linkReleaseFrameworkIosFat` lipos the device slice (`iosArm64`) together
+with a simulator slice (`iosX64`) into a single binary. App Store upload rejects any archive
+whose embedded framework carries simulator slices (ITMS-90240). Use
+`assembleSharedReleaseXCFramework`, which keeps device and simulator slices in separate,
+correctly tagged directories inside the `.xcframework`.
 
 ## Troubleshooting
 

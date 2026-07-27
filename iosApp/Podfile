@@ -1,26 +1,18 @@
 platform :ios, '14.0'
 
+# No pods are declared. Shared.xcframework is produced by Gradle
+# (./gradlew :shared:assembleSharedReleaseXCFramework) and linked by the Xcode project
+# directly via FRAMEWORK_SEARCH_PATHS, not through CocoaPods.
+#
+# This file is kept only so that adding a dependency later does not require rediscovering
+# the platform/target setup. Nothing in CI runs `pod install`: with no pods to install it
+# would only force every build to use a .xcworkspace instead of the .xcodeproj.
+#
+# NOTE: do not add a nested `target 'iosAppTests'` block until that target actually exists
+# in iosApp.xcodeproj. It did before, and `pod install` aborted every run with
+# "Unable to find a target named `iosAppTests`".
+
 target 'iosApp' do
   use_frameworks!
   use_modular_headers!
-
-  # Shared.framework is built by Gradle and linked by Xcode project directly
-  # (not via CocoaPods, as :shared module doesn't have CocoaPods plugin)
-
-  target 'iosAppTests' do
-    inherit! :search_paths
-    pod 'Nimble', '~> 12.0'
-  end
-end
-
-post_install do |installer|
-  installer.pods_project.targets.each do |target|
-    target.build_configurations.each do |config|
-      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '14.0'
-      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= [
-        '$(inherited)',
-        'COCOAPODS=1'
-      ]
-    end
-  end
 end

@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.plugin.mpp.apple.XCFramework
+
 plugins {
   alias(libs.plugins.kotlin.multiplatform)
   alias(libs.plugins.android.library)
@@ -7,11 +9,19 @@ plugins {
 kotlin {
   androidTarget()
 
+  // An XCFramework, not a fat framework. `linkReleaseFrameworkIosFat` lipos iosArm64 (device)
+  // together with iosX64 (simulator) into one binary; App Store upload rejects an archive whose
+  // embedded framework carries simulator slices (ITMS-90240). An XCFramework keeps device and
+  // simulator slices in separate, correctly-tagged directories, so the same artifact serves both
+  // local simulator runs and TestFlight uploads.
+  val xcf = XCFramework("Shared")
+
   // Each iOS target exports a static Shared.framework for the Xcode project to link against.
   listOf(iosX64(), iosArm64(), iosSimulatorArm64()).forEach { target ->
     target.binaries.framework {
       baseName = "Shared"
       isStatic = true
+      xcf.add(this)
     }
   }
 

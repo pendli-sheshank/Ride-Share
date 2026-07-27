@@ -392,6 +392,50 @@ env KEYSTORE_PATH= ./gradlew :app:bundleRelease   # must succeed, producing an u
 > It understands the context-availability rules and the expression grammar, so it catches
 > exactly the class of error that produces an unreadable zero-job run.
 
+### 2026-07-27 — the iOS "test suite" was 39 tests that CI never compiled or ran
+**Cause:** three `commonTest` files were added to `:shared`, plus an `androidTest` file and a
+Swift `XCTest` file, and the PR described them as a working suite. Nothing ran any of them.
+`ci.yml` runs `:app:testDebugUnitTest` (a different module) and
+`:shared:compileCommonMainKotlinMetadata` (compiles `commonMain`, **not** `commonTest`). Green
+CI therefore proved only that the app still built. Running `:shared:testDebugUnitTest` by hand
+found 2 of the 39 asserting things that were simply false: `testModelDefaults` expected
+`User().verifiedTier == "guest"` when `Models.kt` defaults it to `"vouched"`, and
+`testEmailValidation` asserted `assertFalse` on a condition that is true for its own input.
+**Fix:** corrected both assertions; added `:shared:testDebugUnitTest` to the `shared-common`
+job so the suite actually gates merges.
+**Check for it:** a test file only counts if a CI job names its Gradle task. Grep the workflow
+for the task before believing any claim about coverage.
+
+### 2026-07-27 — the Xcode project linked an XCFramework that no Gradle task produced
+**Cause:** `iosApp.xcodeproj` referenced `../shared/build/XCFrameworks/Shared.xcframework` and
+the docs told people to run `:shared:assembleSharedXCFramework`, but `shared/build.gradle.kts`
+never declared an `XCFramework()`, so that task did not exist. The workflows instead ran
+`:shared:linkReleaseFrameworkIosFat`, which writes somewhere else entirely — so
+`build/XCFrameworks/` was never created, and `build-ios.yml` was uploading an artifact path
+that never had anything in it.
+**Fix:** declared `val xcf = XCFramework("Shared")` and `xcf.add(this)` per target, which
+registers `assembleShared{Debug,Release}XCFramework`; pointed the workflows, `setup.sh` and the
+pbxproj at `build/XCFrameworks/release/Shared.xcframework`; added a step that fails loudly if
+the framework is not at that path after the Gradle build.
+**Check for it:** `./gradlew :shared:<task> --dry-run` fails fast for a task that does not
+exist. Do that before writing a workflow around a task name.
+
+### 2026-07-27 — `linkReleaseFrameworkIosFat` cannot produce an App Store-uploadable build
+**Cause:** it lipos `iosArm64` (device) together with `iosX64` (simulator) into one binary.
+App Store upload rejects any archive whose embedded framework carries simulator slices
+(ITMS-90240). It is a convenience task for local simulator work, not a release artifact.
+**Fix:** use an XCFramework, which keeps device and simulator slices in separate correctly
+tagged directories.
+
+### 2026-07-27 — `pod install` aborted every iOS run: "Unable to find a target named `iosAppTests`"
+**Cause:** the `Podfile` declared a nested `target 'iosAppTests'`, but `iosApp.xcodeproj` has
+exactly one target (the app). The release workflow masked it with `|| echo "continuing..."`,
+which turned a hard failure into a later, far more confusing one.
+**Fix:** removed the nested target. No pods are declared at all now, so the release workflow no
+longer runs CocoaPods — with nothing to install it only forces `-workspace` over `-project`.
+**Also:** `FRAMEWORK_SEARCH_PATHS` was `"$(inherited)"` in both configurations, so `import
+Shared` could not have resolved even once the framework existed. Now set per configuration.
+
 ---
 
 ## 8. Pre-flight checklist before merging to `main`

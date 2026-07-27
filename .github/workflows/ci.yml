@@ -86,3 +86,17 @@ jobs:
       # before they reach a macOS runner. Cheapest possible iOS-breakage check.
       - name: Compile common metadata
         run: ./gradlew :shared:compileCommonMainKotlinMetadata --stacktrace
+
+      # commonMain compiling says nothing about commonTest. Without this step the shared test
+      # suite is dead weight: it was added in one PR and sat there for the whole of that PR
+      # with two tests asserting things that were false, because no job ever ran it.
+      - name: Shared unit tests
+        run: ./gradlew :shared:testDebugUnitTest --stacktrace
+
+      - name: Upload shared test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared-test-report
+          path: shared/build/reports/tests/
+          if-no-files-found: ignore

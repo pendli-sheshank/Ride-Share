@@ -46,15 +46,26 @@ class AuthenticationFlowTest {
         }
     }
 
+    // No email validator exists in the codebase yet. This pins the rule the signup form is
+    // expected to enforce, so whoever writes the real validator has a spec to satisfy.
+    private fun isPlausibleEmail(value: String): Boolean {
+        val local = value.substringBefore("@", missingDelimiterValue = "")
+        val domain = value.substringAfter("@", missingDelimiterValue = "")
+        return local.isNotEmpty() &&
+            domain.contains(".") &&
+            !domain.startsWith(".") &&
+            !domain.endsWith(".")
+    }
+
     @Test
     fun testEmailValidation() {
-        val validEmail = "alice@example.com"
-        val invalidEmail1 = "alice@.com"
-        val invalidEmail2 = "aliceexample.com"
+        assertTrue(isPlausibleEmail("alice@example.com"))
+        assertTrue(isPlausibleEmail("a.b+tag@sub.example.co.uk"))
 
-        assertTrue(validEmail.contains("@"))
-        assertTrue(validEmail.contains("."))
-        assertFalse(invalidEmail1.substringAfter("@").startsWith("."))
+        assertFalse(isPlausibleEmail("alice@.com"), "domain may not start with a dot")
+        assertFalse(isPlausibleEmail("aliceexample.com"), "missing @")
+        assertFalse(isPlausibleEmail("@example.com"), "missing local part")
+        assertFalse(isPlausibleEmail("alice@example"), "domain needs a dot")
     }
 
     @Test

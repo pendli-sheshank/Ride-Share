@@ -29,7 +29,7 @@ fi
 # Step 3: Build the Shared.framework for all iOS targets
 echo "📦 Building Shared.framework for iOS..."
 cd ..
-./gradlew :shared:linkReleaseFrameworkIosFat -x test --stacktrace
+./gradlew :shared:assembleSharedReleaseXCFramework --stacktrace
 echo "✅ Shared.framework built successfully"
 
 # Step 4: Install CocoaPods (if Pods are configured)
