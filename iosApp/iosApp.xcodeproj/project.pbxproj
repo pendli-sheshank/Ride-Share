@@ -8,7 +8,6 @@
 /* Begin PBXBuildFile section */
 		ADDBC3DFFBF25EEFB82A1B3D /* iOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C635C5E2CDDD511A937B1BE4 /* iOSApp.swift */; };
 		00117EF9E3F752CC92FFC020 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3213C9ECB6B259AEA2B8D1BB /* ContentView.swift */; };
-		1AAEBF72985C5539AC7891D4 /* Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = FD81299CF3F35F7D9D3BE2F2 /* Info.plist */; };
 		41842331DC585BB2A741E495 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3D8261F990D35581B391804F /* Assets.xcassets */; };
 		C184793FE5BA565897EAA63B /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = F65FD96E2BE4530ABB6CC5CC /* LaunchScreen.storyboard */; };
 		FE3CC1D9C1405115968A1DFD /* Shared.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4D78B6A376685539B5276587 /* Shared.framework */; };
@@ -140,7 +139,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1AAEBF72985C5539AC7891D4 /* Info.plist in Resources */,
 				41842331DC585BB2A741E495 /* Assets.xcassets in Resources */,
 				C184793FE5BA565897EAA63B /* LaunchScreen.storyboard in Resources */,
 			);
@@ -223,6 +221,7 @@
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
+				INFOPLIST_FILE = iosApp/Info.plist;
 				PRODUCT_BUNDLE_IDENTIFIER = com.splitcruiser.app;
 				PRODUCT_NAME = iosApp;
 				SDKROOT = iphoneos;
@@ -289,6 +288,7 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 14.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
+				INFOPLIST_FILE = iosApp/Info.plist;
 				PRODUCT_BUNDLE_IDENTIFIER = com.splitcruiser.app;
 				PRODUCT_NAME = iosApp;
 				SDKROOT = iphoneos;

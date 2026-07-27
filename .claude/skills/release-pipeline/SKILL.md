@@ -466,6 +466,24 @@ coin flip on a runner. Archiving cannot fall back to `-target`.
 `PBXNativeTarget` id and whose `ArchiveAction` is `Release`.
 **Note:** this was found by inspection before it cost a run, unlike the one above.
 
+### 2026-07-27 — archive: "Cannot code sign because the target does not have an Info.plist file"
+**Symptom:** with the pbxproj graph repaired, `xcodebuild archive` got as far as computing the
+dependency graph and running `actool`/`ibtool`, then failed with
+`error: Cannot code sign because the target does not have an Info.plist file and one is not
+being generated automatically ... (in target 'iosApp')`.
+**Cause:** `generate-project.py` listed `Info.plist` in the resources copy phase but never set
+`INFOPLIST_FILE`. Those are not interchangeable: the copy phase just drops the file into the
+bundle, whereas `INFOPLIST_FILE` is what tells Xcode which plist *is* the target's — and code
+signing requires the latter. The plist itself was complete and correct all along.
+**Fix:** set `INFOPLIST_FILE = iosApp/Info.plist` (relative to SRCROOT, which is `iosApp/`) in
+both target configurations, and removed `Info.plist` from the resources copy phase. Keeping
+both would fail the next build with "Multiple commands produce .../Info.plist", since
+INFOPLIST_FILE already installs a processed copy at the bundle root. The PBXFileReference is
+retained so the file still appears in the project navigator.
+**Check for it:** `grep INFOPLIST_FILE iosApp/iosApp.xcodeproj/project.pbxproj` — two hits
+expected, one per configuration. Note that `verify-xcodeproj.py` does *not* catch this: the
+reference graph was perfectly intact, the setting was simply absent.
+
 ---
 
 ## 8. Pre-flight checklist before merging to `main`
