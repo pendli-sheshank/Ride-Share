@@ -1,15 +1,24 @@
 #!/bin/bash
-# iOS app setup script - runs CocoaPods setup and builds Shared.framework
+# iOS app setup script - creates Xcode project, builds framework, and installs pods
 
 set -e
 
 echo "🔨 Setting up iOS app..."
 
-# Build the Shared.framework for all iOS targets
+# Step 1: Create Xcode project if it doesn't exist
+if [ ! -d "iosApp.xcodeproj" ]; then
+  echo "📝 Creating Xcode project structure..."
+  ./create-xcode-project.sh
+else
+  echo "✅ Xcode project already exists"
+fi
+
+# Step 2: Build the Shared.framework for all iOS targets
 echo "📦 Building Shared.framework..."
 cd ..
-./gradlew :shared:assembleSharedXCFramework
+./gradlew :shared:assembleSharedXCFramework -x test
 
+# Step 3: Install CocoaPods dependencies
 echo "📱 Installing CocoaPods dependencies..."
 cd iosApp
 pod install --repo-update
