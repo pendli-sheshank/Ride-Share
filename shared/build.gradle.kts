@@ -34,6 +34,7 @@ kotlin {
 
     androidMain.dependencies {
       implementation(libs.kotlinx.coroutines.android)
+      // Compose remains in app module only (platform-specific UI)
     }
   }
 }

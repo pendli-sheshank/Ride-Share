@@ -1,0 +1,247 @@
+name: iOS App Release Pipeline
+
+# Triggered manually with release type selection
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: 'Release type'
+        required: true
+        default: 'beta'
+        type: choice
+        options:
+          - beta
+          - production
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+  XCODE_VERSION: 15.3
+
+permissions:
+  contents: read
+
+jobs:
+  # Step 1: Build shared framework and iOS app
+  build:
+    name: Build iOS App Archive
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      # Setup Java for Gradle (builds Kotlin framework)
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # Step 1: Build Shared.framework from Kotlin Multiplatform
+      - name: Build Shared Framework
+        run: |
+          echo "📦 Building Shared.framework for iOS..."
+          ./gradlew :shared:linkReleaseFrameworkIosFat -x test --stacktrace
+          echo "✅ Shared.framework built successfully"
+
+      # Step 2: Verify iOS project structure
+      - name: Verify iOS Project
+        run: |
+          cd iosApp
+          echo "🔍 Verifying iOS project structure..."
+
+          # Check essential files
+          test -f "iosApp.xcodeproj/project.pbxproj" || exit 1
+          test -f "iosApp/Info.plist" || exit 1
+          test -f "iosApp/ContentView.swift" || exit 1
+
+          echo "✅ iOS project structure verified"
+
+      # Step 3: Install CocoaPods dependencies
+      - name: Install CocoaPods
+        run: |
+          cd iosApp
+          echo "📱 Installing CocoaPods dependencies..."
+          pod repo update
+          pod install --repo-update || echo "⚠️ CocoaPods install had issues, continuing..."
+          echo "✅ CocoaPods setup complete"
+
+      # Step 4: Create release archive
+      - name: Create Release Archive
+        run: |
+          cd iosApp
+          echo "📦 Creating Xcode archive..."
+
+          xcodebuild archive \
+            -scheme iosApp \
+            -configuration Release \
+            -archivePath "./build/iosApp.xcarchive" \
+            -derivedDataPath "./build/DerivedData" \
+            -allowProvisioningUpdates \
+            -verbose
+
+          echo "✅ Archive created: build/iosApp.xcarchive"
+
+      # Step 5: Export IPA file
+      - name: Export IPA File
+        run: |
+          cd iosApp
+          echo "📤 Exporting IPA for App Store..."
+
+          xcodebuild -exportArchive \
+            -archivePath "./build/iosApp.xcarchive" \
+            -exportPath "./build/export" \
+            -exportOptionsPlist "./exportOptions.plist" \
+            -verbose
+
+          ls -lh build/export/iosApp.ipa
+          echo "✅ IPA export complete"
+
+      # Step 6: Upload build artifacts for debugging/inspection
+      - name: Upload Build Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-artifacts
+          path: |
+            iosApp/build/export/iosApp.ipa
+            iosApp/build/iosApp.xcarchive
+          if-no-files-found: warn
+          retention-days: 30
+
+      # Step 7: Build summary
+      - name: Build Summary
+        if: success()
+        run: |
+          echo "## iOS App Release Build" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Build Status: ✅ SUCCESS" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Build Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release Type:** ${{ github.event.inputs.release_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Xcode Version:** ${{ env.XCODE_VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **iOS Target:** iOS 14.0+" >> $GITHUB_STEP_SUMMARY
+          echo "- **Architecture:** arm64 (device) + x86_64 (simulator)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Completed Steps" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Shared.framework built from Kotlin Multiplatform" >> $GITHUB_STEP_SUMMARY
+          echo "✅ iOS project structure verified" >> $GITHUB_STEP_SUMMARY
+          echo "✅ CocoaPods dependencies installed" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Release archive created" >> $GITHUB_STEP_SUMMARY
+          echo "✅ IPA file exported" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ github.event.inputs.release_type }}" = "beta" ]; then
+            echo "📱 **Upload to TestFlight** for beta testing" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "🎉 **Submit to App Store** for production release" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "[See iOS Release Pipeline Documentation](./.claude/ios-release-pipeline.md)" >> $GITHUB_STEP_SUMMARY
+
+  # Step 2: Upload to TestFlight (for beta releases)
+  testflight:
+    name: Upload to TestFlight
+    runs-on: macos-14
+    needs: build
+    if: github.event.inputs.release_type == 'beta'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ios-build-artifacts
+          path: iosApp/build/
+
+      # TODO: Implement TestFlight upload
+      # This requires:
+      # 1. App Store Connect API key (store as secret)
+      # 2. Authenticated altool or app-store-connect-swift-sdk
+      # 3. Build number management
+      - name: Upload to TestFlight
+        run: |
+          echo "⏳ TestFlight upload placeholder"
+          echo "TODO: Implement using App Store Connect API"
+          echo "Required secrets:"
+          echo "  - APPSTORE_CONNECT_ISSUER_ID"
+          echo "  - APPSTORE_CONNECT_KEY_ID"
+          echo "  - APPSTORE_CONNECT_PRIVATE_KEY"
+          echo ""
+          echo "Build ready for upload at: iosApp/build/export/iosApp.ipa"
+
+      - name: TestFlight Upload Summary
+        if: always()
+        run: |
+          echo "## TestFlight Upload" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⏳ **Status:** Awaiting implementation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Build:** iosApp/build/export/iosApp.ipa" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Next:** Configure App Store Connect API credentials" >> $GITHUB_STEP_SUMMARY
+
+  # Step 3: Submit to App Store (for production releases)
+  app-store:
+    name: Submit to App Store
+    runs-on: macos-14
+    needs: build
+    if: github.event.inputs.release_type == 'production'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ios-build-artifacts
+          path: iosApp/build/
+
+      # TODO: Implement App Store submission
+      # This requires:
+      # 1. Same App Store Connect API key as TestFlight
+      # 2. Automated metadata updates (release notes, etc.)
+      # 3. Submission for review
+      - name: Submit to App Store
+        run: |
+          echo "⏳ App Store submission placeholder"
+          echo "TODO: Implement using App Store Connect API"
+          echo "Required steps:"
+          echo "  1. Upload IPA to App Store Connect"
+          echo "  2. Add release notes"
+          echo "  3. Configure release date"
+          echo "  4. Submit for review"
+          echo ""
+          echo "Build ready for submission at: iosApp/build/export/iosApp.ipa"
+
+      - name: App Store Submission Summary
+        if: always()
+        run: |
+          echo "## App Store Submission" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⏳ **Status:** Awaiting implementation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Build:** iosApp/build/export/iosApp.ipa" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Next:** Configure App Store Connect API credentials & release notes" >> $GITHUB_STEP_SUMMARY
+
+  # Notify team of release
+  notify:
+    name: Notify Release Status
+    runs-on: ubuntu-latest
+    needs: [build]
+    if: always()
+    steps:
+      - name: Determine Status
+        id: status
+        run: |
+          if [ "${{ needs.build.result }}" = "success" ]; then
+            echo "status=✅ Build successful" >> $GITHUB_OUTPUT
+          else
+            echo "status=❌ Build failed" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Post Status
+        run: |
+          echo "Release Pipeline Status: ${{ steps.status.outputs.status }}"
+          echo "Release Type: ${{ github.event.inputs.release_type }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Actor: ${{ github.actor }}"

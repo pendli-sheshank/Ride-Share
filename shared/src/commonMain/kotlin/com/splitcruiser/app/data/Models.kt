@@ -251,6 +251,15 @@ fun NotificationAlert.toMap(): Map<String, Any?> = mapOf(
 )
 
 @Serializable
+data class MatchDetails(
+    val match: TripMatch,
+    val offer: TripOffer,
+    val request: RideRequest,
+    val hostProfile: User?,
+    val riderProfile: User?
+)
+
+@Serializable
 data class LocationPlace(
     val name: String,
     val address: String,
