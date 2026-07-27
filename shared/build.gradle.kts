@@ -34,10 +34,7 @@ kotlin {
 
     androidMain.dependencies {
       implementation(libs.kotlinx.coroutines.android)
-      // Compose is Android-only for now; UI is not in commonMain
-      implementation(libs.androidx.compose.bom)
-      implementation(libs.androidx.compose.ui)
-      implementation(libs.androidx.compose.material3)
+      // Compose remains in app module only (platform-specific UI)
     }
   }
 }

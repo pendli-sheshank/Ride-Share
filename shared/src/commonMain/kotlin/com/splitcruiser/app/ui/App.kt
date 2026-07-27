@@ -1,5 +1,9 @@
 package com.splitcruiser.app.ui
 
-// Platform-agnostic app entry point
-// Actual composable implementations are in androidMain and iosMain
-expect fun SawaariApp()
+// UI layer package
+// Actual app UI implementations:
+// - Android: app/src/main/java/com/splitcruiser/app/ui/SawaariApp.kt (Compose)
+// - iOS: iosApp/iosApp/ContentView.swift (SwiftUI)
+//
+// Shared: Theme colors, models, and business logic only
+// Platforms: Native UI implementations
