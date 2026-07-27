@@ -35,8 +35,10 @@ jobs:
       # Step 1: Build Shared.framework for iOS
       - name: Build Shared.framework
         run: |
-          ./gradlew :shared:linkReleaseFrameworkIosFat -x test --stacktrace
-          echo "✅ Shared.framework built successfully"
+          ./gradlew :shared:assembleSharedReleaseXCFramework --stacktrace
+          # linkReleaseFrameworkIosFat produces a device+simulator fat binary that App
+          # Store upload rejects, and never writes to build/XCFrameworks at all.
+          ls -R shared/build/XCFrameworks
 
       # Step 2: Verify iOS project structure
       - name: Verify iOS project structure

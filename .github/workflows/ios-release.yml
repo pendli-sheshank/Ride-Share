@@ -1,11 +1,12 @@
 name: iOS App Release Pipeline
 
-# Triggered manually with release type selection
+# Manual only. Uploading a build to App Store Connect is not reversible — a build number
+# can never be reused, even if the upload is later deleted — so this must not fire on push.
 on:
   workflow_dispatch:
     inputs:
       release_type:
-        description: 'Release type'
+        description: 'beta = upload to TestFlight; production = upload, then submit for review in App Store Connect'
         required: true
         default: 'beta'
         type: choice
@@ -13,22 +14,16 @@ on:
           - beta
           - production
 
-env:
-  DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
-  XCODE_VERSION: 15.3
-
 permissions:
   contents: read
 
 jobs:
-  # Step 1: Build shared framework and iOS app
-  build:
-    name: Build iOS App Archive
+  release:
+    name: Build, sign and upload iOS build
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
 
-      # Setup Java for Gradle (builds Kotlin framework)
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -36,212 +31,219 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      # Step 1: Build Shared.framework from Kotlin Multiplatform
-      - name: Build Shared Framework
+      # --- Fail fast on missing secrets -------------------------------------------------
+      # Without this, a missing secret surfaces as an opaque xcodebuild or altool error
+      # several minutes into the run. Named up front, it takes seconds to diagnose.
+      - name: Check required secrets are configured
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CERT_P12: ${{ secrets.IOS_DIST_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
+          PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.APPSTORE_CONNECT_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APPSTORE_CONNECT_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.APPSTORE_CONNECT_PRIVATE_KEY }}
         run: |
-          echo "📦 Building Shared.framework for iOS..."
-          ./gradlew :shared:linkReleaseFrameworkIosFat -x test --stacktrace
-          echo "✅ Shared.framework built successfully"
+          missing=""
+          for name in TEAM_ID CERT_P12 CERT_PASSWORD PROFILE ASC_KEY_ID ASC_ISSUER_ID ASC_PRIVATE_KEY; do
+            if [ -z "${!name}" ]; then
+              missing="$missing $name"
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing required repository secrets:$missing"
+            echo "See .claude/ios-release-pipeline.md for how to generate each one."
+            exit 1
+          fi
+          echo "All required secrets are present."
 
-      # Step 2: Verify iOS project structure
-      - name: Verify iOS Project
+      # --- Shared Kotlin framework ------------------------------------------------------
+      # assembleSharedReleaseXCFramework, NOT linkReleaseFrameworkIosFat: the latter lipos
+      # device (iosArm64) and simulator (iosX64) slices into one binary, and App Store upload
+      # rejects an archive containing simulator slices with ITMS-90240.
+      - name: Build Shared.xcframework
+        run: ./gradlew :shared:assembleSharedReleaseXCFramework --stacktrace
+
+      # The Xcode project links ../shared/build/XCFrameworks/release/Shared.xcframework by
+      # path. If Gradle ever changes that output location the archive fails later with a
+      # confusing "no such module 'Shared'", so assert the path here instead.
+      - name: Verify the framework landed where Xcode expects it
         run: |
-          cd iosApp
-          echo "🔍 Verifying iOS project structure..."
+          framework="shared/build/XCFrameworks/release/Shared.xcframework"
+          if [ ! -d "$framework" ]; then
+            echo "::error::Expected $framework to exist after the Gradle build."
+            echo "Contents of shared/build/XCFrameworks:"
+            ls -R shared/build/XCFrameworks || echo "(directory does not exist)"
+            exit 1
+          fi
+          echo "Found $framework"
+          ls "$framework"
 
-          # Check essential files
-          test -f "iosApp.xcodeproj/project.pbxproj" || exit 1
-          test -f "iosApp/Info.plist" || exit 1
-          test -f "iosApp/ContentView.swift" || exit 1
-
-          echo "✅ iOS project structure verified"
-
-      # Step 3: Install CocoaPods dependencies
-      - name: Install CocoaPods
+      # --- Code signing -----------------------------------------------------------------
+      # Signing material goes into a throwaway keychain that is deleted in the cleanup step,
+      # so nothing persists on the runner even though runners are ephemeral anyway.
+      - name: Install signing certificate and provisioning profile
+        env:
+          CERT_P12: ${{ secrets.IOS_DIST_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
+          PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+          KEYCHAIN_PASSWORD: ${{ github.run_id }}
         run: |
-          cd iosApp
-          echo "📱 Installing CocoaPods dependencies..."
-          pod repo update
-          pod install --repo-update || echo "⚠️ CocoaPods install had issues, continuing..."
-          echo "✅ CocoaPods setup complete"
+          set -euo pipefail
+          cert_path="$RUNNER_TEMP/dist.p12"
+          profile_path="$RUNNER_TEMP/profile.mobileprovision"
+          keychain_path="$RUNNER_TEMP/signing.keychain-db"
 
-      # Step 4: Create release archive
-      - name: Create Release Archive
+          # Redirection rather than `base64 -o`: the -o flag is BSD-only and this recipe gets
+          # copied to Linux runners often enough that it is not worth the trap.
+          printf '%s' "$CERT_P12" | base64 --decode > "$cert_path"
+          printf '%s' "$PROFILE" | base64 --decode > "$profile_path"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+
+          security import "$cert_path" -P "$CERT_PASSWORD" -A \
+            -t cert -f pkcs12 -k "$keychain_path"
+          # Lets codesign use the key without an interactive prompt.
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$keychain_path" > /dev/null
+          security list-keychains -d user -s "$keychain_path"
+
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          uuid=$(security cms -D -i "$profile_path" | plutil -extract UUID raw -)
+          cp "$profile_path" "$HOME/Library/MobileDevice/Provisioning Profiles/$uuid.mobileprovision"
+          echo "PROVISIONING_PROFILE_UUID=$uuid" >> "$GITHUB_ENV"
+
+          echo "Installed signing identities:"
+          security find-identity -v -p codesigning "$keychain_path"
+
+      # --- Version / build number -------------------------------------------------------
+      # App Store Connect rejects a build whose CFBundleVersion it has already seen for this
+      # CFBundleShortVersionString. run_number is monotonic per workflow, so it never repeats.
+      - name: Set build number
         run: |
-          cd iosApp
-          echo "📦 Creating Xcode archive..."
+          set -euo pipefail
+          plist="iosApp/iosApp/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" "$plist"
+          echo "Marketing version: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")"
+          echo "Build number:      $(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist")"
 
+      # --- Archive ----------------------------------------------------------------------
+      # No CocoaPods step: the Podfile declares no pods for the iosApp target, so there is
+      # nothing to install, and running it would force building a .xcworkspace instead.
+      - name: Create Xcode archive
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
           xcodebuild archive \
+            -project iosApp/iosApp.xcodeproj \
             -scheme iosApp \
             -configuration Release \
-            -archivePath "./build/iosApp.xcarchive" \
-            -derivedDataPath "./build/DerivedData" \
-            -allowProvisioningUpdates \
-            -verbose
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/iosApp.xcarchive" \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            PROVISIONING_PROFILE_SPECIFIER="$PROVISIONING_PROFILE_UUID" \
+            CODE_SIGN_IDENTITY="Apple Distribution"
 
-          echo "✅ Archive created: build/iosApp.xcarchive"
-
-      # Step 5: Export IPA file
-      - name: Export IPA File
+      - name: Export signed IPA
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          cd iosApp
-          echo "📤 Exporting IPA for App Store..."
+          set -euo pipefail
+          # Generated here rather than committed so the team ID stays out of the repository.
+          cat > "$RUNNER_TEMP/exportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>teamID</key>
+            <string>$TEAM_ID</string>
+            <key>stripSwiftSymbols</key>
+            <true/>
+            <key>uploadSymbols</key>
+            <true/>
+          </dict>
+          </plist>
+          PLIST
 
           xcodebuild -exportArchive \
-            -archivePath "./build/iosApp.xcarchive" \
-            -exportPath "./build/export" \
-            -exportOptionsPlist "./exportOptions.plist" \
-            -verbose
+            -archivePath "$RUNNER_TEMP/iosApp.xcarchive" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -exportOptionsPlist "$RUNNER_TEMP/exportOptions.plist"
 
-          ls -lh build/export/iosApp.ipa
-          echo "✅ IPA export complete"
+          ls -lh "$RUNNER_TEMP/export"
 
-      # Step 6: Upload build artifacts for debugging/inspection
-      - name: Upload Build Artifacts
+      # --- Upload to App Store Connect --------------------------------------------------
+      - name: Upload to App Store Connect
+        env:
+          ASC_KEY_ID: ${{ secrets.APPSTORE_CONNECT_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APPSTORE_CONNECT_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.APPSTORE_CONNECT_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          # altool discovers the key by filename in this directory; the name is not arbitrary.
+          key_dir="$HOME/.appstoreconnect/private_keys"
+          mkdir -p "$key_dir"
+          printf '%s' "$ASC_PRIVATE_KEY" > "$key_dir/AuthKey_${ASC_KEY_ID}.p8"
+
+          ipa=$(find "$RUNNER_TEMP/export" -name '*.ipa' -maxdepth 1 | head -n 1)
+          if [ -z "$ipa" ]; then
+            echo "::error::No .ipa produced by the export step."
+            exit 1
+          fi
+          echo "Uploading $ipa"
+
+          xcrun altool --upload-app \
+            --file "$ipa" \
+            --type ios \
+            --apiKey "$ASC_KEY_ID" \
+            --apiIssuer "$ASC_ISSUER_ID"
+
+          rm -f "$key_dir/AuthKey_${ASC_KEY_ID}.p8"
+
+      - name: Upload IPA as a workflow artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ios-build-artifacts
-          path: |
-            iosApp/build/export/iosApp.ipa
-            iosApp/build/iosApp.xcarchive
+          name: ios-release-ipa
+          path: ${{ runner.temp }}/export/*.ipa
           if-no-files-found: warn
           retention-days: 30
 
-      # Step 7: Build summary
-      - name: Build Summary
-        if: success()
-        run: |
-          echo "## iOS App Release Build" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Build Status: ✅ SUCCESS" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Build Details" >> $GITHUB_STEP_SUMMARY
-          echo "- **Release Type:** ${{ github.event.inputs.release_type }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Xcode Version:** ${{ env.XCODE_VERSION }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **iOS Target:** iOS 14.0+" >> $GITHUB_STEP_SUMMARY
-          echo "- **Architecture:** arm64 (device) + x86_64 (simulator)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Completed Steps" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Shared.framework built from Kotlin Multiplatform" >> $GITHUB_STEP_SUMMARY
-          echo "✅ iOS project structure verified" >> $GITHUB_STEP_SUMMARY
-          echo "✅ CocoaPods dependencies installed" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Release archive created" >> $GITHUB_STEP_SUMMARY
-          echo "✅ IPA file exported" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ github.event.inputs.release_type }}" = "beta" ]; then
-            echo "📱 **Upload to TestFlight** for beta testing" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "🎉 **Submit to App Store** for production release" >> $GITHUB_STEP_SUMMARY
-          fi
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "[See iOS Release Pipeline Documentation](./.claude/ios-release-pipeline.md)" >> $GITHUB_STEP_SUMMARY
-
-  # Step 2: Upload to TestFlight (for beta releases)
-  testflight:
-    name: Upload to TestFlight
-    runs-on: macos-14
-    needs: build
-    if: github.event.inputs.release_type == 'beta'
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download Build Artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: ios-build-artifacts
-          path: iosApp/build/
-
-      # TODO: Implement TestFlight upload
-      # This requires:
-      # 1. App Store Connect API key (store as secret)
-      # 2. Authenticated altool or app-store-connect-swift-sdk
-      # 3. Build number management
-      - name: Upload to TestFlight
-        run: |
-          echo "⏳ TestFlight upload placeholder"
-          echo "TODO: Implement using App Store Connect API"
-          echo "Required secrets:"
-          echo "  - APPSTORE_CONNECT_ISSUER_ID"
-          echo "  - APPSTORE_CONNECT_KEY_ID"
-          echo "  - APPSTORE_CONNECT_PRIVATE_KEY"
-          echo ""
-          echo "Build ready for upload at: iosApp/build/export/iosApp.ipa"
-
-      - name: TestFlight Upload Summary
+      # Runners are ephemeral, but an unlocked keychain left behind would be visible to any
+      # later step in this same job, so remove it explicitly.
+      - name: Clean up keychain and signing material
         if: always()
         run: |
-          echo "## TestFlight Upload" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "⏳ **Status:** Awaiting implementation" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Build:** iosApp/build/export/iosApp.ipa" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Next:** Configure App Store Connect API credentials" >> $GITHUB_STEP_SUMMARY
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/dist.p12" "$RUNNER_TEMP/profile.mobileprovision"
+          rm -rf "$HOME/.appstoreconnect/private_keys"
 
-  # Step 3: Submit to App Store (for production releases)
-  app-store:
-    name: Submit to App Store
-    runs-on: macos-14
-    needs: build
-    if: github.event.inputs.release_type == 'production'
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download Build Artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: ios-build-artifacts
-          path: iosApp/build/
-
-      # TODO: Implement App Store submission
-      # This requires:
-      # 1. Same App Store Connect API key as TestFlight
-      # 2. Automated metadata updates (release notes, etc.)
-      # 3. Submission for review
-      - name: Submit to App Store
-        run: |
-          echo "⏳ App Store submission placeholder"
-          echo "TODO: Implement using App Store Connect API"
-          echo "Required steps:"
-          echo "  1. Upload IPA to App Store Connect"
-          echo "  2. Add release notes"
-          echo "  3. Configure release date"
-          echo "  4. Submit for review"
-          echo ""
-          echo "Build ready for submission at: iosApp/build/export/iosApp.ipa"
-
-      - name: App Store Submission Summary
+      - name: Summary
         if: always()
         run: |
-          echo "## App Store Submission" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "⏳ **Status:** Awaiting implementation" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Build:** iosApp/build/export/iosApp.ipa" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Next:** Configure App Store Connect API credentials & release notes" >> $GITHUB_STEP_SUMMARY
-
-  # Notify team of release
-  notify:
-    name: Notify Release Status
-    runs-on: ubuntu-latest
-    needs: [build]
-    if: always()
-    steps:
-      - name: Determine Status
-        id: status
-        run: |
-          if [ "${{ needs.build.result }}" = "success" ]; then
-            echo "status=✅ Build successful" >> $GITHUB_OUTPUT
-          else
-            echo "status=❌ Build failed" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Post Status
-        run: |
-          echo "Release Pipeline Status: ${{ steps.status.outputs.status }}"
-          echo "Release Type: ${{ github.event.inputs.release_type }}"
-          echo "Commit: ${{ github.sha }}"
-          echo "Actor: ${{ github.actor }}"
+          {
+            echo "## iOS release — ${{ github.event.inputs.release_type }}"
+            echo ""
+            echo "- Build number: \`${{ github.run_number }}\`"
+            echo "- Commit: \`${{ github.sha }}\`"
+            echo ""
+            if [ "${{ job.status }}" = "success" ]; then
+              echo "Build uploaded to App Store Connect. Processing usually takes 10–30 minutes."
+              echo ""
+              if [ "${{ github.event.inputs.release_type }}" = "beta" ]; then
+                echo "Next: assign the build to a TestFlight group in App Store Connect."
+              else
+                echo "Next: attach the build to the App Store version and submit for review."
+              fi
+            else
+              echo "Run failed — see the failing step above."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
