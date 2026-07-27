@@ -10,9 +10,15 @@ import uuid
 from pathlib import Path
 
 
-def generate_id(length=24):
-    """Generate a unique identifier for pbxproj."""
-    return uuid.uuid4().hex[:length].upper()
+# Deterministic on purpose. uuid4() meant every run rewrote every ID, so the checked-in
+# project.pbxproj could never be diffed against a fresh generation to confirm it was still
+# correct — which is how 12 dangling references went unnoticed until a release build.
+_ID_NAMESPACE = uuid.UUID("6f1a9c3e-58d2-4a7b-9e14-2c8d5b0f7a63")
+
+
+def generate_id(name, length=24):
+    """Stable identifier for a pbxproj object, derived from its role."""
+    return uuid.uuid5(_ID_NAMESPACE, name).hex[:length].upper()
 
 
 def create_xcode_project():
@@ -32,28 +38,39 @@ def create_xcode_project():
 
     # Generate unique identifiers for all objects
     ids = {
-        "project": generate_id(),
-        "products_group": generate_id(),
-        "main_group": generate_id(),
-        "iosapp_group": generate_id(),
-        "resources_group": generate_id(),
-        "frameworks_group": generate_id(),
-        "native_target": generate_id(),
-        "frameworks_build_phase": generate_id(),
-        "sources_build_phase": generate_id(),
-        "resources_build_phase": generate_id(),
-        "iosapp_swift": generate_id(),
-        "contentview_swift": generate_id(),
-        "info_plist": generate_id(),
-        "assets": generate_id(),
-        "launchscreen": generate_id(),
-        "shared_framework_ref": generate_id(),
-        "shared_framework_build": generate_id(),
-        "app_product": generate_id(),
-        "debug_config": generate_id(),
-        "release_config": generate_id(),
-        "project_debug": generate_id(),
-        "project_release": generate_id(),
+        "project": generate_id("project"),
+        "products_group": generate_id("products_group"),
+        "main_group": generate_id("main_group"),
+        "iosapp_group": generate_id("iosapp_group"),
+        "resources_group": generate_id("resources_group"),
+        "frameworks_group": generate_id("frameworks_group"),
+        "native_target": generate_id("native_target"),
+        "frameworks_build_phase": generate_id("frameworks_build_phase"),
+        "sources_build_phase": generate_id("sources_build_phase"),
+        "resources_build_phase": generate_id("resources_build_phase"),
+        "iosapp_swift": generate_id("iosapp_swift"),
+        "contentview_swift": generate_id("contentview_swift"),
+        "info_plist": generate_id("info_plist"),
+        "assets": generate_id("assets"),
+        "launchscreen": generate_id("launchscreen"),
+        "shared_framework_ref": generate_id("shared_framework_ref"),
+        "shared_framework_build": generate_id("shared_framework_build"),
+        "app_product": generate_id("app_product"),
+        "debug_config": generate_id("debug_config"),
+        "release_config": generate_id("release_config"),
+        "project_debug": generate_id("project_debug"),
+        "project_release": generate_id("project_release"),
+        # PBXFileReference ids, distinct from the PBXBuildFile ids above.
+        "iosapp_swift_ref": generate_id("iosapp_swift_ref"),
+        "contentview_swift_ref": generate_id("contentview_swift_ref"),
+        "info_plist_ref": generate_id("info_plist_ref"),
+        "assets_ref": generate_id("assets_ref"),
+        "launchscreen_ref": generate_id("launchscreen_ref"),
+        # Referenced by PBXNativeTarget/PBXProject and defined in XCConfigurationList. These
+        # were emitted inline at four call sites, so reference and definition never matched;
+        # that is exactly what "The project contains no build configurations" means.
+        "project_config_list": generate_id("project_config_list"),
+        "target_config_list": generate_id("target_config_list"),
     }
 
     pbxproj = f"""// !$*UTF8*$!
@@ -64,21 +81,21 @@ def create_xcode_project():
 	objectVersion = 56;
 	objects = {{
 /* Begin PBXBuildFile section */
-		{ids['iosapp_swift']} /* iOSApp.swift in Sources */ = {{isa = PBXBuildFile; fileRef = {generate_id()} /* iOSApp.swift */; }};
-		{ids['contentview_swift']} /* ContentView.swift in Sources */ = {{isa = PBXBuildFile; fileRef = {generate_id()} /* ContentView.swift */; }};
-		{ids['info_plist']} /* Info.plist in Resources */ = {{isa = PBXBuildFile; fileRef = {generate_id()} /* Info.plist */; }};
-		{ids['assets']} /* Assets.xcassets in Resources */ = {{isa = PBXBuildFile; fileRef = {generate_id()} /* Assets.xcassets */; }};
-		{ids['launchscreen']} /* LaunchScreen.storyboard in Resources */ = {{isa = PBXBuildFile; fileRef = {generate_id()} /* LaunchScreen.storyboard */; }};
+		{ids['iosapp_swift']} /* iOSApp.swift in Sources */ = {{isa = PBXBuildFile; fileRef = {ids['iosapp_swift_ref']} /* iOSApp.swift */; }};
+		{ids['contentview_swift']} /* ContentView.swift in Sources */ = {{isa = PBXBuildFile; fileRef = {ids['contentview_swift_ref']} /* ContentView.swift */; }};
+		{ids['info_plist']} /* Info.plist in Resources */ = {{isa = PBXBuildFile; fileRef = {ids['info_plist_ref']} /* Info.plist */; }};
+		{ids['assets']} /* Assets.xcassets in Resources */ = {{isa = PBXBuildFile; fileRef = {ids['assets_ref']} /* Assets.xcassets */; }};
+		{ids['launchscreen']} /* LaunchScreen.storyboard in Resources */ = {{isa = PBXBuildFile; fileRef = {ids['launchscreen_ref']} /* LaunchScreen.storyboard */; }};
 		{ids['shared_framework_build']} /* Shared.framework in Frameworks */ = {{isa = PBXBuildFile; fileRef = {ids['shared_framework_ref']} /* Shared.framework */; }};
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		{ids['app_product']} /* iosApp.app */ = {{isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = iosApp.app; sourceTree = BUILT_PRODUCTS_DIR; }};
-		{generate_id()} /* iOSApp.swift */ = {{isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp.swift; sourceTree = "<group>"; }};
-		{generate_id()} /* ContentView.swift */ = {{isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; }};
-		{generate_id()} /* Info.plist */ = {{isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; }};
-		{generate_id()} /* Assets.xcassets */ = {{isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; }};
-		{generate_id()} /* LaunchScreen.storyboard */ = {{isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; }};
+		{ids['iosapp_swift_ref']} /* iOSApp.swift */ = {{isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp.swift; sourceTree = "<group>"; }};
+		{ids['contentview_swift_ref']} /* ContentView.swift */ = {{isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; }};
+		{ids['info_plist_ref']} /* Info.plist */ = {{isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; }};
+		{ids['assets_ref']} /* Assets.xcassets */ = {{isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; }};
+		{ids['launchscreen_ref']} /* LaunchScreen.storyboard */ = {{isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; }};
 		{ids['shared_framework_ref']} /* Shared.framework */ = {{isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = ../shared/build/XCFrameworks/release/Shared.xcframework; sourceTree = SOURCE_ROOT; }};
 /* End PBXFileReference section */
 
@@ -114,8 +131,8 @@ def create_xcode_project():
 		{ids['iosapp_group']} /* iosApp */ = {{
 			isa = PBXGroup;
 			children = (
-				{generate_id()} /* iOSApp.swift */,
-				{generate_id()} /* ContentView.swift */,
+				{ids['iosapp_swift_ref']} /* iOSApp.swift */,
+				{ids['contentview_swift_ref']} /* ContentView.swift */,
 				{ids['resources_group']} /* Resources */,
 			);
 			path = iosApp;
@@ -124,9 +141,9 @@ def create_xcode_project():
 		{ids['resources_group']} /* Resources */ = {{
 			isa = PBXGroup;
 			children = (
-				{generate_id()} /* Assets.xcassets */,
-				{generate_id()} /* LaunchScreen.storyboard */,
-				{generate_id()} /* Info.plist */,
+				{ids['assets_ref']} /* Assets.xcassets */,
+				{ids['launchscreen_ref']} /* LaunchScreen.storyboard */,
+				{ids['info_plist_ref']} /* Info.plist */,
 			);
 			name = Resources;
 			sourceTree = "<group>";
@@ -144,7 +161,7 @@ def create_xcode_project():
 /* Begin PBXNativeTarget section */
 		{ids['native_target']} /* iosApp */ = {{
 			isa = PBXNativeTarget;
-			buildConfigurationList = {generate_id()} /* Build Settings */;
+			buildConfigurationList = {ids['target_config_list']} /* Build Settings */;
 			buildPhases = (
 				{ids['sources_build_phase']} /* Sources */,
 				{ids['frameworks_build_phase']} /* Frameworks */,
@@ -175,7 +192,7 @@ def create_xcode_project():
 					}};
 				}};
 			}};
-			buildConfigurationList = {generate_id()} /* Build Settings */;
+			buildConfigurationList = {ids['project_config_list']} /* Build Settings */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -479,7 +496,7 @@ def create_xcode_project():
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		{generate_id()} /* Build configuration list for PBXProject "iosApp" */ = {{
+		{ids['project_config_list']} /* Build configuration list for PBXProject "iosApp" */ = {{
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				{ids['project_debug']} /* Debug */,
@@ -488,7 +505,7 @@ def create_xcode_project():
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		}};
-		{generate_id()} /* Build configuration list for PBXNativeTarget "iosApp" */ = {{
+		{ids['target_config_list']} /* Build configuration list for PBXNativeTarget "iosApp" */ = {{
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				{ids['debug_config']} /* Debug */,
@@ -508,9 +525,8 @@ def create_xcode_project():
     pbxproj_path.write_text(pbxproj)
     print(f"✅ Generated {pbxproj_path}")
 
-    # Create project.pbxproj.orig backup
-    orig_path = xcodeproj_path / "project.pbxproj.orig"
-    orig_path.write_text(pbxproj)
+    # No project.pbxproj.orig: it was written with the same content as project.pbxproj in the
+    # same breath, so it backed up nothing and only doubled the diff on every regeneration.
 
     # Create xcworkspace Contents.json
     workspace_path = xcodeproj_path / "project.xcworkspace" / "contents.xcworkspacedata"
@@ -523,6 +539,84 @@ def create_xcode_project():
 """
     workspace_path.write_text(workspace_contents)
     print(f"✅ Generated {workspace_path}")
+
+    # A *shared* scheme. `xcodebuild archive` requires -scheme (there is no -target form for
+    # archiving), and whether xcodebuild autocreates one for a project with no xcshareddata is
+    # version-dependent — exactly the kind of thing that works locally and fails on a runner.
+    # Committing the scheme removes the question.
+    schemes_dir = xcodeproj_path / "xcshareddata" / "xcschemes"
+    schemes_dir.mkdir(parents=True, exist_ok=True)
+    scheme_path = schemes_dir / "iosApp.xcscheme"
+    buildable = f"""<BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "{ids['native_target']}"
+               BuildableName = "iosApp.app"
+               BlueprintName = "iosApp"
+               ReferencedContainer = "container:iosApp.xcodeproj">
+            </BuildableReference>"""
+    scheme_contents = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Scheme
+   LastUpgradeVersion = "1500"
+   version = "1.7">
+   <BuildAction
+      parallelizeBuildables = "YES"
+      buildImplicitDependencies = "YES">
+      <BuildActionEntries>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            {buildable}
+         </BuildActionEntry>
+      </BuildActionEntries>
+   </BuildAction>
+   <TestAction
+      buildConfiguration = "Debug"
+      selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
+      selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
+      shouldUseLaunchSchemeArgsEnv = "YES">
+      <Testables>
+      </Testables>
+   </TestAction>
+   <LaunchAction
+      buildConfiguration = "Debug"
+      selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
+      selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
+      launchStyle = "0"
+      useCustomWorkingDirectory = "NO"
+      ignoresPersistentStateOnLaunch = "NO"
+      debugDocumentVersioning = "YES"
+      debugServiceExtension = "internal"
+      allowLocationSimulation = "YES">
+      <BuildableProductRunnable
+         runnableDebuggingMode = "0">
+         {buildable}
+      </BuildableProductRunnable>
+   </LaunchAction>
+   <ProfileAction
+      buildConfiguration = "Release"
+      shouldUseLaunchSchemeArgsEnv = "YES"
+      savedToolIdentifier = ""
+      useCustomWorkingDirectory = "NO"
+      debugDocumentVersioning = "YES">
+      <BuildableProductRunnable
+         runnableDebuggingMode = "0">
+         {buildable}
+      </BuildableProductRunnable>
+   </ProfileAction>
+   <AnalyzeAction
+      buildConfiguration = "Debug">
+   </AnalyzeAction>
+   <ArchiveAction
+      buildConfiguration = "Release"
+      revealArchiveInOrganizer = "YES">
+   </ArchiveAction>
+</Scheme>
+"""
+    scheme_path.write_text(scheme_contents)
+    print(f"✅ Generated {scheme_path}")
 
     print(f"✅ Xcode project structure created successfully")
 

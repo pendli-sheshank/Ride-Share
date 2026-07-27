@@ -40,6 +40,27 @@ jobs:
           # Store upload rejects, and never writes to build/XCFrameworks at all.
           ls -R shared/build/XCFrameworks
 
+      # Catches a dangling object reference in the generated pbxproj. Xcode reports that only
+      # as "the project is damaged", with no file, line or ID — and only on a macOS runner,
+      # minutes into a release build. This runs in milliseconds, on any platform.
+      - name: Verify the Xcode project graph is intact
+        run: python3 .github/scripts/verify-xcodeproj.py iosApp/iosApp.xcodeproj/project.pbxproj
+
+      # The generator is deterministic, so a regenerated project must be byte-identical to the
+      # committed one. If it is not, the checked-in project was hand-edited and the next
+      # regeneration would silently revert that edit.
+      - name: Verify the committed project matches the generator
+        run: |
+          cd iosApp
+          cp iosApp.xcodeproj/project.pbxproj /tmp/committed.pbxproj
+          python3 generate-project.py > /dev/null
+          if ! diff -u /tmp/committed.pbxproj iosApp.xcodeproj/project.pbxproj; then
+            echo "::error::project.pbxproj differs from generate-project.py output."
+            echo "Re-run iosApp/generate-project.py and commit the result, or fix the generator."
+            exit 1
+          fi
+          echo "Committed project matches the generator."
+
       # Step 2: Verify iOS project structure
       - name: Verify iOS project structure
         run: |
