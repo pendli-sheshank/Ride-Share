@@ -83,7 +83,6 @@ def create_xcode_project():
 /* Begin PBXBuildFile section */
 		{ids['iosapp_swift']} /* iOSApp.swift in Sources */ = {{isa = PBXBuildFile; fileRef = {ids['iosapp_swift_ref']} /* iOSApp.swift */; }};
 		{ids['contentview_swift']} /* ContentView.swift in Sources */ = {{isa = PBXBuildFile; fileRef = {ids['contentview_swift_ref']} /* ContentView.swift */; }};
-		{ids['info_plist']} /* Info.plist in Resources */ = {{isa = PBXBuildFile; fileRef = {ids['info_plist_ref']} /* Info.plist */; }};
 		{ids['assets']} /* Assets.xcassets in Resources */ = {{isa = PBXBuildFile; fileRef = {ids['assets_ref']} /* Assets.xcassets */; }};
 		{ids['launchscreen']} /* LaunchScreen.storyboard in Resources */ = {{isa = PBXBuildFile; fileRef = {ids['launchscreen_ref']} /* LaunchScreen.storyboard */; }};
 		{ids['shared_framework_build']} /* Shared.framework in Frameworks */ = {{isa = PBXBuildFile; fileRef = {ids['shared_framework_ref']} /* Shared.framework */; }};
@@ -215,7 +214,6 @@ def create_xcode_project():
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				{ids['info_plist']} /* Info.plist in Resources */,
 				{ids['assets']} /* Assets.xcassets in Resources */,
 				{ids['launchscreen']} /* LaunchScreen.storyboard in Resources */,
 			);
@@ -298,6 +296,7 @@ def create_xcode_project():
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
+				INFOPLIST_FILE = iosApp/Info.plist;
 				PRODUCT_BUNDLE_IDENTIFIER = {bundle_id};
 				PRODUCT_NAME = iosApp;
 				SDKROOT = iphoneos;
@@ -364,6 +363,7 @@ def create_xcode_project():
 				IPHONEOS_DEPLOYMENT_TARGET = 14.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
+				INFOPLIST_FILE = iosApp/Info.plist;
 				PRODUCT_BUNDLE_IDENTIFIER = {bundle_id};
 				PRODUCT_NAME = iosApp;
 				SDKROOT = iphoneos;
