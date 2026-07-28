@@ -55,9 +55,9 @@ Consequences worth knowing before changing anything here:
   restores the `Result` shape for the ViewModel; Swift never sees it.
 - **Firebase is the only store.** The old Moshi JSON fallback is gone. An unconfigured build fails
   loudly rather than pretending to work.
-- Firestore rules and indexes are deployable via `firebase.json`. **Invites must be seeded out of
-  band** — the rules make `invites` create-only-by-backend, so a release without seeded codes has
-  a dead signup funnel.
+- Firestore rules and indexes are deployable via `firebase.json`. Signup is **not** gated on an
+  invite code any more; onboarding collects a contact number and a home address instead, and the
+  address lives in `users/{uid}/private/profile` because `users` itself is world-readable.
 
 ## Accuracy of the existing docs
 
@@ -80,8 +80,11 @@ not evidence. Verify against a build.
 - **The UI is not shared.** The backend is, but Android is Jetpack Compose in `:app` and iOS is
   SwiftUI in `iosApp/`, so every screen exists twice. iOS covers a subset: auth, browse, post an
   offer, post a request, reserve a seat, accept/decline. No chat, ratings, blocking or profile
-  pictures yet. Sharing the UI would mean Compose Multiplatform and moving `SplitCruiserApp.kt`
-  into `commonMain`.
+  pictures yet. **Google sign-in is Android-only** — the token exchange is in `:shared`, but only
+  Android acquires a Google ID token (Credential Manager); iOS would need an
+  `ASWebAuthenticationSession` flow and a URL scheme in the generated Xcode project.
+  Sharing the UI would mean Compose Multiplatform and moving `SplitCruiserApp.kt` into
+  `commonMain`.
 - **iOS keeps the refresh token in `NSUserDefaults`, not the Keychain.** It is a long-lived
   credential sitting in a plaintext plist that is included in unencrypted backups. `KeychainStore`
   is the fix; it was deferred because Keychain cinterop cannot be compile-checked on Linux.
@@ -94,6 +97,6 @@ not evidence. Verify against a build.
   filename.
 - The `google-services` and `secrets` Gradle plugins are inert on `:app` now that no native
   Firebase SDK consumes them.
-- Test coverage: 111 tests in `:shared` cover the codec, the REST clients, token refresh, the feed
+- Test coverage: 118 tests in `:shared` cover the codec, the REST clients, token refresh, the feed
   rules and the repository. `:app` has three (a Robolectric label check, a Roborazzi screenshot,
   and an arithmetic placeholder); the androidTest suite is still not run by any CI job.

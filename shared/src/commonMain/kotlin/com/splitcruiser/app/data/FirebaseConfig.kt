@@ -15,6 +15,14 @@ data class FirebaseConfig(
     val apiKey: String,
     val projectId: String,
     val storageBucket: String,
+    /**
+     * The OAuth 2.0 **Web** client ID, or empty when Google sign-in has not been set up.
+     *
+     * Only the platform half of the flow needs it — it is what the Google ID token is minted for.
+     * The token exchange in [com.splitcruiser.app.data.firebase.FirebaseAuthClient] does not, since
+     * Identity Toolkit infers the audience from the API key.
+     */
+    val googleWebClientId: String = "",
 ) {
     /**
      * False when a value is missing or is still the placeholder committed in `.env.example`.
@@ -25,6 +33,14 @@ data class FirebaseConfig(
      */
     val isConfigured: Boolean
         get() = listOf(apiKey, projectId).all { it.isNotBlank() && !it.contains("PLACEHOLDER") }
+
+    /**
+     * Whether to offer the Google button at all. Showing it without a client ID produces a
+     * `DEVELOPER_ERROR` from Play Services at the tap, which says nothing to a user.
+     */
+    val isGoogleSignInConfigured: Boolean
+        get() = isConfigured && googleWebClientId.isNotBlank() &&
+            !googleWebClientId.contains("PLACEHOLDER")
 
     val identityBase: String
         get() = "https://identitytoolkit.googleapis.com/v1"
@@ -51,6 +67,7 @@ data class FirebaseConfig(
             apiKey = FirebaseBuildConfig.API_KEY,
             projectId = FirebaseBuildConfig.PROJECT_ID,
             storageBucket = FirebaseBuildConfig.STORAGE_BUCKET,
+            googleWebClientId = FirebaseBuildConfig.GOOGLE_WEB_CLIENT_ID,
         )
     }
 }

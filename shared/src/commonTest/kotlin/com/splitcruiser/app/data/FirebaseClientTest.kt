@@ -145,6 +145,79 @@ class FirebaseClientTest {
         assertContains(failure.message!!, "at least 6 characters")
     }
 
+    /**
+     * The failure a project that has never had Authentication enabled returns. It reached the login
+     * screen as the bare "Configuration not found", which names neither the cause nor the project.
+     */
+    @Test
+    fun configurationNotFoundNamesTheProjectAndTheConsoleStep() = runTest {
+        val http = createFirebaseHttpClient(
+            engine {
+                HttpStatusCode.BadRequest to
+                    """{"error":{"code":400,"message":"CONFIGURATION_NOT_FOUND","status":"INVALID_ARGUMENT"}}"""
+            }
+        )
+        val failure = assertFailsWith<SplitCruiserException> {
+            FirebaseAuthClient(http, config).signIn("ana@neu.edu", "hunter2")
+        }
+        assertEquals("CONFIGURATION_NOT_FOUND", failure.code)
+        assertContains(failure.message!!, "split-cruiser-test")
+        assertContains(failure.message!!, "Authentication")
+    }
+
+    /** A rejected key is an English sentence, not a code; lowercasing it produced "api key not valid". */
+    @Test
+    fun anInvalidApiKeyIsReportedWithoutMangling() = runTest {
+        val http = createFirebaseHttpClient(
+            engine {
+                HttpStatusCode.BadRequest to
+                    """{"error":{"code":400,"message":"API key not valid. Please pass a valid API key.","status":"INVALID_ARGUMENT"}}"""
+            }
+        )
+        val failure = assertFailsWith<SplitCruiserException> {
+            FirebaseAuthClient(http, config).signUp("ana@neu.edu", "hunter2")
+        }
+        assertContains(failure.message!!, "FIREBASE_API_KEY")
+    }
+
+    /** Every auth endpoint maps errors the Identity Toolkit way, not the Firestore way. */
+    @Test
+    fun theOtherAuthEndpointsAlsoGetReadableMessages() = runTest {
+        val http = createFirebaseHttpClient(
+            engine { HttpStatusCode.BadRequest to """{"error":{"code":400,"message":"EMAIL_NOT_FOUND"}}""" }
+        )
+        val failure = assertFailsWith<SplitCruiserException> {
+            FirebaseAuthClient(http, config).sendPasswordReset("nobody@neu.edu")
+        }
+        assertEquals("EMAIL_NOT_FOUND", failure.code)
+        assertContains(failure.message!!, "No account found")
+    }
+
+    /**
+     * The Google token exchange. `postBody` is form-encoded inside a JSON field, and the provider
+     * id has to travel with it — omitting it fails with a code that blames the token instead.
+     */
+    @Test
+    fun googleSignInPostsTheIdTokenToSignInWithIdp() = runTest {
+        val http = createFirebaseHttpClient(
+            engine {
+                HttpStatusCode.OK to """
+                {"localId":"user_g","email":"ana@gmail.com","idToken":"tok","refreshToken":"ref",
+                 "expiresIn":"3600","displayName":"Ana R","photoUrl":"https://lh3.example/ana.jpg"}
+                """.trimIndent()
+            }
+        )
+        val result = FirebaseAuthClient(http, config).signInWithGoogle("google-jwt")
+
+        assertEquals("user_g", result.session.uid)
+        assertEquals("https://lh3.example/ana.jpg", result.photoUrl)
+        val request = requests.single()
+        assertContains(request.url.toString(), "accounts:signInWithIdp")
+        val body = (request.body as io.ktor.http.content.TextContent).text
+        assertContains(body, "id_token=google-jwt")
+        assertContains(body, "providerId=google.com")
+    }
+
     // --- Token refresh ---------------------------------------------------------------------
 
     @Test

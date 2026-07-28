@@ -1,12 +1,16 @@
 package com.splitcruiser.app.ui
 
 import android.app.Application
+import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.splitcruiser.app.auth.GoogleSignInCancelledException
+import com.splitcruiser.app.auth.requestGoogleIdToken
 import com.splitcruiser.app.data.Community
+import com.splitcruiser.app.data.ContactDetails
 import com.splitcruiser.app.data.FirebaseConfig
 import com.splitcruiser.app.data.Message
 import com.splitcruiser.app.data.NotificationAlert
@@ -23,10 +27,12 @@ import com.splitcruiser.app.data.fetchMyTripsFromFirestore
 import com.splitcruiser.app.data.firebase.SharedPreferencesStore
 import com.splitcruiser.app.data.joinTripOfferDirectResult
 import com.splitcruiser.app.data.logInWithEmailResult
+import com.splitcruiser.app.data.offerSeatForRequestResult
 import com.splitcruiser.app.data.postRideRequestResult
 import com.splitcruiser.app.data.postTripOfferResult
-import com.splitcruiser.app.data.redeemInviteCodeResult
+import com.splitcruiser.app.data.requestSeatOnOfferResult
 import com.splitcruiser.app.data.sendMessageResult
+import com.splitcruiser.app.data.signInWithGoogleResult
 import com.splitcruiser.app.data.signUpWithEmailResult
 import com.splitcruiser.app.data.submitRatingResult
 import com.splitcruiser.app.data.updateRideRequestStatusResult
@@ -61,6 +67,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val userMatches: StateFlow<List<TripMatch>> = repository.userMatches
     val allCommunities: StateFlow<List<Community>> = repository.allCommunities
     val notifications: StateFlow<List<NotificationAlert>> = repository.notifications
+
+    /** What onboarding stored: the home address a ride request prefills from. */
+    val contactDetails: StateFlow<ContactDetails?> = repository.contactDetails
 
     private val _hostedRides = MutableStateFlow<List<TripOffer>>(emptyList())
     val hostedRides: StateFlow<List<TripOffer>> = _hostedRides.asStateFlow()
@@ -166,12 +175,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun redeemInviteCode(code: String, onSuccess: () -> Unit) {
-        runGuarded(
-            block = { repository.redeemInviteCodeResult(code) },
-            fallbackMessage = "Invalid invite code.",
-            onSuccess = { onSuccess() },
-        )
+    /**
+     * [activityContext] must be the Activity: Credential Manager shows a bottom sheet, so the
+     * application context this ViewModel already holds is not usable here.
+     *
+     * A cancelled picker is not an error — the user closed a sheet — so it leaves no message.
+     */
+    fun signInWithGoogle(activityContext: Context, onFinished: (isNewUser: Boolean) -> Unit) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            try {
+                val idToken = requestGoogleIdToken(activityContext, repository.googleWebClientId)
+                repository.signInWithGoogleResult(idToken).fold(
+                    onSuccess = { isNewUser -> onFinished(isNewUser) },
+                    onFailure = { _uiError.value = it.message ?: "Failed to sign in with Google." },
+                )
+            } catch (e: GoogleSignInCancelledException) {
+                // Deliberately silent.
+            } catch (e: Exception) {
+                _uiError.value = e.message ?: "Failed to sign in with Google."
+            } finally {
+                _isLoading.value = false
+            }
+        }
     }
 
     fun completeProfile(
@@ -179,11 +205,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         lastInitial: String,
         communityId: String,
         homeArea: String,
+        contact: ContactDetails,
         vehicle: Vehicle?,
         onSuccess: () -> Unit
     ) {
         runGuarded(
-            block = { repository.createUserProfileResult(name, lastInitial, communityId, homeArea, vehicle) },
+            block = {
+                repository.createUserProfileResult(name, lastInitial, communityId, homeArea, contact, vehicle)
+            },
             fallbackMessage = "Failed to setup profile.",
             onSuccess = { onSuccess() },
         )
@@ -246,6 +275,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             block = { repository.updateRideRequestStatusResult(requestId, "cancelled") },
             fallbackMessage = "Failed to cancel ride request.",
             onSuccess = { onSuccess() },
+        )
+    }
+
+    /**
+     * A rider asking for a seat. The backing ride request is created by the repository, which is
+     * the point: the screens used to invent an id from the clock, and two riders joining in the
+     * same 17-minute window could collide on it.
+     */
+    fun requestSeat(offerId: String, contribution: Double, onSuccess: () -> Unit) {
+        runGuarded(
+            block = { repository.requestSeatOnOfferResult(offerId, contribution) },
+            fallbackMessage = "Failed to request a seat.",
+            onSuccess = { onSuccess() },
+        )
+    }
+
+    /** The host offering one of their own rides to a rider who posted a request. */
+    fun offerSeat(requestId: String, offerId: String, contribution: Double, onSuccess: () -> Unit) {
+        runGuarded(
+            block = { repository.offerSeatForRequestResult(requestId, offerId, contribution) },
+            fallbackMessage = "Failed to offer the ride.",
+            onSuccess = {
+                refreshMyTrips()
+                onSuccess()
+            },
         )
     }
 

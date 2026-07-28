@@ -111,6 +111,7 @@ once they exist.
 | `FIREBASE_PROJECT_ID` | same |
 | `FIREBASE_STORAGE_BUCKET` | same |
 | `FIREBASE_APP_ID` | `.env` only. **Unused** — it identifies an app to the native SDKs and has no role in any REST endpoint. |
+| `GOOGLE_WEB_CLIENT_ID` | same `env:` blocks. **Optional** — unset means the app offers email/password only. Must be the OAuth **Web** client ID, not the Android one (§4). |
 
 These three configure the app on *both* platforms, because the backend is one shared Kotlin
 repository. Putting them only in `.env` is not enough: `.env` feeds `:app`'s `BuildConfig` via the
@@ -160,6 +161,50 @@ throwaway keychain. It does **not** use `fastlane match`; there is no fastlane i
    wait before debugging anything else.
 7. Play requires **at least one manual upload per track** before the API will accept one. If
    the internal track has never received an AAB, upload one by hand first.
+
+### Firebase — one-time
+
+The `FIREBASE_*` secrets only say *where* the project is. They cannot turn anything on inside it,
+and every one of these steps is invisible to the build — a fully green release ships an app that
+cannot sign anybody in. Do them once, in the console, for the project named by
+`FIREBASE_PROJECT_ID`:
+
+1. Firebase console → **Authentication → Get started**. Until this is clicked the project has no
+   Identity Platform configuration at all and every `accounts:*` call returns
+   `CONFIGURATION_NOT_FOUND` — see §7.
+2. **Sign-in method → Email/Password → Enable.** (Leave "Email link" off; the app sends a password.)
+   Without it the same calls return `OPERATION_NOT_ALLOWED`.
+2b. **Sign-in method → Google → Enable**, set a support email, save. Then:
+   - Project settings → General → **Your apps → Android** must list the app with the
+     `applicationId` *and* the signing **SHA-1** of every build that will sign in — the debug
+     keystore's for local runs (`keytool -list -v -keystore ~/.android/debug.keystore -alias
+     androiddebugkey -storepass android`), and Play's **app signing** SHA-1 for released builds,
+     which is not the upload key's. A missing SHA-1 fails only on the device, only at the tap,
+     with Play Services' "developer console is not set up correctly".
+   - GCP → APIs & Services → Credentials → copy the **Web client (auto created by Google
+     Service)** client ID into the `GOOGLE_WEB_CLIENT_ID` secret. The *Android* client ID is the
+     wrong one: Credential Manager mints the ID token for the web audience, and Identity Toolkit
+     rejects any other.
+   - Leave the secret unset to ship without the feature — the button hides itself rather than
+     failing at the tap.
+3. Project settings → General → **Web API key** is what `FIREBASE_API_KEY` must hold. It is *not*
+   the App ID and *not* a service-account key. If the key is restricted under GCP → APIs &
+   Services → Credentials, its allowed-API list must include **Identity Toolkit API**; REST calls
+   carry no app signature, so Android/iOS *app* restrictions will reject them.
+4. Firestore → **Create database**, then `firebase deploy --only firestore:rules,firestore:indexes`.
+5. Storage → **Get started** (profile pictures use the v0 REST API against `FIREBASE_STORAGE_BUCKET`).
+6. Nothing to seed. Signup used to be gated on an invite code that only a backend could create;
+   that screen is gone, and `communities` still ships as `DEFAULT_COMMUNITIES` in `commonMain`.
+
+Verify without building anything; a real project answers `EMAIL_EXISTS` or `EMAIL_NOT_FOUND`
+rather than a project-level code:
+
+```bash
+curl -s -X POST \
+  "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$FIREBASE_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"probe@example.com","password":"hunter22","returnSecureToken":true}'
+```
 
 ### Apple — one-time *(planned)*
 
@@ -779,6 +824,119 @@ needs to display them.
 **Add to the release checklist:** confirm invite codes exist in Firestore before shipping a build
 that gates signup on them.
 
+### 2026-07-28 — signup and login both failed with "Configuration not found"
+
+The dialog said `Information / Configuration not found` while the header badge read **Firebase
+Live**, so the build *was* configured — the secrets were present and `isFirebaseEnabled` was true.
+That message is `CONFIGURATION_NOT_FOUND` from Identity Toolkit, falling through
+`authErrorMessage`'s last branch, which prettifies unknown SCREAMING_SNAKE codes.
+
+**Cause is server-side, not in the app.** `CONFIGURATION_NOT_FOUND` means the API key is valid and
+reaches Google, but the project behind that key has no Identity Platform configuration — i.e.
+**Firebase Authentication was never enabled** for it, or `FIREBASE_API_KEY` belongs to a *different*
+project than `FIREBASE_PROJECT_ID`. It is worth knowing the neighbouring codes, because they point
+at different consoles:
+
+| Response | What it actually means |
+|---|---|
+| `CONFIGURATION_NOT_FOUND` | key is fine; that project has never had Authentication turned on |
+| `API key not valid. Please pass a valid API key.` | wrong/rotated/deleted key, or the App ID was pasted into `FIREBASE_API_KEY` |
+| `OPERATION_NOT_ALLOWED` | Authentication is on, but the Email/Password provider is off |
+| `PERMISSION_DENIED` / `SERVICE_DISABLED` | Identity Toolkit API disabled on the GCP project |
+
+**Fix (console, one-time):** see "Firebase — one-time" in §4.
+
+**Fix (code):** `authErrorMessage` now names the cause, the console step and the configured project
+id for the four project-level failures, and no longer lowercases Google's English sentences into
+"api key not valid". Every auth endpoint — refresh, `sendOobCode`, `lookup`, `delete` — was going
+through `requireSuccess`, which maps codes the *Firestore* way (`error.status`) and so surfaced
+Identity Toolkit's codes raw; they now share one `requireIdentitySuccess`.
+
+⚠ A curl against `accounts:signUp` with any junk key returns `API_KEY_INVALID`, never
+`CONFIGURATION_NOT_FOUND`. So seeing `CONFIGURATION_NOT_FOUND` is itself proof the key is real and
+the problem is the project's auth setup — no need to re-check the secret first.
+
+### 2026-07-28 — Google sign-in without a Firebase SDK, and which client ID it wants
+
+Adding Google sign-in looked like it would force the native Firebase SDK back in — the thing the
+whole REST architecture exists to avoid. It does not. The two halves separate cleanly:
+
+- **Getting a Google ID token is platform work.** Android uses Credential Manager
+  (`androidx.credentials` + `googleid`), which is unrelated to Firebase. `GoogleSignInClient` from
+  play-services-auth is deprecated; do not reach for it.
+- **Trading that token for a Firebase session is REST**, `accounts:signInWithIdp`, and lives in
+  `:shared` with everything else. `postBody` is form-encoded *inside* a JSON field
+  (`id_token=…&providerId=google.com`) and `requestUri` is required even though nothing redirects.
+
+Three things that only fail on a device, never in CI:
+
+1. **The client ID must be the Web one.** Credential Manager mints the ID token for that audience
+   and Identity Toolkit rejects any other. The Android client ID is the intuitive wrong answer.
+2. **The signing SHA-1 must be registered** on the Android app in the Firebase console — separately
+   for the debug keystore and for Play's app-signing key. Missing it produces Play Services'
+   "developer console is not set up correctly", which names no fix; `GoogleCredentials.kt`
+   rewrites that one message into the actual instruction.
+3. **Do not seed the Firebase profile with Google's display name.** `loadSignedInUser` returns
+   `name.isEmpty()` as "needs profile setup", and the profile screen is the only place community
+   and home area are collected — a seeded name skips it and leaves an account that cannot see a
+   feed. The avatar URL is safe to keep and is.
+
+**iOS is not done.** `signInWithGoogle` is in `:shared` and exported, so the exchange works there
+already, but nothing acquires the token: that needs `ASWebAuthenticationSession` plus a reversed-
+client-id URL scheme in `Info.plist` and `generate-project.py`, none of which can be compile-checked
+on Linux. iOS shows email/password only until then.
+
+### 2026-07-28 — the screens invented Firestore document ids from the clock
+
+Three buttons built ids like `"req_joined_" + System.currentTimeMillis().toString().takeLast(6)`
+and handed them to the repository as if they named real documents. What that produced:
+
+- **Joining a ride** (feed and detail screens): `validateAndCreateMatch` did not find the request,
+  so it *created* one under the made-up id. Those documents were `status: "active"`, so every host
+  saw demand no rider had expressed. Worse, six digits of millis repeat every ~17 minutes, so a
+  second rider could land on the first rider's document; the rules correctly refused to let them
+  rewrite a request that was not theirs, and the join failed with a permission error.
+- **"Accept & Offer Ride Share"** (host viewing a rider's request): the fabricated *offer* id named
+  nothing at all, so `loadOffer` threw and the button failed 100% of the time it was pressed.
+
+**Fix:** ids are the repository's to mint. `requestSeatOnOffer(offerId, contribution)` creates the
+backing request itself with `newId("request")` and the offer's own route, and reuses an open one
+rather than piling up documents; `offerSeatForRequest(requestId, offerId, contribution)` takes a
+real offer of the caller's own and accepts the rider outright. `validateAndCreateMatch` now refuses
+a request id it cannot find instead of conjuring one.
+
+Two details worth keeping:
+
+- The backing request is written with `status: "pending"`, not `"active"`. The feed query and
+  `FeedProjector` both key on `"active"`, so a pending one stays out of the browse feeds while
+  still being a real, rider-owned document that `acceptMatch` can flip to `"matched"`.
+- The host-side button now needs an actual ride to offer, so the screen picks one: none → an error
+  naming the fix, one → use it, several → a chooser. There is no correct id to invent.
+
+### 2026-07-28 — the invite gate is gone; onboarding collects contact and home instead
+
+Supersedes "invites must be seeded out of band or signup is dead" above. Signup no longer asks for
+a code, so there is nothing to seed and no dead funnel to avoid. `InviteCodeScreen`,
+`redeemInviteCode`, the `Invite` model and the `invites` rules block are all deleted — the screen
+was already unreachable, since no route in the `NavHost` ever pointed at it.
+
+Onboarding now takes a contact number and a home address, and `PostRequestScreen` and
+`PostOfferScreen` start their pickup from that address instead of an empty field over hardcoded
+Boston coordinates.
+
+Where those two values live is deliberate and worth not "tidying" later:
+
+- **The home address goes to `users/{uid}/private/profile`**, owner-only. `users` is
+  `allow read: if true` because feeds show a host's name and rating, so a field on the user
+  document is a field published to anyone who can open the app. A residence is not that.
+- **The phone number stays on the user document.** The trip detail screen has always shown a
+  matched host's number; moving it would have broken that. It is world-readable — if that is not
+  wanted, the fix is a rule change and a screen change together, not a quiet move.
+
+`createUserProfile` keeps its five-argument overload because `ViewModel.swift` calls it and Kotlin
+default arguments do not survive into Swift. iOS therefore stores no contact details yet, which is
+the same subset story as the rest of that app.
+
 ---
 
 ## 8. Pre-flight checklist before merging to `main`
@@ -793,7 +951,10 @@ that gates signup on them.
 - [ ] `FIREBASE_API_KEY` / `FIREBASE_PROJECT_ID` / `FIREBASE_STORAGE_BUCKET` are in the `env:`
       of every Gradle step that builds `:app` or the XCFramework — the generated
       `FirebaseBuildConfig` is what configures both apps
-- [ ] Invite codes are seeded in Firestore (the rules forbid the client creating them)
+- [ ] The Firebase project itself is set up — Authentication enabled with the Email/Password
+      provider on (§4). The build cannot tell you this; the `accounts:signUp` curl in §4 can
+- [ ] If `GOOGLE_WEB_CLIENT_ID` is set: it is the **Web** client ID, and this build's signing
+      SHA-1 is registered on the Android app in the Firebase console (§4)
 - [ ] Nothing exported to Swift returns `Result` or `Pair`, or relies on a default argument
 
 ## 9. Rollback

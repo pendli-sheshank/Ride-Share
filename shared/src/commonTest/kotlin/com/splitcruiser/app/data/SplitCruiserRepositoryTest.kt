@@ -133,6 +133,68 @@ class SplitCruiserRepositoryTest {
     }
 
     @Test
+    fun googleSignInCreatesTheProfileAndKeepsTheAvatar() = runTest {
+        val repo = repository { request ->
+            if (request.url.toString().contains("signInWithIdp")) {
+                HttpStatusCode.OK to """
+                {"localId":"me","email":"ana@gmail.com","idToken":"tok","refreshToken":"ref",
+                 "expiresIn":"3600","displayName":"Ana R","photoUrl":"https://lh3.example/ana.jpg"}
+                """.trimIndent()
+            } else {
+                scriptedBackend()(request)
+            }
+        }
+
+        val needsProfile = repo.signInWithGoogle("google-jwt")
+
+        // Google knows the display name, but filling it in would make the profile screen — the only
+        // place community and home area are collected — think it had already run.
+        assertTrue(needsProfile, "a Google account still has to pick a community")
+        assertEquals("https://lh3.example/ana.jpg", repo.currentUser.value?.avatarUrl)
+        assertEquals("ana@gmail.com", repo.currentUser.value?.email)
+    }
+
+    @Test
+    fun anEmptyGoogleTokenNeverReachesTheNetwork() = runTest {
+        val repo = repository(scriptedBackend())
+        assertFailsWith<SplitCruiserException> { repo.signInWithGoogle("") }
+        assertTrue(requests.isEmpty())
+    }
+
+    @Test
+    fun onboardingKeepsTheHomeAddressOutOfTheReadableDocument() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+
+        repo.createUserProfile(
+            name = "Ana",
+            lastInitial = "R",
+            communityId = "neu",
+            homeArea = "Mission Hill",
+            contact = ContactDetails("+16175550100", "12 Tremont St, Boston, MA", 42.3332, -71.1054),
+            vehicle = null,
+        )
+
+        val writes = requests.filter { it.method.value == "PATCH" }.map { it.url.toString() }
+        // `users` is world-readable, so the address goes to the owner-only subcollection instead.
+        assertTrue(
+            writes.any { it.contains("/users/me/private/profile") },
+            "the private details must be written: $writes",
+        )
+        assertEquals("12 Tremont St, Boston, MA", repo.contactDetails.value?.homeAddress)
+        assertTrue(repo.contactDetails.value?.hasHomeLocation == true)
+        // The phone number is the deliberate exception — the trip detail screen shows a host's.
+        assertEquals("+16175550100", repo.currentUser.value?.phoneNumber)
+    }
+
+    @Test
+    fun signingOutForgetsTheHomeAddress() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+        repo.saveContactDetails(ContactDetails("+16175550100", "12 Tremont St", 42.33, -71.10))
+        repo.logout()
+        assertNull(repo.contactDetails.value)
+    }
+
+    @Test
     fun emptyCredentialsAreRejectedBeforeTheNetwork() = runTest {
         val repo = repository(scriptedBackend())
         assertFailsWith<SplitCruiserException> { repo.logInWithEmail("", "") }
@@ -360,7 +422,7 @@ class SplitCruiserRepositoryTest {
         }
         signedIn(repo)
         val failure = assertFailsWith<SplitCruiserException> {
-            repo.validateAndCreateMatch("offer_1", "request_1", contribution = 25.0)
+            repo.requestSeatOnOffer("offer_1", contribution = 25.0)
         }
         assertContains(failure.message!!, "cost cap")
     }
@@ -385,11 +447,92 @@ class SplitCruiserRepositoryTest {
             }
         }
         signedIn(repo)
-        val match = repo.validateAndCreateMatch("offer_1", "request_1", contribution = 10.0)
+        val match = repo.requestSeatOnOffer("offer_1", contribution = 10.0)
 
         // Rules cannot follow a reference cheaply, so participation must be on the document.
         assertEquals(listOf("bo", "me"), match.participants)
         assertEquals("pending", match.status)
+    }
+
+    /**
+     * The screens used to invent this id from the clock and let the repository create a ride
+     * request document under it, which put demand nobody had expressed into the host feed.
+     */
+    @Test
+    fun aMatchAgainstAMissingRequestIsRefusedRatherThanInvented() = runTest {
+        documents["trip_offers/offer_1"] = """
+            {"fields":{"id":{"stringValue":"offer_1"},"hostId":{"stringValue":"bo"},
+             "seatsLeft":{"integerValue":"3"},"costPerRider":{"doubleValue":10.0},
+             "status":{"stringValue":"active"}}}
+        """.trimIndent()
+        val repo = signedIn(repository(scriptedBackend()))
+
+        val failure = assertFailsWith<SplitCruiserException> {
+            repo.validateAndCreateMatch("offer_1", "req_joined_123456", contribution = 10.0)
+        }
+        assertContains(failure.message!!, "no longer exists")
+        assertTrue(
+            requests.none { it.url.toString().contains("/ride_requests/req_joined_123456") && it.method.value == "PATCH" },
+            "a request document must not be conjured out of a made-up id",
+        )
+    }
+
+    @Test
+    fun theRequestBackingASeatRequestIsNotAdvertisedToHosts() = runTest {
+        documents["trip_offers/offer_1"] = """
+            {"fields":{"id":{"stringValue":"offer_1"},"hostId":{"stringValue":"bo"},
+             "seatsLeft":{"integerValue":"3"},"costPerRider":{"doubleValue":10.0},
+             "status":{"stringValue":"active"}}}
+        """.trimIndent()
+        val repo = signedIn(repository(scriptedBackend()))
+
+        repo.requestSeatOnOffer("offer_1", contribution = 10.0)
+
+        val created = repo.myRideRequests.value.single()
+        // "active" would put it in every host's feed as a rider still looking for a ride.
+        assertEquals("pending", created.status)
+        assertEquals("me", created.riderId)
+
+        // And a second tap must not open a second match on the same ride.
+        val failure = assertFailsWith<SplitCruiserException> {
+            repo.requestSeatOnOffer("offer_1", contribution = 10.0)
+        }
+        assertContains(failure.message!!, "already have a request")
+    }
+
+    @Test
+    fun aHostOfferingASeatAcceptsTheRiderOutright() = runTest {
+        documents["trip_offers/offer_mine"] = """
+            {"fields":{"id":{"stringValue":"offer_mine"},"hostId":{"stringValue":"me"},
+             "seatsLeft":{"integerValue":"3"},"totalSeats":{"integerValue":"3"},
+             "costPerRider":{"doubleValue":10.0},"status":{"stringValue":"active"}}}
+        """.trimIndent()
+        documents["ride_requests/req_1"] = """
+            {"fields":{"id":{"stringValue":"req_1"},"riderId":{"stringValue":"zo"},
+             "riderName":{"stringValue":"Zo"},"seatsNeeded":{"integerValue":"1"},
+             "status":{"stringValue":"active"}}}
+        """.trimIndent()
+        val repo = signedIn(repository(scriptedBackend()))
+
+        val match = repo.offerSeatForRequest("req_1", "offer_mine", contribution = 10.0)
+
+        assertEquals("accepted", match.status)
+        assertEquals(2, repo.getTripOfferById("offer_mine")?.seatsLeft)
+    }
+
+    @Test
+    fun aSeatCannotBeOfferedOnSomeoneElsesRide() = runTest {
+        documents["trip_offers/offer_1"] = """
+            {"fields":{"id":{"stringValue":"offer_1"},"hostId":{"stringValue":"bo"},
+             "seatsLeft":{"integerValue":"3"},"costPerRider":{"doubleValue":10.0},
+             "status":{"stringValue":"active"}}}
+        """.trimIndent()
+        val repo = signedIn(repository(scriptedBackend()))
+
+        val failure = assertFailsWith<SplitCruiserException> {
+            repo.offerSeatForRequest("req_1", "offer_1", contribution = 10.0)
+        }
+        assertContains(failure.message!!, "you are hosting")
     }
 
     // --- Cost split ------------------------------------------------------------------------

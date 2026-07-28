@@ -69,6 +69,12 @@ class SplitCruiserRepository internal constructor(
     /** False when the FIREBASE_* values are missing or still placeholders. */
     val isFirebaseEnabled: Boolean get() = config.isConfigured
 
+    /** False when GOOGLE_WEB_CLIENT_ID is unset, in which case the UI hides the Google button. */
+    val isGoogleSignInEnabled: Boolean get() = config.isGoogleSignInConfigured
+
+    /** The audience the platform must request its Google ID token for. */
+    val googleWebClientId: String get() = config.googleWebClientId
+
     // --- Caches -----------------------------------------------------------------------------
 
     private val users = MutableStateFlow<Map<String, User>>(emptyMap())
@@ -83,6 +89,10 @@ class SplitCruiserRepository internal constructor(
 
     private val _currentUser = MutableStateFlow<User?>(null)
     val currentUser: StateFlow<User?> = _currentUser.asStateFlow()
+
+    /** Null until onboarding has run, or for an account that predates it. */
+    private val _contactDetails = MutableStateFlow<ContactDetails?>(null)
+    val contactDetails: StateFlow<ContactDetails?> = _contactDetails.asStateFlow()
 
     private val _activeOffers = MutableStateFlow<List<TripOffer>>(emptyList())
     val activeOffers: StateFlow<List<TripOffer>> = _activeOffers.asStateFlow()
@@ -376,8 +386,33 @@ class SplitCruiserRepository internal constructor(
         return loadSignedInUser(session)
     }
 
-    /** True when the profile is still incomplete, which is what routes the UI to profile setup. */
-    private suspend fun loadSignedInUser(session: StoredSession): Boolean {
+    /**
+     * Signs in with a Google ID token that the platform has already obtained.
+     *
+     * There is no separate sign-up: Identity Toolkit creates the account on first exchange, and
+     * [loadSignedInUser] writes the profile document when it finds none — the same path a returning
+     * user takes. So the caller does not have to know which it is.
+     */
+    @Throws(Exception::class)
+    suspend fun signInWithGoogle(googleIdToken: String): Boolean {
+        requireValid(googleIdToken.isNotBlank()) {
+            "Google sign-in did not return a credential. Please try again."
+        }
+        requireConfigured()
+
+        val result = auth.signInWithGoogle(googleIdToken)
+        tokens.set(result.session)
+        return loadSignedInUser(result.session, avatarUrl = result.photoUrl)
+    }
+
+    /**
+     * True when the profile is still incomplete, which is what routes the UI to profile setup.
+     *
+     * [avatarUrl] seeds a new document from the identity provider. Google's display name is
+     * deliberately *not* seeded: this returns `name.isEmpty()`, so filling it in would skip the
+     * profile screen — and with it the community and home area, which nothing else collects.
+     */
+    private suspend fun loadSignedInUser(session: StoredSession, avatarUrl: String = ""): Boolean {
         val existing = firestore.getDocument("users", session.uid, serializer<User>())
         val user = if (existing != null) {
             // The uid on the token is authoritative. A document written before the `id` field
@@ -388,11 +423,16 @@ class SplitCruiserRepository internal constructor(
                 email = existing.email.ifBlank { session.email },
             )
         } else {
-            User(id = session.uid, email = session.email, verifiedTier = "vouched")
-                .also { firestore.setDocument("users", session.uid, it, serializer<User>()) }
+            User(
+                id = session.uid,
+                email = session.email,
+                avatarUrl = avatarUrl,
+                verifiedTier = "vouched",
+            ).also { firestore.setDocument("users", session.uid, it, serializer<User>()) }
         }
 
         adoptUser(user)
+        loadContactDetails(session.uid)
         runCatching { refreshNow() }
             .onFailure { logWarn(LOG_TAG, "First sync after login failed", it) }
         return user.name.isEmpty()
@@ -408,6 +448,7 @@ class SplitCruiserRepository internal constructor(
         stop()
         tokens.clear()
         _currentUser.value = null
+        _contactDetails.value = null
         users.value = emptyMap()
         offers.value = emptyMap()
         requests.value = emptyMap()
@@ -427,6 +468,7 @@ class SplitCruiserRepository internal constructor(
         lastInitial: String,
         communityId: String,
         homeArea: String,
+        contact: ContactDetails,
         vehicle: Vehicle?,
     ) {
         val user = requireUser()
@@ -440,11 +482,31 @@ class SplitCruiserRepository internal constructor(
             lastInitial = lastInitial.trim(),
             communityId = communityId,
             homeArea = homeArea,
+            phoneNumber = contact.phoneNumber.trim(),
         )
         firestore.setDocument("users", user.id, updated, serializer<User>())
         adoptUser(updated)
+
+        // After the user document, and tolerantly: a rejected private write must not strand an
+        // account with no profile at all, which would drop it back onto the onboarding screen.
+        runCatching { saveContactDetails(contact.copy(phoneNumber = contact.phoneNumber.trim())) }
+            .onFailure { logWarn(LOG_TAG, "Could not store the private contact details", it) }
+
         if (vehicle != null) saveVehicle(vehicle.copy(ownerId = user.id))
     }
+
+    /**
+     * The five-argument form, kept because `ViewModel.swift` calls it and Kotlin default arguments
+     * do not survive into Swift. iOS has no onboarding fields yet, so it stores none.
+     */
+    @Throws(Exception::class)
+    suspend fun createUserProfile(
+        name: String,
+        lastInitial: String,
+        communityId: String,
+        homeArea: String,
+        vehicle: Vehicle?,
+    ) = createUserProfile(name, lastInitial, communityId, homeArea, ContactDetails(), vehicle)
 
     @Throws(Exception::class)
     suspend fun updateUserProfileDetails(
@@ -486,26 +548,36 @@ class SplitCruiserRepository internal constructor(
         adoptUser(updated)
     }
 
+    /**
+     * Stores the private half of a profile: where the user lives, so a ride request can fill its own
+     * pickup in.
+     *
+     * A subcollection rather than fields on the user document, because `users` is world-readable —
+     * the feeds need a host's name and rating — and a home address is not something to publish to
+     * everyone who can open the app.
+     */
     @Throws(Exception::class)
-    suspend fun redeemInviteCode(code: String) {
-        val upper = code.trim().uppercase()
+    suspend fun saveContactDetails(details: ContactDetails) {
         val user = requireUser()
-        val invite = firestore.getDocument("invites", upper, serializer<Invite>())
-            ?: throw SplitCruiserException("Invalid invite code. Try '$DEFAULT_INVITE_CODE'")
-        if (invite.used) throw SplitCruiserException("Invite code already used!")
+        firestore.setDocument("users/${user.id}/private", CONTACT_DOC, details, serializer<ContactDetails>())
+        _contactDetails.value = details
 
-        // The rules permit exactly this transition and no other, so the mask must be this narrow.
-        firestore.updateFields(
-            "invites",
-            upper,
-            buildFields(
-                "used" to booleanValue(true),
-                "usedBy" to stringValue(user.id),
-            ),
-        )
-        val updated = user.copy(verifiedTier = "vouched", invitedBy = invite.invitedBy)
-        firestore.setDocument("users", user.id, updated, serializer<User>())
-        adoptUser(updated)
+        // The phone number is the exception: the trip detail screen shows a matched host's number,
+        // so it has to live on the readable document to be of any use.
+        if (details.phoneNumber != user.phoneNumber) {
+            firestore.updateFields(
+                "users",
+                user.id,
+                buildFields("phoneNumber" to stringValue(details.phoneNumber)),
+            )
+            adoptUser(user.copy(phoneNumber = details.phoneNumber))
+        }
+    }
+
+    private suspend fun loadContactDetails(uid: String) {
+        _contactDetails.value = runCatching {
+            firestore.getDocument("users/$uid/private", CONTACT_DOC, serializer<ContactDetails>())
+        }.getOrNull()
     }
 
     @Throws(Exception::class)
@@ -673,34 +745,119 @@ class SplitCruiserRepository internal constructor(
         )
     }
 
-    /** Requests a seat, subject to the cost cap and seat count. Returns the new match. */
+    /**
+     * A rider asking a specific host for a seat, subject to the cost cap and seat count.
+     *
+     * This exists because the screens used to invent a request id — `"req_joined_" + the last six
+     * digits of the clock` — and hand it to [validateAndCreateMatch], which then created a ride
+     * request document under that id. Two consequences, both real: those fabricated requests showed
+     * up in the host feed as demand nobody had expressed, and the six-digit id repeats every ~17
+     * minutes, so a second rider could land on the first rider's document and be denied by the
+     * rules for writing a request that was not theirs.
+     *
+     * The backing request is created here instead, with a generated id and the offer's own route,
+     * and is reused if the rider already has an open one for the same trip.
+     */
+    @Throws(Exception::class)
+    suspend fun requestSeatOnOffer(offerId: String, contribution: Double): TripMatch {
+        val user = requireUser()
+        val offer = loadOffer(offerId)
+
+        if (offer.hostId == user.id) {
+            throw SplitCruiserException("You cannot request a seat on your own ride.")
+        }
+        if (offer.status != "active") {
+            throw SplitCruiserException("This ride is no longer taking riders.")
+        }
+        val pending = matches.value.values.find {
+            it.offerId == offerId && it.riderId == user.id && it.status != "declined"
+        }
+        if (pending != null) {
+            throw SplitCruiserException("You already have a request on this ride.")
+        }
+
+        // "pending", not "active": this request exists to back a match, and an active one would be
+        // advertised to every host as a rider looking for a ride they have already found.
+        val request = requests.value.values.find {
+            it.riderId == user.id && it.status == "pending" &&
+                it.departureTime == offer.departureTime &&
+                it.origin == offer.origin && it.destination == offer.destination
+        } ?: RideRequest(
+            id = newId("request"),
+            riderId = user.id,
+            riderName = user.displayName,
+            riderRating = user.ratingAvg,
+            origin = offer.origin,
+            destination = offer.destination,
+            originLat = offer.originLat,
+            originLng = offer.originLng,
+            destLat = offer.destLat,
+            destLng = offer.destLng,
+            originGeohash = offer.originGeohash,
+            destGeohash = offer.destGeohash,
+            seatsNeeded = 1,
+            departureTime = offer.departureTime,
+            status = "pending",
+        ).also {
+            firestore.setDocument("ride_requests", it.id, it, serializer<RideRequest>())
+            requests.value = requests.value + (it.id to it)
+        }
+
+        return createMatch(offer, request, contribution)
+    }
+
+    /**
+     * The host side of the same handshake: agreeing to carry a rider who posted a request.
+     *
+     * [offerId] must be one of the caller's own rides. The screen used to invent this id too —
+     * `"offer_quick_" + the clock` — which named no document at all, so the button failed with
+     * "Trip offer not found" every single time it was pressed.
+     *
+     * Creating the match *is* the host accepting it, so the seat bookkeeping runs immediately
+     * rather than leaving a pending match only the host could approve.
+     */
+    @Throws(Exception::class)
+    suspend fun offerSeatForRequest(requestId: String, offerId: String, contribution: Double): TripMatch {
+        val host = requireUser()
+        val offer = loadOffer(offerId)
+
+        if (offer.hostId != host.id) {
+            throw SplitCruiserException("You can only offer a seat on a ride you are hosting.")
+        }
+        if (offer.status != "active") {
+            throw SplitCruiserException("That ride of yours is no longer active.")
+        }
+        val request = loadRequest(requestId)
+        if (request.riderId == host.id) {
+            throw SplitCruiserException("That is your own ride request.")
+        }
+        if (request.status != "active" && request.status != "pending") {
+            throw SplitCruiserException("That rider is no longer looking for a seat.")
+        }
+
+        val match = createMatch(offer, request, contribution, notifyHost = false)
+        acceptMatch(match.id)
+        return matches.value[match.id] ?: match
+    }
+
+    /** Requests a seat against an existing ride request. Returns the new match. */
     @Throws(Exception::class)
     suspend fun validateAndCreateMatch(
         offerId: String,
         requestId: String,
         contribution: Double,
     ): TripMatch {
-        val user = requireUser()
-        val offer = loadOffer(offerId)
+        requireUser()
+        return createMatch(loadOffer(offerId), loadRequest(requestId), contribution)
+    }
 
-        val request = requests.value[requestId]
-            ?: runCatching { firestore.getDocument("ride_requests", requestId, serializer<RideRequest>()) }
-                .getOrNull()
-            ?: RideRequest(
-                id = requestId,
-                riderId = user.id,
-                riderName = user.displayName,
-                riderRating = user.ratingAvg,
-                origin = offer.origin,
-                destination = offer.destination,
-                seatsNeeded = 1,
-                departureTime = offer.departureTime,
-                status = "active",
-            ).also {
-                firestore.setDocument("ride_requests", requestId, it, serializer<RideRequest>())
-                requests.value = requests.value + (requestId to it)
-            }
-
+    /** The checks and the write shared by every way of pairing an offer with a request. */
+    private suspend fun createMatch(
+        offer: TripOffer,
+        request: RideRequest,
+        contribution: Double,
+        notifyHost: Boolean = true,
+    ): TripMatch {
         val costLimit = offer.costPerRider * 2.0
         if (contribution > costLimit) {
             throw SplitCruiserException(
@@ -713,14 +870,14 @@ class SplitCruiserRepository internal constructor(
             )
         }
         val duplicate = matches.value.values.find {
-            it.offerId == offerId && it.requestId == requestId && it.status != "declined"
+            it.offerId == offer.id && it.requestId == request.id && it.status != "declined"
         }
         if (duplicate != null) throw SplitCruiserException("Match already exists or is pending!")
 
         val match = TripMatch(
             id = newId("match"),
-            offerId = offerId,
-            requestId = requestId,
+            offerId = offer.id,
+            requestId = request.id,
             hostId = offer.hostId,
             riderId = request.riderId,
             riderName = request.riderName,
@@ -734,12 +891,15 @@ class SplitCruiserRepository internal constructor(
         matches.value = matches.value + (match.id to match)
         recomputeFeeds()
 
-        sendNotificationAlert(
-            targetUserId = offer.hostId,
-            title = "New Ride Request Received! 🚗",
-            message = "${request.riderName} requested a seat on your ride from ${offer.origin} to ${offer.destination}.",
-            type = "match",
-        )
+        if (notifyHost) {
+            sendNotificationAlert(
+                targetUserId = offer.hostId,
+                title = "New Ride Request Received! 🚗",
+                message = "${request.riderName} requested a seat on your ride from ${offer.origin} " +
+                    "to ${offer.destination}.",
+                type = "match",
+            )
+        }
         return match
     }
 
@@ -1279,6 +1439,12 @@ class SplitCruiserRepository internal constructor(
             ?: firestore.getDocument("trip_offers", offerId, serializer<TripOffer>())
             ?: throw SplitCruiserException("Trip offer not found.")
 
+    private suspend fun loadRequest(requestId: String): RideRequest =
+        requests.value[requestId]
+            ?: runCatching { firestore.getDocument("ride_requests", requestId, serializer<RideRequest>()) }
+                .getOrNull()
+            ?: throw SplitCruiserException("That ride request no longer exists.")
+
     private fun adoptUser(user: User) {
         users.value = users.value + (user.id to user)
         _currentUser.value = user
@@ -1347,7 +1513,8 @@ class SplitCruiserRepository internal constructor(
     }
 
     private companion object {
-        const val DEFAULT_INVITE_CODE = "SPLITCRUISER"
+        /** The single document under `users/{uid}/private` that onboarding writes. */
+        const val CONTACT_DOC = "profile"
     }
 }
 

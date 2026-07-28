@@ -45,6 +45,13 @@ service cloud.firestore {
       match /blockedUsers/{blockedId} {
         allow read, write: if isOwner(userId);
       }
+
+      // Onboarding's contact details — the home address a ride request prefills from. The user
+      // document itself is world-readable so feeds can show a host's name and rating, which is
+      // exactly why a home address does not belong on it.
+      match /private/{docId} {
+        allow read, write: if isOwner(userId);
+      }
     }
 
     // ============================================
@@ -186,24 +193,8 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // ============================================
-    // COLLECTION: invites
-    // ============================================
-
-    match /invites/{inviteId} {
-      allow read: if isAuth();
-
-      // Invites must be seeded out of band — see the release runbook. But redeeming one is a client
-      // action, and `write: if false` denied it, so the invite flow could never have completed.
-      // Permit exactly the redemption transition and nothing else.
-      allow create: if false;
-      allow update: if isAuth() &&
-        resource.data.used == false &&
-        request.resource.data.used == true &&
-        request.resource.data.usedBy == request.auth.uid &&
-        changed().hasOnly(['used', 'usedBy']);
-      allow delete: if false;
-    }
+    // `invites` is deliberately absent: signup is no longer gated on a code, so the collection has
+    // no client that reads or writes it and the catch-all below denies it.
 
     // ============================================
     // DENY ALL OTHER COLLECTIONS

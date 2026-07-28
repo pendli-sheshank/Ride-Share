@@ -674,6 +674,56 @@ fun EmailPasswordLoginScreen(viewModel: MainViewModel, navController: NavControl
                     )
                 }
 
+                // Hidden rather than disabled when GOOGLE_WEB_CLIENT_ID is unset: without it the
+                // account picker fails at the tap with a Play Services error that means nothing
+                // to whoever is looking at it.
+                if (viewModel.repository.isGoogleSignInEnabled) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                    ) {
+                        HorizontalDivider(modifier = Modifier.weight(1f), color = SplitCruiserDivider)
+                        Text(
+                            text = "or",
+                            color = SplitCruiserLightGray,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(horizontal = 12.dp)
+                        )
+                        HorizontalDivider(modifier = Modifier.weight(1f), color = SplitCruiserDivider)
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            vibrate(context, 50)
+                            viewModel.signInWithGoogle(context) {
+                                vibrateSuccess(context)
+                                // Navigates automatically based on global StateFlow observer
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(54.dp)
+                            .testTag("google_sign_in_button"),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, SplitCruiserDivider),
+                        colors = ButtonDefaults.outlinedButtonColors(containerColor = SplitCruiserCardBg)
+                    ) {
+                        Text(
+                            text = "G",
+                            color = SplitCruiserSaffron,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = "Continue with Google",
+                            color = SplitCruiserTextPrimary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp
+                        )
+                    }
+                }
+
                 TextButton(
                     onClick = { isSignUpMode = !isSignUpMode },
                     colors = ButtonDefaults.textButtonColors(contentColor = SplitCruiserSaffron),
@@ -696,117 +746,7 @@ fun EmailPasswordLoginScreen(viewModel: MainViewModel, navController: NavControl
     }
 }
 
-// --- Screen 2: Invite Code Redemption ---
-
-@Composable
-fun InviteCodeScreen(viewModel: MainViewModel, navController: NavController) {
-    var inviteCode by remember { mutableStateOf("") }
-    var redeemButtonPressed by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .statusBarsPadding()
-            .navigationBarsPadding()
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Image(
-            painter = painterResource(id = R.drawable.img_split_cruiser_logo),
-            contentDescription = "Split Cruiser Logo",
-            modifier = Modifier
-                .size(72.dp)
-                .clip(CircleShape)
-                .border(2.dp, SplitCruiserIndigo, CircleShape),
-            contentScale = ContentScale.Crop
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Text(
-            text = "Enter Invite Code",
-            color = SplitCruiserTextPrimary,
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Text(
-            text = "To keep Split Cruiser secure, we require a voucher code from an existing student.",
-            color = SplitCruiserLightGray,
-            fontSize = 14.sp,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 16.dp)
-        )
-
-        Spacer(modifier = Modifier.height(32.dp))
-
-        OutlinedTextField(
-            value = inviteCode,
-            onValueChange = { inviteCode = it.uppercase() },
-            label = { Text("Student Voucher Code") },
-            placeholder = { Text("e.g. SPLITCRUISER") },
-            singleLine = true,
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("invite_input"),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = SplitCruiserSaffron,
-                unfocusedBorderColor = SplitCruiserDivider,
-                focusedLabelColor = SplitCruiserSaffron,
-                unfocusedLabelColor = SplitCruiserLightGray,
-                focusedTextColor = SplitCruiserTextPrimary,
-                unfocusedTextColor = SplitCruiserTextPrimary,
-                focusedContainerColor = SplitCruiserCardBg,
-                unfocusedContainerColor = SplitCruiserCardBg
-            ),
-            shape = RoundedCornerShape(12.dp)
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = "Demo tip: Enter code 'SPLITCRUISER' to get vouched instantly!",
-            color = SplitCruiserEmerald,
-            fontSize = 12.sp,
-            textAlign = TextAlign.Center
-        )
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        val redeemScale = AnimatedButtonScale(redeemButtonPressed)
-        Button(
-            onClick = {
-                if (inviteCode.isNotEmpty()) {
-                    redeemButtonPressed = true
-                    viewModel.redeemInviteCode(inviteCode) {
-                        redeemButtonPressed = false
-                        // Routing handled by state flow
-                    }
-                }
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(54.dp)
-                .testTag("redeem_invite_button")
-                .withButtonScale(redeemScale),
-            colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserSaffron),
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            Text("Redeem & Activate Account", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        TextButton(onClick = { viewModel.logout() }) {
-            Text("Cancel & Log Out", color = Color.Red.copy(alpha = 0.8f))
-        }
-    }
-}
-
-// --- Screen 3: Profile Setup ---
+// --- Screen 2: Profile Setup ---
 
 @Composable
 fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
@@ -814,6 +754,13 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
     var lastInitial by remember { mutableStateOf("") }
     var homeArea by remember { mutableStateOf("") }
     var selectedCommunityId by remember { mutableStateOf("") }
+
+    // Contact and home location. The address is picked from autocomplete so it carries
+    // coordinates, which is what lets a ride request fill its own pickup in later.
+    var phoneNumber by remember { mutableStateOf("") }
+    var homeAddress by remember { mutableStateOf("") }
+    var homeLat by remember { mutableStateOf(0.0) }
+    var homeLng by remember { mutableStateOf(0.0) }
     val communities by viewModel.allCommunities.collectAsState()
 
     // Host Vehicle state (optional during setup)
@@ -1066,6 +1013,59 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
                 shape = RoundedCornerShape(12.dp)
             )
 
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Contact number. This one does go on the public user document: the trip detail screen
+            // has always shown a matched host's number.
+            OutlinedTextField(
+                value = phoneNumber,
+                onValueChange = { phoneNumber = it },
+                label = { Text("Contact Number") },
+                placeholder = { Text("+1 617 555 0100") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("phone_input"),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = SplitCruiserSaffron,
+                    unfocusedBorderColor = SplitCruiserDivider,
+                    focusedTextColor = SplitCruiserTextPrimary,
+                    unfocusedTextColor = SplitCruiserTextPrimary,
+                    focusedContainerColor = SplitCruiserCardBg,
+                    unfocusedContainerColor = SplitCruiserCardBg
+                ),
+                shape = RoundedCornerShape(12.dp),
+                leadingIcon = {
+                    Icon(Icons.Default.Phone, contentDescription = "Phone", tint = SplitCruiserLightGray)
+                }
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Home address, kept private to the account and used to prefill pickups.
+            LocationAutoCompleteTextField(
+                value = homeAddress,
+                onValueChange = { homeAddress = it },
+                onLocationSelected = { place ->
+                    homeLat = place.lat
+                    homeLng = place.lng
+                },
+                label = "Home Address",
+                placeholder = "Where should pickups start from?",
+                testTag = "home_address_input",
+                leadingIcon = {
+                    Icon(Icons.Default.Home, contentDescription = "Home", tint = SplitCruiserEmerald)
+                }
+            )
+
+            Text(
+                text = "Private to you. Ride requests start from here so you don't retype it.",
+                color = SplitCruiserLightGray,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(top = 6.dp)
+            )
+
             Spacer(modifier = Modifier.height(16.dp))
 
             // Vehicle setup (Optional toggle)
@@ -1189,7 +1189,19 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
 
             Button(
                 onClick = {
-                    if (name.isNotEmpty() && selectedCommunityId.isNotEmpty()) {
+                    // The button used to do nothing at all when a field was missing, which reads
+                    // as a broken app rather than as a validation failure.
+                    val missing = when {
+                        name.isBlank() -> "Please enter your first name."
+                        lastInitial.isBlank() -> "Please enter your last initial."
+                        selectedCommunityId.isEmpty() -> "Please pick your student community."
+                        homeArea.isBlank() -> "Please enter your home area."
+                        phoneNumber.isBlank() -> "Please enter a contact number so riders can reach you."
+                        else -> null
+                    }
+                    if (missing != null) {
+                        viewModel.setError(missing)
+                    } else {
                         val vehicle = if (isHostExpanded && vMake.isNotEmpty()) {
                             Vehicle(
                                 ownerId = viewModel.currentUser.value?.id ?: "",
@@ -1206,6 +1218,12 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
                             lastInitial = lastInitial,
                             communityId = selectedCommunityId,
                             homeArea = homeArea,
+                            contact = ContactDetails(
+                                phoneNumber = phoneNumber,
+                                homeAddress = homeAddress,
+                                homeLat = homeLat,
+                                homeLng = homeLng,
+                            ),
                             vehicle = vehicle
                         ) {
                             // Routed automatically
@@ -1227,7 +1245,7 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
     }
 }
 
-// --- Screen 4: Main Dashboard ---
+// --- Screen 3: Main Dashboard ---
 
 @Composable
 fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
@@ -1745,8 +1763,9 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                                 viewModel = viewModel,
                                 navController = navController,
                                 onJoinClick = { offer ->
-                                    val dummyRequestId = "req_joined_${System.currentTimeMillis().toString().takeLast(6)}"
-                                    viewModel.requestJoin(offer.id, dummyRequestId, offer.costPerRider) {
+                                    // The request id is the repository's to generate: this used to
+                                    // be the clock's last six digits, which repeat every 17 minutes.
+                                    viewModel.requestSeat(offer.id, offer.costPerRider) {
                                         selectedOfferForDialog = offer
                                         showSuccessDialog = true
                                     }
@@ -4333,15 +4352,17 @@ fun RideRequestCard(request: RideRequest, onClick: () -> Unit) {
     }
 }
 
-// --- Screen 5: Post Ride Offer (Host) ---
+// --- Screen 4: Post Ride Offer (Host) ---
 
 @Composable
 fun PostOfferScreen(viewModel: MainViewModel, navController: NavController) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    var origin by remember { mutableStateOf("") }
+    // Prefilled from onboarding, like the rider screen: a host's ride usually starts from home.
+    val home by viewModel.contactDetails.collectAsState()
+    var origin by remember(home) { mutableStateOf(home?.homeAddress.orEmpty()) }
     var destination by remember { mutableStateOf("") }
-    var originLat by remember { mutableStateOf(42.34) }
-    var originLng by remember { mutableStateOf(-71.10) }
+    var originLat by remember(home) { mutableStateOf(home?.homeLat?.takeIf { it != 0.0 } ?: 42.34) }
+    var originLng by remember(home) { mutableStateOf(home?.homeLng?.takeIf { it != 0.0 } ?: -71.10) }
     var destLat by remember { mutableStateOf(42.33) }
     var destLng by remember { mutableStateOf(-71.08) }
     
@@ -4688,15 +4709,17 @@ fun PostOfferScreen(viewModel: MainViewModel, navController: NavController) {
     }
 }
 
-// --- Screen 6: Post Ride Request (Rider) ---
+// --- Screen 5: Post Ride Request (Rider) ---
 
 @Composable
 fun PostRequestScreen(viewModel: MainViewModel, navController: NavController) {
+    // What the home address in onboarding is for: the rider should not retype where they live.
+    val home by viewModel.contactDetails.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
-    var origin by remember { mutableStateOf("") }
+    var origin by remember(home) { mutableStateOf(home?.homeAddress.orEmpty()) }
     var destination by remember { mutableStateOf("") }
-    var originLat by remember { mutableStateOf(42.33) }
-    var originLng by remember { mutableStateOf(-71.08) }
+    var originLat by remember(home) { mutableStateOf(home?.homeLat?.takeIf { it != 0.0 } ?: 42.33) }
+    var originLng by remember(home) { mutableStateOf(home?.homeLng?.takeIf { it != 0.0 } ?: -71.08) }
     var destLat by remember { mutableStateOf(42.36) }
     var destLng by remember { mutableStateOf(-71.01) }
     
@@ -4963,7 +4986,7 @@ fun PostRequestScreen(viewModel: MainViewModel, navController: NavController) {
     }
 }
 
-// --- Screen 7: Ride Detail Screen (Join / Accept / Decline matches) ---
+// --- Screen 6: Ride Detail Screen (Join / Accept / Decline matches) ---
 
 @Composable
 fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navController: NavController) {
@@ -5599,8 +5622,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                         Button(
                                             onClick = {
                                                 val contributionDouble = customContribution.toDoubleOrNull() ?: offer.costPerRider
-                                                val dummyRequestId = "req_joined_${System.currentTimeMillis().toString().takeLast(6)}"
-                                                viewModel.requestJoin(offer.id, dummyRequestId, contributionDouble) {
+                                                viewModel.requestSeat(offer.id, contributionDouble) {
                                                     showSuccessDialog = true
                                                 }
                                             },
@@ -5854,12 +5876,72 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                         }
                     }
                 } else {
+                    // A seat can only be offered on a ride that exists. This used to pass an id
+                    // made up from the clock, so the button failed with "Trip offer not found"
+                    // every time it was pressed.
+                    val hostedRides by viewModel.hostedRides.collectAsState()
+                    val offerable = hostedRides.filter {
+                        it.status == "active" &&
+                            it.departureTime > System.currentTimeMillis() &&
+                            it.seatsLeft >= request.seatsNeeded
+                    }
+                    var showOfferPicker by remember { mutableStateOf(false) }
+
+                    if (showOfferPicker) {
+                        AlertDialog(
+                            onDismissRequest = { showOfferPicker = false },
+                            containerColor = SplitCruiserCardBg,
+                            title = {
+                                Text(
+                                    "Which ride are you offering?",
+                                    color = SplitCruiserTextPrimary,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            },
+                            text = {
+                                Column {
+                                    offerable.forEach { hostedOffer ->
+                                        TextButton(
+                                            onClick = {
+                                                showOfferPicker = false
+                                                viewModel.offerSeat(
+                                                    request.id,
+                                                    hostedOffer.id,
+                                                    hostedOffer.costPerRider * request.seatsNeeded,
+                                                ) {}
+                                            },
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Text(
+                                                "${hostedOffer.origin} → ${hostedOffer.destination} " +
+                                                    "(${hostedOffer.seatsLeft} seats left)",
+                                                color = SplitCruiserTextPrimary
+                                            )
+                                        }
+                                    }
+                                }
+                            },
+                            confirmButton = {
+                                TextButton(onClick = { showOfferPicker = false }) {
+                                    Text("Cancel", color = SplitCruiserSaffron)
+                                }
+                            }
+                        )
+                    }
+
                     Button(
                         onClick = {
-                            // Propose a quick direct match
-                            val dummyOfferId = "offer_quick_${System.currentTimeMillis().toString().takeLast(6)}"
-                            viewModel.requestJoin(dummyOfferId, request.id, 15.0) {
-                                // Match request submitted
+                            when (offerable.size) {
+                                0 -> viewModel.setError(
+                                    "You have no upcoming ride with ${request.seatsNeeded} free " +
+                                        "seat(s). Post a ride first, then offer it here."
+                                )
+                                1 -> viewModel.offerSeat(
+                                    request.id,
+                                    offerable.first().id,
+                                    offerable.first().costPerRider * request.seatsNeeded,
+                                ) {}
+                                else -> showOfferPicker = true
                             }
                         },
                         modifier = Modifier
@@ -5892,7 +5974,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
     }
 }
 
-// --- Screen 8: Real-time Coordinate & Coordination Chat ---
+// --- Screen 7: Real-time Coordinate & Coordination Chat ---
 
 @Composable
 fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavController) {
@@ -6722,7 +6804,7 @@ fun EditProfileDialog(
     )
 }
 
-// --- Screen 9: Profile and Rating Settings ---
+// --- Screen 8: Profile and Rating Settings ---
 
 @Composable
 fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
@@ -7260,7 +7342,7 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
     }
 }
 
-// --- Screen 10: Block List Screen ---
+// --- Screen 9: Block List Screen ---
 
 @Composable
 fun BlockedListScreen(viewModel: MainViewModel, navController: NavController) {

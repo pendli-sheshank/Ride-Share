@@ -17,16 +17,22 @@ suspend fun SplitCruiserRepository.signUpWithEmailResult(email: String, password
 suspend fun SplitCruiserRepository.logInWithEmailResult(email: String, password: String): Result<Boolean> =
     runCatching { logInWithEmail(email, password) }
 
-suspend fun SplitCruiserRepository.redeemInviteCodeResult(code: String): Result<Unit> =
-    runCatching { redeemInviteCode(code) }
+suspend fun SplitCruiserRepository.signInWithGoogleResult(googleIdToken: String): Result<Boolean> =
+    runCatching { signInWithGoogle(googleIdToken) }
 
 suspend fun SplitCruiserRepository.createUserProfileResult(
     name: String,
     lastInitial: String,
     communityId: String,
     homeArea: String,
+    contact: ContactDetails,
     vehicle: Vehicle?,
-): Result<Unit> = runCatching { createUserProfile(name, lastInitial, communityId, homeArea, vehicle) }
+): Result<Unit> = runCatching {
+    createUserProfile(name, lastInitial, communityId, homeArea, contact, vehicle)
+}
+
+suspend fun SplitCruiserRepository.saveContactDetailsResult(details: ContactDetails): Result<Unit> =
+    runCatching { saveContactDetails(details) }
 
 suspend fun SplitCruiserRepository.updateUserProfileDetailsResult(
     name: String,
@@ -49,6 +55,17 @@ suspend fun SplitCruiserRepository.postRideRequestResult(request: RideRequest): 
 
 suspend fun SplitCruiserRepository.joinTripOfferDirectResult(offerId: String): Result<Unit> =
     runCatching { joinTripOfferDirect(offerId) }
+
+suspend fun SplitCruiserRepository.requestSeatOnOfferResult(
+    offerId: String,
+    contribution: Double,
+): Result<TripMatch> = runCatching { requestSeatOnOffer(offerId, contribution) }
+
+suspend fun SplitCruiserRepository.offerSeatForRequestResult(
+    requestId: String,
+    offerId: String,
+    contribution: Double,
+): Result<TripMatch> = runCatching { offerSeatForRequest(requestId, offerId, contribution) }
 
 suspend fun SplitCruiserRepository.validateAndCreateMatchResult(
     offerId: String,
