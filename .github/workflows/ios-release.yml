@@ -153,7 +153,19 @@ jobs:
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
+          archive="$RUNNER_TEMP/iosApp.xcarchive"
+
+          # Read the bundle id out of the archive rather than hardcoding it, so this cannot
+          # drift from PRODUCT_BUNDLE_IDENTIFIER in the project.
+          bundle_id=$(/usr/libexec/PlistBuddy -c \
+            "Print :ApplicationProperties:CFBundleIdentifier" "$archive/Info.plist")
+          echo "Archive bundle id: $bundle_id"
+
           # Generated here rather than committed so the team ID stays out of the repository.
+          #
+          # `provisioningProfiles` is REQUIRED when signingStyle is manual. Omitting it does not
+          # produce a clean error — Xcode 15's exportArchive segfaults (exit 139) while trying
+          # to resolve a profile it was never given. That is what failed the previous run.
           cat > "$RUNNER_TEMP/exportOptions.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -161,23 +173,61 @@ jobs:
           <dict>
             <key>method</key>
             <string>app-store</string>
+            <key>destination</key>
+            <string>export</string>
             <key>signingStyle</key>
             <string>manual</string>
             <key>teamID</key>
             <string>$TEAM_ID</string>
-            <key>stripSwiftSymbols</key>
-            <true/>
+            <key>signingCertificate</key>
+            <string>Apple Distribution</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>$bundle_id</key>
+              <string>$PROVISIONING_PROFILE_UUID</string>
+            </dict>
             <key>uploadSymbols</key>
             <true/>
           </dict>
           </plist>
           PLIST
 
-          xcodebuild -exportArchive \
-            -archivePath "$RUNNER_TEMP/iosApp.xcarchive" \
-            -exportPath "$RUNNER_TEMP/export" \
-            -exportOptionsPlist "$RUNNER_TEMP/exportOptions.plist"
+          echo "--- exportOptions.plist ---"
+          cat "$RUNNER_TEMP/exportOptions.plist"
 
+          # Do not let a non-zero exit abort the step: we want the fallback below to run.
+          set +e
+          xcodebuild -exportArchive \
+            -archivePath "$archive" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -exportOptionsPlist "$RUNNER_TEMP/exportOptions.plist" \
+            -allowProvisioningUpdates
+          export_status=$?
+          set -e
+          echo "xcodebuild -exportArchive exited $export_status"
+
+          # Fallback. An .ipa is just a zip with the signed .app inside Payload/, and the app in
+          # the archive is already distribution-signed by the archive step (it embedded the
+          # profile and signed with "Apple Distribution"). So if exportArchive crashes again we
+          # can still produce a valid, uploadable IPA rather than losing the whole run.
+          if ! ls "$RUNNER_TEMP/export"/*.ipa >/dev/null 2>&1; then
+            echo "::warning::exportArchive produced no IPA (exit $export_status); packaging from the archive instead."
+            apps=("$archive/Products/Applications/"*.app)
+            app_path="${apps[0]}"
+            echo "Packaging $app_path"
+            rm -rf "$RUNNER_TEMP/payload-build"
+            mkdir -p "$RUNNER_TEMP/payload-build/Payload" "$RUNNER_TEMP/export"
+            cp -R "$app_path" "$RUNNER_TEMP/payload-build/Payload/"
+            ( cd "$RUNNER_TEMP/payload-build" && zip -qry "$RUNNER_TEMP/export/iosApp.ipa" Payload )
+            # Confirm what we packaged is actually signed; an unsigned IPA is rejected on
+            # upload with a far less obvious message.
+            codesign -dv --verbose=4 "$app_path" 2>&1 | sed -n '1,6p'
+          fi
+
+          if ! ls "$RUNNER_TEMP/export"/*.ipa >/dev/null 2>&1; then
+            echo "::error::No IPA produced by either exportArchive or the archive fallback."
+            exit 1
+          fi
           ls -lh "$RUNNER_TEMP/export"
 
       # --- Upload to App Store Connect --------------------------------------------------

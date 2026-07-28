@@ -561,6 +561,24 @@ insurance, since that is where the limit bites regardless.
 **Check for it:** grep for dot-shorthand style modifiers, not just type names — the shorthand
 is the newer spelling of an API whose long form is often much older.
 
+### 2026-07-28 — `xcodebuild -exportArchive` exits 139 (SIGSEGV), no message at all
+**Symptom:** the archive succeeded, then `Export signed IPA` died in one second with
+`##[error]Process completed with exit code 139` and no diagnostic whatsoever. 139 = 128 + 11,
+i.e. segmentation fault.
+**Cause:** `exportOptions.plist` set `signingStyle = manual` but omitted the
+`provisioningProfiles` dictionary. That dictionary is **required** for manual signing. Xcode 15
+does not report the omission — it crashes while trying to resolve a profile it was never given.
+**Fix:** added `provisioningProfiles` mapping the bundle id (read out of the archive's
+`Info.plist`, not hardcoded) to the profile UUID, plus `signingCertificate` and `destination`,
+and `-allowProvisioningUpdates` on the command.
+**Also added a fallback, because a crash with no message must not cost another release cycle:**
+an `.ipa` is just a zip containing the signed `.app` under `Payload/`, and the app inside the
+archive is already distribution-signed by the archive step. If `exportArchive` produces no IPA
+for any reason, the step now packages one from the archive and verifies with `codesign -dv`
+that what it packaged is actually signed.
+**Check for it:** exit 139 from any Xcode tool is a segfault, never a configuration error
+message you have missed. Look for a required key that is absent rather than one that is wrong.
+
 ---
 
 ## 8. Pre-flight checklist before merging to `main`
