@@ -119,7 +119,7 @@ dependencies {
   implementation(libs.androidx.lifecycle.viewmodel.compose)
   implementation(libs.androidx.navigation.compose)
   implementation(libs.coil.compose)
-  // Retrofit, Moshi and OkHttp went with SawaariRepository and the OSM services. Ktor now does
+  // Retrofit, Moshi and OkHttp went with the old Android-only repository and the OSM services.
   // the HTTP in :shared, and ktor-client-okhttp brings its own OkHttp — leaving the old
   // logging-interceptor 4.10.0 here would have put two OkHttp versions on the runtime classpath.
   // implementation(libs.converter.moshi)
@@ -129,7 +129,7 @@ dependencies {
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
   // implementation(libs.play.services.location)
-  implementation(libs.retrofit)
+  // implementation(libs.retrofit)
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
   testImplementation(libs.androidx.junit)
@@ -146,6 +146,6 @@ dependencies {
   androidTestImplementation(libs.androidx.runner)
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
-  // Moshi codegen (and therefore KSP) removed: nothing in this project is annotated with
-  // @JsonClass — SawaariRepository uses the reflective KotlinJsonAdapterFactory instead.
+  // Moshi codegen (and therefore KSP) removed: Moshi itself is gone now that the backend lives
+  // in :shared and serialises with kotlinx-serialization.
 }

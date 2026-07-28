@@ -1,7 +1,7 @@
 package com.splitcruiser.app.ui.theme
 
 // Typography configuration as plain objects - Compose-specific types are in androidMain/iosMain
-object SawaariTypography {
+object SplitCruiserTypography {
     data class TextStyleConfig(
         val fontFamily: String = "Default",
         val fontWeight: Int = 400,

@@ -22,7 +22,7 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "SawaariShare"
+rootProject.name = "SplitCruiser"
 
 include(":shared")
 include(":app")
