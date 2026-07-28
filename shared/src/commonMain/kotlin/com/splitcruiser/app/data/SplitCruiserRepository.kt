@@ -69,6 +69,12 @@ class SplitCruiserRepository internal constructor(
     /** False when the FIREBASE_* values are missing or still placeholders. */
     val isFirebaseEnabled: Boolean get() = config.isConfigured
 
+    /** False when GOOGLE_WEB_CLIENT_ID is unset, in which case the UI hides the Google button. */
+    val isGoogleSignInEnabled: Boolean get() = config.isGoogleSignInConfigured
+
+    /** The audience the platform must request its Google ID token for. */
+    val googleWebClientId: String get() = config.googleWebClientId
+
     // --- Caches -----------------------------------------------------------------------------
 
     private val users = MutableStateFlow<Map<String, User>>(emptyMap())
@@ -376,8 +382,33 @@ class SplitCruiserRepository internal constructor(
         return loadSignedInUser(session)
     }
 
-    /** True when the profile is still incomplete, which is what routes the UI to profile setup. */
-    private suspend fun loadSignedInUser(session: StoredSession): Boolean {
+    /**
+     * Signs in with a Google ID token that the platform has already obtained.
+     *
+     * There is no separate sign-up: Identity Toolkit creates the account on first exchange, and
+     * [loadSignedInUser] writes the profile document when it finds none — the same path a returning
+     * user takes. So the caller does not have to know which it is.
+     */
+    @Throws(Exception::class)
+    suspend fun signInWithGoogle(googleIdToken: String): Boolean {
+        requireValid(googleIdToken.isNotBlank()) {
+            "Google sign-in did not return a credential. Please try again."
+        }
+        requireConfigured()
+
+        val result = auth.signInWithGoogle(googleIdToken)
+        tokens.set(result.session)
+        return loadSignedInUser(result.session, avatarUrl = result.photoUrl)
+    }
+
+    /**
+     * True when the profile is still incomplete, which is what routes the UI to profile setup.
+     *
+     * [avatarUrl] seeds a new document from the identity provider. Google's display name is
+     * deliberately *not* seeded: this returns `name.isEmpty()`, so filling it in would skip the
+     * profile screen — and with it the community and home area, which nothing else collects.
+     */
+    private suspend fun loadSignedInUser(session: StoredSession, avatarUrl: String = ""): Boolean {
         val existing = firestore.getDocument("users", session.uid, serializer<User>())
         val user = if (existing != null) {
             // The uid on the token is authoritative. A document written before the `id` field
@@ -388,8 +419,12 @@ class SplitCruiserRepository internal constructor(
                 email = existing.email.ifBlank { session.email },
             )
         } else {
-            User(id = session.uid, email = session.email, verifiedTier = "vouched")
-                .also { firestore.setDocument("users", session.uid, it, serializer<User>()) }
+            User(
+                id = session.uid,
+                email = session.email,
+                avatarUrl = avatarUrl,
+                verifiedTier = "vouched",
+            ).also { firestore.setDocument("users", session.uid, it, serializer<User>()) }
         }
 
         adoptUser(user)

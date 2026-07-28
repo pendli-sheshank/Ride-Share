@@ -1,11 +1,14 @@
 package com.splitcruiser.app.ui
 
 import android.app.Application
+import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.splitcruiser.app.auth.GoogleSignInCancelledException
+import com.splitcruiser.app.auth.requestGoogleIdToken
 import com.splitcruiser.app.data.Community
 import com.splitcruiser.app.data.FirebaseConfig
 import com.splitcruiser.app.data.Message
@@ -27,6 +30,7 @@ import com.splitcruiser.app.data.postRideRequestResult
 import com.splitcruiser.app.data.postTripOfferResult
 import com.splitcruiser.app.data.redeemInviteCodeResult
 import com.splitcruiser.app.data.sendMessageResult
+import com.splitcruiser.app.data.signInWithGoogleResult
 import com.splitcruiser.app.data.signUpWithEmailResult
 import com.splitcruiser.app.data.submitRatingResult
 import com.splitcruiser.app.data.updateRideRequestStatusResult
@@ -160,6 +164,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     onSuccess = { isNewUser -> onFinished(isNewUser) },
                     onFailure = { _uiError.value = it.message ?: "Failed to sign up." },
                 )
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+    /**
+     * [activityContext] must be the Activity: Credential Manager shows a bottom sheet, so the
+     * application context this ViewModel already holds is not usable here.
+     *
+     * A cancelled picker is not an error — the user closed a sheet — so it leaves no message.
+     */
+    fun signInWithGoogle(activityContext: Context, onFinished: (isNewUser: Boolean) -> Unit) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            try {
+                val idToken = requestGoogleIdToken(activityContext, repository.googleWebClientId)
+                repository.signInWithGoogleResult(idToken).fold(
+                    onSuccess = { isNewUser -> onFinished(isNewUser) },
+                    onFailure = { _uiError.value = it.message ?: "Failed to sign in with Google." },
+                )
+            } catch (e: GoogleSignInCancelledException) {
+                // Deliberately silent.
+            } catch (e: Exception) {
+                _uiError.value = e.message ?: "Failed to sign in with Google."
             } finally {
                 _isLoading.value = false
             }

@@ -77,17 +77,25 @@ val firebaseApiKey = providers.environmentVariable("FIREBASE_API_KEY").orElse(""
 val firebaseProjectId = providers.environmentVariable("FIREBASE_PROJECT_ID").orElse("")
 val firebaseStorageBucket = providers.environmentVariable("FIREBASE_STORAGE_BUCKET").orElse("")
 
+// The OAuth 2.0 **Web** client ID Firebase creates when the Google sign-in provider is enabled —
+// not the Android client ID. Credential Manager asks Google for an ID token whose audience is this
+// value, and Identity Toolkit only accepts a token minted for the project's own web client. Empty
+// is a supported state: the Google button hides itself rather than failing at the tap.
+val googleWebClientId = providers.environmentVariable("GOOGLE_WEB_CLIENT_ID").orElse("")
+
 val firebaseConfigDir: Provider<Directory> = layout.buildDirectory.dir("generated/firebaseConfig")
 
 val generateFirebaseConfig by tasks.registering {
   val apiKey = firebaseApiKey
   val projectId = firebaseProjectId
   val storageBucket = firebaseStorageBucket
+  val webClientId = googleWebClientId
   val outputDir = firebaseConfigDir
 
   inputs.property("firebaseApiKey", apiKey)
   inputs.property("firebaseProjectId", projectId)
   inputs.property("firebaseStorageBucket", storageBucket)
+  inputs.property("googleWebClientId", webClientId)
   outputs.dir(outputDir)
 
   doLast {
@@ -120,6 +128,7 @@ val generateFirebaseConfig by tasks.registering {
           const val API_KEY: String = ${quote(apiKey.get())}
           const val PROJECT_ID: String = ${quote(projectId.get())}
           const val STORAGE_BUCKET: String = ${quote(storageBucket.get())}
+          const val GOOGLE_WEB_CLIENT_ID: String = ${quote(webClientId.get())}
       }
       """.trimIndent() + "\n"
     )

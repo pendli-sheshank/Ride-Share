@@ -133,6 +133,35 @@ class SplitCruiserRepositoryTest {
     }
 
     @Test
+    fun googleSignInCreatesTheProfileAndKeepsTheAvatar() = runTest {
+        val repo = repository { request ->
+            if (request.url.toString().contains("signInWithIdp")) {
+                HttpStatusCode.OK to """
+                {"localId":"me","email":"ana@gmail.com","idToken":"tok","refreshToken":"ref",
+                 "expiresIn":"3600","displayName":"Ana R","photoUrl":"https://lh3.example/ana.jpg"}
+                """.trimIndent()
+            } else {
+                scriptedBackend()(request)
+            }
+        }
+
+        val needsProfile = repo.signInWithGoogle("google-jwt")
+
+        // Google knows the display name, but filling it in would make the profile screen — the only
+        // place community and home area are collected — think it had already run.
+        assertTrue(needsProfile, "a Google account still has to pick a community")
+        assertEquals("https://lh3.example/ana.jpg", repo.currentUser.value?.avatarUrl)
+        assertEquals("ana@gmail.com", repo.currentUser.value?.email)
+    }
+
+    @Test
+    fun anEmptyGoogleTokenNeverReachesTheNetwork() = runTest {
+        val repo = repository(scriptedBackend())
+        assertFailsWith<SplitCruiserException> { repo.signInWithGoogle("") }
+        assertTrue(requests.isEmpty())
+    }
+
+    @Test
     fun emptyCredentialsAreRejectedBeforeTheNetwork() = runTest {
         val repo = repository(scriptedBackend())
         assertFailsWith<SplitCruiserException> { repo.logInWithEmail("", "") }

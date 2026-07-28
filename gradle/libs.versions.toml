@@ -59,6 +59,11 @@ koinTest = "4.0.1"
 # and 3.3.3+/3.5.x move to 2.2.21/2.3.x, which a 2.2.10 Native compile cannot read.
 # Re-check this pairing before bumping either version.
 ktor = "3.3.0"
+# Credential Manager is how a Google ID token is obtained on Android now; GoogleSignInClient from
+# play-services-auth is deprecated. `credentials-play-services-auth` is the provider that actually
+# serves the request on Play-enabled devices, and `googleid` carries GetSignInWithGoogleOption.
+androidxCredentials = "1.5.0"
+googleid = "1.1.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -124,6 +129,9 @@ ktor-serialization-kotlinx-json = { group = "io.ktor", name = "ktor-serializatio
 ktor-client-okhttp = { group = "io.ktor", name = "ktor-client-okhttp", version.ref = "ktor" }
 ktor-client-darwin = { group = "io.ktor", name = "ktor-client-darwin", version.ref = "ktor" }
 ktor-client-mock = { group = "io.ktor", name = "ktor-client-mock", version.ref = "ktor" }
+androidx-credentials = { group = "androidx.credentials", name = "credentials", version.ref = "androidxCredentials" }
+androidx-credentials-play-services-auth = { group = "androidx.credentials", name = "credentials-play-services-auth", version.ref = "androidxCredentials" }
+googleid = { group = "com.google.android.libraries.identity.googleid", name = "googleid", version.ref = "googleid" }
 
 [plugins]
 kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }

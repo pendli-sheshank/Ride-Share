@@ -193,6 +193,31 @@ class FirebaseClientTest {
         assertContains(failure.message!!, "No account found")
     }
 
+    /**
+     * The Google token exchange. `postBody` is form-encoded inside a JSON field, and the provider
+     * id has to travel with it — omitting it fails with a code that blames the token instead.
+     */
+    @Test
+    fun googleSignInPostsTheIdTokenToSignInWithIdp() = runTest {
+        val http = createFirebaseHttpClient(
+            engine {
+                HttpStatusCode.OK to """
+                {"localId":"user_g","email":"ana@gmail.com","idToken":"tok","refreshToken":"ref",
+                 "expiresIn":"3600","displayName":"Ana R","photoUrl":"https://lh3.example/ana.jpg"}
+                """.trimIndent()
+            }
+        )
+        val result = FirebaseAuthClient(http, config).signInWithGoogle("google-jwt")
+
+        assertEquals("user_g", result.session.uid)
+        assertEquals("https://lh3.example/ana.jpg", result.photoUrl)
+        val request = requests.single()
+        assertContains(request.url.toString(), "accounts:signInWithIdp")
+        val body = (request.body as io.ktor.http.content.TextContent).text
+        assertContains(body, "id_token=google-jwt")
+        assertContains(body, "providerId=google.com")
+    }
+
     // --- Token refresh ---------------------------------------------------------------------
 
     @Test

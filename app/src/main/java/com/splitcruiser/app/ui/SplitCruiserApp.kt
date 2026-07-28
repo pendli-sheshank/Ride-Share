@@ -674,6 +674,56 @@ fun EmailPasswordLoginScreen(viewModel: MainViewModel, navController: NavControl
                     )
                 }
 
+                // Hidden rather than disabled when GOOGLE_WEB_CLIENT_ID is unset: without it the
+                // account picker fails at the tap with a Play Services error that means nothing
+                // to whoever is looking at it.
+                if (viewModel.repository.isGoogleSignInEnabled) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                    ) {
+                        HorizontalDivider(modifier = Modifier.weight(1f), color = SplitCruiserDivider)
+                        Text(
+                            text = "or",
+                            color = SplitCruiserLightGray,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(horizontal = 12.dp)
+                        )
+                        HorizontalDivider(modifier = Modifier.weight(1f), color = SplitCruiserDivider)
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            vibrate(context, 50)
+                            viewModel.signInWithGoogle(context) {
+                                vibrateSuccess(context)
+                                // Navigates automatically based on global StateFlow observer
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(54.dp)
+                            .testTag("google_sign_in_button"),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, SplitCruiserDivider),
+                        colors = ButtonDefaults.outlinedButtonColors(containerColor = SplitCruiserCardBg)
+                    ) {
+                        Text(
+                            text = "G",
+                            color = SplitCruiserSaffron,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = "Continue with Google",
+                            color = SplitCruiserTextPrimary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp
+                        )
+                    }
+                }
+
                 TextButton(
                     onClick = { isSignUpMode = !isSignUpMode },
                     colors = ButtonDefaults.textButtonColors(contentColor = SplitCruiserSaffron),

@@ -35,6 +35,42 @@ internal class FirebaseAuthClient(
         identityCall("accounts:signInWithPassword", IdentityRequest(email = email, password = password))
 
     /**
+     * Exchanges a Google ID token for a Firebase session.
+     *
+     * The platform half — Credential Manager on Android — is what actually talks to Google; by the
+     * time we are here the user has already picked an account and we hold a signed JWT. This
+     * endpoint verifies it against the project's own Google provider and mints Firebase tokens,
+     * which is why no Google SDK is needed on this side of the line.
+     *
+     * `postBody` is form-encoded *inside* a JSON field, and `requestUri` is required even though
+     * nothing redirects anywhere — it is a leftover from the browser flow the endpoint also serves.
+     */
+    suspend fun signInWithGoogle(googleIdToken: String): GoogleSession {
+        val response = http.post("${config.identityBase}/accounts:signInWithIdp?key=${config.apiKey}") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                IdpRequest(
+                    postBody = "id_token=$googleIdToken&providerId=google.com",
+                    requestUri = "http://localhost",
+                ),
+            )
+        }.requireIdentitySuccess()
+
+        val body: IdpResponse = response.body()
+        return GoogleSession(
+            session = StoredSession(
+                uid = body.localId,
+                email = body.email,
+                idToken = body.idToken,
+                refreshToken = body.refreshToken,
+                expiresAtMs = expiryFrom(body.expiresIn),
+            ),
+            displayName = body.displayName,
+            photoUrl = body.photoUrl,
+        )
+    }
+
+    /**
      * The odd one out, in three ways: a different host, a form-encoded body rather than JSON, and a
      * snake_case response where every other Identity Toolkit response is camelCase.
      */
@@ -134,6 +170,33 @@ private data class IdentityResponse(
     val refreshToken: String = "",
     val expiresIn: String = "3600",
     val registered: Boolean = false,
+)
+
+@Serializable
+private data class IdpRequest(
+    val postBody: String,
+    val requestUri: String,
+    val returnSecureToken: Boolean = true,
+    /** Off deliberately: the Google access token has no use here and does not want storing. */
+    val returnIdpCredential: Boolean = false,
+)
+
+@Serializable
+private data class IdpResponse(
+    val localId: String = "",
+    val email: String = "",
+    val idToken: String = "",
+    val refreshToken: String = "",
+    val expiresIn: String = "3600",
+    val displayName: String = "",
+    val photoUrl: String = "",
+)
+
+/** What Google knows about the account, alongside the Firebase session it was traded for. */
+internal data class GoogleSession(
+    val session: StoredSession,
+    val displayName: String,
+    val photoUrl: String,
 )
 
 @Serializable

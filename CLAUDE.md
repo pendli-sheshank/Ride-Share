@@ -80,8 +80,11 @@ not evidence. Verify against a build.
 - **The UI is not shared.** The backend is, but Android is Jetpack Compose in `:app` and iOS is
   SwiftUI in `iosApp/`, so every screen exists twice. iOS covers a subset: auth, browse, post an
   offer, post a request, reserve a seat, accept/decline. No chat, ratings, blocking or profile
-  pictures yet. Sharing the UI would mean Compose Multiplatform and moving `SplitCruiserApp.kt`
-  into `commonMain`.
+  pictures yet. **Google sign-in is Android-only** — the token exchange is in `:shared`, but only
+  Android acquires a Google ID token (Credential Manager); iOS would need an
+  `ASWebAuthenticationSession` flow and a URL scheme in the generated Xcode project.
+  Sharing the UI would mean Compose Multiplatform and moving `SplitCruiserApp.kt` into
+  `commonMain`.
 - **iOS keeps the refresh token in `NSUserDefaults`, not the Keychain.** It is a long-lived
   credential sitting in a plaintext plist that is included in unencrypted backups. `KeychainStore`
   is the fix; it was deferred because Keychain cinterop cannot be compile-checked on Linux.
@@ -94,6 +97,6 @@ not evidence. Verify against a build.
   filename.
 - The `google-services` and `secrets` Gradle plugins are inert on `:app` now that no native
   Firebase SDK consumes them.
-- Test coverage: 111 tests in `:shared` cover the codec, the REST clients, token refresh, the feed
+- Test coverage: 112 tests in `:shared` cover the codec, the REST clients, token refresh, the feed
   rules and the repository. `:app` has three (a Robolectric label check, a Roborazzi screenshot,
   and an arithmetic placeholder); the androidTest suite is still not run by any CI job.

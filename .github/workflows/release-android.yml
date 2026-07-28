@@ -104,6 +104,9 @@ jobs:
           FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
           FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
           FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
+          # Empty until the Google sign-in provider is enabled; the button then hides itself
+          # rather than failing at the tap.
+          GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_WEB_CLIENT_ID }}
           # VERSION_CODE / VERSION_NAME come from the Compute version step above.
           # Currently published versionCode is 2; the 1000 offset guarantees the value only
           # ever increases. NOTE: github.run_number resets to 1 if this workflow file is

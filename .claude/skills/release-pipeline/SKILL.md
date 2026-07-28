@@ -111,6 +111,7 @@ once they exist.
 | `FIREBASE_PROJECT_ID` | same |
 | `FIREBASE_STORAGE_BUCKET` | same |
 | `FIREBASE_APP_ID` | `.env` only. **Unused** — it identifies an app to the native SDKs and has no role in any REST endpoint. |
+| `GOOGLE_WEB_CLIENT_ID` | same `env:` blocks. **Optional** — unset means the app offers email/password only. Must be the OAuth **Web** client ID, not the Android one (§4). |
 
 These three configure the app on *both* platforms, because the backend is one shared Kotlin
 repository. Putting them only in `.env` is not enough: `.env` feeds `:app`'s `BuildConfig` via the
@@ -173,6 +174,19 @@ cannot sign anybody in. Do them once, in the console, for the project named by
    `CONFIGURATION_NOT_FOUND` — see §7.
 2. **Sign-in method → Email/Password → Enable.** (Leave "Email link" off; the app sends a password.)
    Without it the same calls return `OPERATION_NOT_ALLOWED`.
+2b. **Sign-in method → Google → Enable**, set a support email, save. Then:
+   - Project settings → General → **Your apps → Android** must list the app with the
+     `applicationId` *and* the signing **SHA-1** of every build that will sign in — the debug
+     keystore's for local runs (`keytool -list -v -keystore ~/.android/debug.keystore -alias
+     androiddebugkey -storepass android`), and Play's **app signing** SHA-1 for released builds,
+     which is not the upload key's. A missing SHA-1 fails only on the device, only at the tap,
+     with Play Services' "developer console is not set up correctly".
+   - GCP → APIs & Services → Credentials → copy the **Web client (auto created by Google
+     Service)** client ID into the `GOOGLE_WEB_CLIENT_ID` secret. The *Android* client ID is the
+     wrong one: Credential Manager mints the ID token for the web audience, and Identity Toolkit
+     rejects any other.
+   - Leave the secret unset to ship without the feature — the button hides itself rather than
+     failing at the tap.
 3. Project settings → General → **Web API key** is what `FIREBASE_API_KEY` must hold. It is *not*
    the App ID and *not* a service-account key. If the key is restricted under GCP → APIs &
    Services → Credentials, its allowed-API list must include **Identity Toolkit API**; REST calls
@@ -841,6 +855,36 @@ Identity Toolkit's codes raw; they now share one `requireIdentitySuccess`.
 `CONFIGURATION_NOT_FOUND`. So seeing `CONFIGURATION_NOT_FOUND` is itself proof the key is real and
 the problem is the project's auth setup — no need to re-check the secret first.
 
+### 2026-07-28 — Google sign-in without a Firebase SDK, and which client ID it wants
+
+Adding Google sign-in looked like it would force the native Firebase SDK back in — the thing the
+whole REST architecture exists to avoid. It does not. The two halves separate cleanly:
+
+- **Getting a Google ID token is platform work.** Android uses Credential Manager
+  (`androidx.credentials` + `googleid`), which is unrelated to Firebase. `GoogleSignInClient` from
+  play-services-auth is deprecated; do not reach for it.
+- **Trading that token for a Firebase session is REST**, `accounts:signInWithIdp`, and lives in
+  `:shared` with everything else. `postBody` is form-encoded *inside* a JSON field
+  (`id_token=…&providerId=google.com`) and `requestUri` is required even though nothing redirects.
+
+Three things that only fail on a device, never in CI:
+
+1. **The client ID must be the Web one.** Credential Manager mints the ID token for that audience
+   and Identity Toolkit rejects any other. The Android client ID is the intuitive wrong answer.
+2. **The signing SHA-1 must be registered** on the Android app in the Firebase console — separately
+   for the debug keystore and for Play's app-signing key. Missing it produces Play Services'
+   "developer console is not set up correctly", which names no fix; `GoogleCredentials.kt`
+   rewrites that one message into the actual instruction.
+3. **Do not seed the Firebase profile with Google's display name.** `loadSignedInUser` returns
+   `name.isEmpty()` as "needs profile setup", and the profile screen is the only place community
+   and home area are collected — a seeded name skips it and leaves an account that cannot see a
+   feed. The avatar URL is safe to keep and is.
+
+**iOS is not done.** `signInWithGoogle` is in `:shared` and exported, so the exchange works there
+already, but nothing acquires the token: that needs `ASWebAuthenticationSession` plus a reversed-
+client-id URL scheme in `Info.plist` and `generate-project.py`, none of which can be compile-checked
+on Linux. iOS shows email/password only until then.
+
 ---
 
 ## 8. Pre-flight checklist before merging to `main`
@@ -858,6 +902,8 @@ the problem is the project's auth setup — no need to re-check the secret first
 - [ ] Invite codes are seeded in Firestore (the rules forbid the client creating them)
 - [ ] The Firebase project itself is set up — Authentication enabled with the Email/Password
       provider on (§4). The build cannot tell you this; the `accounts:signUp` curl in §4 can
+- [ ] If `GOOGLE_WEB_CLIENT_ID` is set: it is the **Web** client ID, and this build's signing
+      SHA-1 is registered on the Android app in the Firebase console (§4)
 - [ ] Nothing exported to Swift returns `Result` or `Pair`, or relies on a default argument
 
 ## 9. Rollback

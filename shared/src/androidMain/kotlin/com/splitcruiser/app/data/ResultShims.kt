@@ -17,6 +17,9 @@ suspend fun SplitCruiserRepository.signUpWithEmailResult(email: String, password
 suspend fun SplitCruiserRepository.logInWithEmailResult(email: String, password: String): Result<Boolean> =
     runCatching { logInWithEmail(email, password) }
 
+suspend fun SplitCruiserRepository.signInWithGoogleResult(googleIdToken: String): Result<Boolean> =
+    runCatching { signInWithGoogle(googleIdToken) }
+
 suspend fun SplitCruiserRepository.redeemInviteCodeResult(code: String): Result<Unit> =
     runCatching { redeemInviteCode(code) }
 
