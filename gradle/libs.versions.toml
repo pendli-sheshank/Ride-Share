@@ -48,6 +48,17 @@ kotlinxDatetime = "0.6.2"
 koinCore = "4.0.1"
 koinCompose = "4.0.1"
 koinTest = "4.0.1"
+# Ktor drives the Firebase REST APIs from commonMain. This is what lets iOS have a backend at
+# all: the native Firebase SDKs would require CocoaPods/SPM entries in the generated
+# project.pbxproj, whereas ktor-client-darwin is pure Kotlin/Native and links straight into the
+# existing static Shared.xcframework.
+#
+# Pin 3.3.0 deliberately, not the newest. Ktor publishes klibs compiled against a specific
+# Kotlin, and klib metadata is backward- but not forward-compatible. 3.3.0 is built against
+# kotlin-stdlib 2.2.10 — exactly the `kotlin` version above. 3.2.0 was built against 2.1.21,
+# and 3.3.3+/3.5.x move to 2.2.21/2.3.x, which a 2.2.10 Native compile cannot read.
+# Re-check this pairing before bumping either version.
+ktor = "3.3.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -106,6 +117,13 @@ kotlinx-datetime = { group = "org.jetbrains.kotlinx", name = "kotlinx-datetime",
 koin-core = { group = "io.insert-koin", name = "koin-core", version.ref = "koinCore" }
 koin-compose = { group = "io.insert-koin", name = "koin-compose", version.ref = "koinCompose" }
 koin-test = { group = "io.insert-koin", name = "koin-test", version.ref = "koinTest" }
+ktor-client-core = { group = "io.ktor", name = "ktor-client-core", version.ref = "ktor" }
+ktor-client-content-negotiation = { group = "io.ktor", name = "ktor-client-content-negotiation", version.ref = "ktor" }
+ktor-serialization-kotlinx-json = { group = "io.ktor", name = "ktor-serialization-kotlinx-json", version.ref = "ktor" }
+# Engines are per-platform: commonMain only ever sees ktor-client-core.
+ktor-client-okhttp = { group = "io.ktor", name = "ktor-client-okhttp", version.ref = "ktor" }
+ktor-client-darwin = { group = "io.ktor", name = "ktor-client-darwin", version.ref = "ktor" }
+ktor-client-mock = { group = "io.ktor", name = "ktor-client-mock", version.ref = "ktor" }
 
 [plugins]
 kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }

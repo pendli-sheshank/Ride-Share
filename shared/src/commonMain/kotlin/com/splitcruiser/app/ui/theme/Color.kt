@@ -3,7 +3,7 @@ package com.splitcruiser.app.ui.theme
 // Color definitions as RGB hex values for platform-agnostic use
 // These are not Compose Color objects - that's platform-specific
 
-object SawaariColors {
+object SplitCruiserColors {
     // Standard Material colors
     const val Purple80 = 0xFFD0BCFF
     const val PurpleGrey80 = 0xFFCCC2DC
@@ -13,7 +13,7 @@ object SawaariColors {
     const val PurpleGrey40 = 0xFF625b71
     const val Pink40 = 0xFF7D5260
 
-    // Custom SawaariShare colors
+    // Custom Split Cruiser colors
     const val DarkBg = 0xFFF8F9FF
     const val CardBg = 0xFFFFFFFF
     const val Saffron = 0xFF0061A4

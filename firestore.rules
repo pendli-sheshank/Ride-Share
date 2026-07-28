@@ -6,20 +6,18 @@ service cloud.firestore {
     // HELPER FUNCTIONS
     // ============================================
 
-    // Check if user is authenticated
     function isAuth() {
       return request.auth != null;
     }
 
-    // Check if user owns the resource
     function isOwner(userId) {
-      return request.auth.uid == userId;
+      return isAuth() && request.auth.uid == userId;
     }
 
-    // Check if user is a participant in a match
-    function isMatchParticipant(matchId) {
-      return get(/databases/$(database)/documents/trip_matches/$(matchId)).data.hostId == request.auth.uid ||
-             get(/databases/$(database)/documents/trip_matches/$(matchId)).data.riderId == request.auth.uid;
+    // Which fields a write actually changes. The clients send a narrow updateMask precisely so
+    // these checks can stay tight.
+    function changed() {
+      return request.resource.data.diff(resource.data).affectedKeys();
     }
 
     // ============================================
@@ -27,15 +25,25 @@ service cloud.firestore {
     // ============================================
 
     match /users/{userId} {
-      // Anyone can read public user profiles (for display in feeds/matches)
+      // Public, so feeds can show a host's name and rating.
       allow read: if true;
 
-      // Users can only write to their own profile
-      allow write: if isAuth() && isOwner(userId);
+      allow create: if isOwner(userId);
 
-      // Nested: blocked users list (private)
+      // Ratings and no-show counts are aggregates written *about* a user by someone else, so the
+      // owner-only rule that used to guard the whole document made submitRating and recordNoShow
+      // impossible. This is deliberately narrow but still spoofable — anyone can inflate anyone's
+      // rating. The real fix is a Cloud Function holding the Admin SDK; until then this at least
+      // bounds the damage to three numeric fields.
+      allow update: if isOwner(userId) ||
+        (isAuth() && changed().hasOnly(['ratingAvg', 'ratingCount', 'noShowCount']));
+
+      allow delete: if isOwner(userId);
+
+      // Private block list. The client writes here rather than to a top-level `blocks` collection,
+      // which was never declared in these rules and so could only ever have been denied.
       match /blockedUsers/{blockedId} {
-        allow read, write: if isAuth() && isOwner(userId);
+        allow read, write: if isOwner(userId);
       }
     }
 
@@ -44,14 +52,19 @@ service cloud.firestore {
     // ============================================
 
     match /trip_offers/{offerId} {
-      // Anyone can read active trip offers
       allow read: if true;
 
-      // Only authenticated users can create
       allow create: if isAuth() && request.resource.data.hostId == request.auth.uid;
 
-      // Only the host can update their own offer
-      allow update, delete: if isAuth() && resource.data.hostId == request.auth.uid;
+      // Joining a ride, accepting a match and declining one all change someone else's offer. The
+      // previous host-only rule denied every one of them. A non-host may touch only the seat and
+      // passenger bookkeeping.
+      allow update: if isAuth() && (
+        resource.data.hostId == request.auth.uid ||
+        changed().hasOnly(['passengers', 'passengerNames', 'seatsLeft', 'status'])
+      );
+
+      allow delete: if isAuth() && resource.data.hostId == request.auth.uid;
     }
 
     // ============================================
@@ -59,14 +72,17 @@ service cloud.firestore {
     // ============================================
 
     match /ride_requests/{requestId} {
-      // Anyone can read active ride requests
       allow read: if true;
 
-      // Only authenticated users can create
       allow create: if isAuth() && request.resource.data.riderId == request.auth.uid;
 
-      // Only the rider can update their own request
-      allow update, delete: if isAuth() && resource.data.riderId == request.auth.uid;
+      // A host flips the rider's request to "matched" when accepting, so this cannot be rider-only.
+      allow update: if isAuth() && (
+        resource.data.riderId == request.auth.uid ||
+        changed().hasOnly(['status'])
+      );
+
+      allow delete: if isAuth() && resource.data.riderId == request.auth.uid;
     }
 
     // ============================================
@@ -74,14 +90,24 @@ service cloud.firestore {
     // ============================================
 
     match /trip_matches/{matchId} {
-      // Only participants can read match details
-      allow read: if isAuth() && isMatchParticipant(matchId);
+      // Self-contained on purpose. The previous rule called get() on the very document being read,
+      // and Firestore caps get()/exists() at ten per query across the whole result set — so any
+      // query returning more than a handful of matches failed with a PERMISSION_DENIED that said
+      // nothing about the limit.
+      allow read: if isAuth() && (
+        resource.data.hostId == request.auth.uid ||
+        resource.data.riderId == request.auth.uid
+      );
 
-      // Only authenticated users can create (backend validates)
-      allow create: if isAuth();
+      allow create: if isAuth() && (
+        request.resource.data.hostId == request.auth.uid ||
+        request.resource.data.riderId == request.auth.uid
+      );
 
-      // Only participants can update
-      allow update, delete: if isAuth() && isMatchParticipant(matchId);
+      allow update, delete: if isAuth() && (
+        resource.data.hostId == request.auth.uid ||
+        resource.data.riderId == request.auth.uid
+      );
     }
 
     // ============================================
@@ -89,19 +115,15 @@ service cloud.firestore {
     // ============================================
 
     match /messages/{messageId} {
-      // Only match participants can read messages
-      allow read: if isAuth() &&
-        exists(/databases/$(database)/documents/trip_matches/$(resource.data.matchId)) &&
-        isMatchParticipant(resource.data.matchId);
+      // Reads the denormalised participants array rather than following matchId, for the same
+      // get()-budget reason as trip_matches.
+      allow read: if isAuth() && request.auth.uid in resource.data.participants;
 
-      // Only authenticated users can create
-      allow create: if isAuth() && request.resource.data.senderId == request.auth.uid;
+      allow create: if isAuth() &&
+        request.resource.data.senderId == request.auth.uid &&
+        request.auth.uid in request.resource.data.participants;
 
-      // Users can only update their own messages (for read receipts)
-      allow update: if isAuth() && isOwner(resource.data.senderId);
-
-      // Only the sender can delete
-      allow delete: if isAuth() && isOwner(resource.data.senderId);
+      allow update, delete: if isOwner(resource.data.senderId);
     }
 
     // ============================================
@@ -109,17 +131,25 @@ service cloud.firestore {
     // ============================================
 
     match /notifications/{notificationId} {
-      // Users can only read their own notifications
-      allow read: if isAuth() && isOwner(resource.data.userId);
+      allow read: if isOwner(resource.data.userId);
 
-      // Backend creates notifications (no direct client writes)
-      allow create: if false;
+      // These are written *for* another user — the host is told a rider joined, the rider is told
+      // they were accepted. `if false` assumed a backend that does not exist in this repo, so every
+      // notification the app has ever tried to send would have been denied. Bound the shape instead.
+      allow create: if isAuth() &&
+        request.resource.data.keys().hasOnly(
+          ['id', 'userId', 'title', 'message', 'type', 'timestamp', 'isRead']
+        ) &&
+        request.resource.data.isRead == false &&
+        request.resource.data.title is string &&
+        request.resource.data.title.size() <= 200 &&
+        request.resource.data.message is string &&
+        request.resource.data.message.size() <= 1000;
 
-      // Users can mark as read
-      allow update: if isAuth() && isOwner(resource.data.userId);
+      // The recipient may only mark it read.
+      allow update: if isOwner(resource.data.userId) && changed().hasOnly(['isRead']);
 
-      // Users can delete their notifications
-      allow delete: if isAuth() && isOwner(resource.data.userId);
+      allow delete: if isOwner(resource.data.userId);
     }
 
     // ============================================
@@ -127,17 +157,22 @@ service cloud.firestore {
     // ============================================
 
     match /ratings/{ratingId} {
-      // Anyone can read ratings
       allow read: if true;
 
-      // Only authenticated users can create ratings
-      allow create: if isAuth() && request.resource.data.raterId == request.auth.uid;
+      // The field is fromUserId. These rules checked `raterId`, which the Rating model has never
+      // had, so every rating write would have been denied.
+      allow create: if isAuth() && request.resource.data.fromUserId == request.auth.uid;
+      allow update, delete: if isAuth() && resource.data.fromUserId == request.auth.uid;
+    }
 
-      // Only the rater can update
-      allow update: if isAuth() && resource.data.raterId == request.auth.uid;
+    // ============================================
+    // COLLECTION: vehicles
+    // ============================================
 
-      // Only the rater can delete
-      allow delete: if isAuth() && resource.data.raterId == request.auth.uid;
+    match /vehicles/{userId} {
+      // Riders need to see the car they are getting into.
+      allow read: if true;
+      allow write: if isOwner(userId);
     }
 
     // ============================================
@@ -145,10 +180,9 @@ service cloud.firestore {
     // ============================================
 
     match /communities/{communityId} {
-      // Anyone can read community info
       allow read: if true;
-
-      // Only administrators can modify (backend controlled)
+      // Still client-read-only. The app ships DEFAULT_COMMUNITIES so the picker is populated even
+      // when this collection is empty.
       allow write: if false;
     }
 
@@ -157,11 +191,18 @@ service cloud.firestore {
     // ============================================
 
     match /invites/{inviteId} {
-      // Authenticated users can read invites (to redeem)
       allow read: if isAuth();
 
-      // Only backend can create/modify invites
-      allow write: if false;
+      // Invites must be seeded out of band — see the release runbook. But redeeming one is a client
+      // action, and `write: if false` denied it, so the invite flow could never have completed.
+      // Permit exactly the redemption transition and nothing else.
+      allow create: if false;
+      allow update: if isAuth() &&
+        resource.data.used == false &&
+        request.resource.data.used == true &&
+        request.resource.data.usedBy == request.auth.uid &&
+        changed().hasOnly(['used', 'usedBy']);
+      allow delete: if false;
     }
 
     // ============================================

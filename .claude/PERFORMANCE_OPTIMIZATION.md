@@ -1,8 +1,8 @@
-# SawaariShare Performance Optimization Guide
+# Split Cruiser Performance Optimization Guide
 
 ## Overview
 
-This guide documents performance optimization strategies for the SawaariShare application, ensuring efficient memory usage, fast screen loads, and optimal battery consumption.
+This guide documents performance optimization strategies for the Split Cruiser application, ensuring efficient memory usage, fast screen loads, and optimal battery consumption.
 
 ## Performance Benchmarks
 

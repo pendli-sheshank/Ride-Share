@@ -180,7 +180,7 @@ fun SlideInTransition(
 
 ```kotlin
 @Composable
-fun SawaariLoadingSpinner(
+fun Split CruiserLoadingSpinner(
     modifier: Modifier = Modifier,
     size: Dp = 48.dp
 ) {
@@ -202,7 +202,7 @@ fun SawaariLoadingSpinner(
     ) {
         CircularProgressIndicator(
             modifier = Modifier.fillMaxSize(),
-            color = SawaariSaffron,
+            color = Split CruiserSaffron,
             strokeWidth = 4.dp
         )
     }
@@ -243,7 +243,7 @@ fun ShimmerSkeleton(
             .fillMaxWidth()
             .height(12.dp)
             .clip(RoundedCornerShape(6.dp))
-            .background(SawaariDivider.copy(alpha = alpha))
+            .background(Split CruiserDivider.copy(alpha = alpha))
     )
 }
 ```
@@ -383,15 +383,15 @@ val colorScheme = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
 } else {
     if (isSystemInDarkTheme()) {
         darkColorScheme(
-            primary = SawaariSaffron,
-            secondary = SawaariIndigo,
-            tertiary = SawaariEmerald
+            primary = Split CruiserSaffron,
+            secondary = Split CruiserIndigo,
+            tertiary = Split CruiserEmerald
         )
     } else {
         lightColorScheme(
-            primary = SawaariSaffron,
-            secondary = SawaariIndigo,
-            tertiary = SawaariEmerald
+            primary = Split CruiserSaffron,
+            secondary = Split CruiserIndigo,
+            tertiary = Split CruiserEmerald
         )
     }
 }

@@ -1,253 +1,446 @@
 import SwiftUI
 import Shared
 
+// Views are kept deliberately small and split into computed sub-views. Swift's type checker gives
+// up on large ViewBuilder bodies ("unable to type-check this expression in reasonable time"), and
+// that has already cost this project a macOS CI round trip once.
+
 struct ContentView: View {
     @StateObject private var viewModel = AppViewModel()
-    @State private var isLoggedIn = false
+
+    var body: some View {
+        Group {
+            if !viewModel.isSignedIn {
+                LoginView(viewModel: viewModel)
+            } else if viewModel.needsProfileSetup {
+                ProfileSetupView(viewModel: viewModel)
+            } else {
+                MainTabView(viewModel: viewModel)
+            }
+        }
+    }
+}
+
+struct MainTabView: View {
+    @ObservedObject var viewModel: AppViewModel
     @State private var selectedTab = 0
 
     var body: some View {
-        if isLoggedIn {
-            TabView(selection: $selectedTab) {
-                // Home / Browse Rides
-                HomeTabView(viewModel: viewModel)
-                    .tabItem {
-                        Image(systemName: "house.fill")
-                        Text("Home")
-                    }
-                    .tag(0)
+        TabView(selection: $selectedTab) {
+            HomeTabView(viewModel: viewModel)
+                .tabItem { Label("Home", systemImage: "house.fill") }
+                .tag(0)
 
-                // My Rides
-                MyRidesTabView(viewModel: viewModel)
-                    .tabItem {
-                        Image(systemName: "car.fill")
-                        Text("My Rides")
-                    }
-                    .tag(1)
+            MyRidesTabView(viewModel: viewModel)
+                .tabItem { Label("My Rides", systemImage: "car.fill") }
+                .tag(1)
 
-                // Messages
-                MessagesTabView()
-                    .tabItem {
-                        Image(systemName: "message.fill")
-                        Text("Messages")
-                    }
-                    .tag(2)
+            MatchesTabView(viewModel: viewModel)
+                .tabItem { Label("Matches", systemImage: "person.2.fill") }
+                .tag(2)
 
-                // Profile
-                ProfileTabView(viewModel: viewModel, isLoggedIn: $isLoggedIn)
-                    .tabItem {
-                        Image(systemName: "person.fill")
-                        Text("Profile")
-                    }
-                    .tag(3)
-            }
-        } else {
-            LoginView(viewModel: viewModel, isLoggedIn: $isLoggedIn)
+            ProfileTabView(viewModel: viewModel)
+                .tabItem { Label("Profile", systemImage: "person.fill") }
+                .tag(3)
         }
     }
 }
 
-// MARK: - Login View
+// MARK: - Login
 
 struct LoginView: View {
     @ObservedObject var viewModel: AppViewModel
-    @Binding var isLoggedIn: Bool
-    @State private var phoneNumber = ""
+    @State private var email = ""
     @State private var password = ""
+    @State private var isSigningUp = false
 
-    var body: some View {
-        NavigationView {
-            VStack(spacing: 24) {
-                VStack(spacing: 12) {
-                    Image(systemName: "car.fill")
-                        .font(.system(size: 48))
-                        .foregroundColor(.blue)
+    private var header: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "car.fill")
+                .font(.system(size: 48))
+                .foregroundColor(.blue)
 
-                    Text("SawaariShare")
-                        .font(.title)
-                        .fontWeight(.bold)
-
-                    Text("US Desi Student Carpools")
-                        .font(.subheadline)
-                        .foregroundColor(.gray)
-                }
-                .padding(.top, 40)
-
-                Spacer()
-
-                VStack(spacing: 16) {
-                    TextField("Phone Number", text: $phoneNumber)
-                        .textFieldStyle(.roundedBorder)
-                        .keyboardType(.phonePad)
-
-                    SecureField("Password", text: $password)
-                        .textFieldStyle(.roundedBorder)
-
-                    if let error = viewModel.errorMessage {
-                        Text(error)
-                            .font(.caption)
-                            .foregroundColor(.red)
-                    }
-
-                    Button(action: {
-                        Task {
-                            await viewModel.loginUser(phoneNumber: phoneNumber, password: password)
-                            if viewModel.currentUser != nil {
-                                isLoggedIn = true
-                            }
-                        }
-                    }) {
-                        if viewModel.isLoading {
-                            ProgressView()
-                                .progressViewStyle(.circular)
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                        } else {
-                            Text("Login")
-                                .font(.headline)
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(Color.blue)
-                                .foregroundColor(.white)
-                                .cornerRadius(8)
-                        }
-                    }
-                    .disabled(viewModel.isLoading)
-                }
-                .padding()
-
-                Spacer()
-
-                VStack(spacing: 12) {
-                    Text("Don't have an account?")
-                        .font(.callout)
-                        .foregroundColor(.gray)
-
-                    NavigationLink("Sign Up") {
-                        SignUpView()
-                    }
-                    .font(.callout)
-                    .fontWeight(.semibold)
-                }
-                .padding(.bottom, 40)
-            }
-            .padding()
-            .navigationBarTitleDisplayMode(.inline)
-        }
-    }
-}
-
-// MARK: - Sign Up View
-
-struct SignUpView: View {
-    @Environment(\.presentationMode) var presentationMode
-
-    var body: some View {
-        VStack(spacing: 16) {
-            Text("Create Account")
+            Text("Split Cruiser")
                 .font(.title)
                 .fontWeight(.bold)
 
-            TextField("Full Name", text: .constant(""))
-                .textFieldStyle(.roundedBorder)
+            Text("Student carpools, cost split")
+                .font(.subheadline)
+                .foregroundColor(.gray)
+        }
+        .padding(.top, 40)
+    }
 
-            TextField("Email", text: .constant(""))
+    private var form: some View {
+        VStack(spacing: 16) {
+            // Email and password, matching Android. This screen used to ask for a phone number,
+            // which no backend has ever authenticated against.
+            TextField("College email", text: $email)
                 .textFieldStyle(.roundedBorder)
                 .keyboardType(.emailAddress)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
 
-            TextField("Phone", text: .constant(""))
-                .textFieldStyle(.roundedBorder)
-                .keyboardType(.phonePad)
-
-            SecureField("Password", text: .constant(""))
+            SecureField("Password", text: $password)
                 .textFieldStyle(.roundedBorder)
 
-            Button(action: { presentationMode.wrappedValue.dismiss() }) {
-                Text("Create Account")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.blue)
-                    .foregroundColor(.white)
-                    .cornerRadius(8)
+            if !viewModel.isBackendConfigured {
+                Text("This build has no Firebase configuration, so sign-in is unavailable.")
+                    .font(.caption)
+                    .foregroundColor(.orange)
+                    .multilineTextAlignment(.center)
             }
 
+            if let error = viewModel.errorMessage {
+                Text(error)
+                    .font(.caption)
+                    .foregroundColor(.red)
+                    .multilineTextAlignment(.center)
+            }
+
+            Button(action: submit) {
+                if viewModel.isLoading {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                } else {
+                    Text(isSigningUp ? "Create account" : "Log in")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(8)
+                }
+            }
+            .disabled(viewModel.isLoading || !viewModel.isBackendConfigured)
+
+            Button(isSigningUp ? "Already have an account? Log in"
+                               : "New here? Create an account") {
+                isSigningUp.toggle()
+                viewModel.clearError()
+            }
+            .font(.callout)
+        }
+        .padding()
+    }
+
+    var body: some View {
+        VStack(spacing: 24) {
+            header
+            Spacer()
+            form
             Spacer()
         }
         .padding()
     }
-}
 
-// MARK: - Home Tab
-
-struct HomeTabView: View {
-    @ObservedObject var viewModel: AppViewModel
-
-    var body: some View {
-        NavigationView {
-            VStack {
-                if viewModel.activeOffers.isEmpty && !viewModel.isLoading {
-                    VStack(spacing: 16) {
-                        Image(systemName: "car.front.waves.up")
-                            .font(.system(size: 48))
-                            .foregroundColor(.gray)
-
-                        Text("No Rides Available")
-                            .font(.headline)
-
-                        Text("Check back soon for available rides in your area")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                            .multilineTextAlignment(.center)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    List(viewModel.activeOffers, id: \.id) { offer in
-                        NavigationLink(destination: RideDetailView(offer: offer)) {
-                            RideOfferRow(offer: offer)
-                        }
-                    }
-                }
-            }
-            .navigationTitle("Available Rides")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: {
-                        Task {
-                            await viewModel.fetchActiveOffers()
-                        }
-                    }) {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                }
-            }
-        }
-        .onAppear {
-            Task {
-                await viewModel.fetchActiveOffers()
+    private func submit() {
+        Task {
+            if isSigningUp {
+                await viewModel.signUp(email: email, password: password)
+            } else {
+                await viewModel.logIn(email: email, password: password)
             }
         }
     }
 }
 
-// MARK: - My Rides Tab
+// MARK: - Profile setup
+
+struct ProfileSetupView: View {
+    @ObservedObject var viewModel: AppViewModel
+    @State private var name = ""
+    @State private var lastInitial = ""
+    @State private var homeArea = ""
+    @State private var communityId = ""
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section("About you") {
+                    TextField("First name", text: $name)
+                    TextField("Last initial", text: $lastInitial)
+                    TextField("Home area", text: $homeArea)
+                }
+
+                Section("Campus") {
+                    Picker("Community", selection: $communityId) {
+                        Text("Select").tag("")
+                        ForEach(viewModel.communities, id: \.id) { community in
+                            Text(community.name).tag(community.id)
+                        }
+                    }
+                }
+
+                if let error = viewModel.errorMessage {
+                    Text(error).font(.caption).foregroundColor(.red)
+                }
+
+                Button("Continue") {
+                    Task {
+                        await viewModel.completeProfile(
+                            name: name,
+                            lastInitial: lastInitial,
+                            communityId: communityId,
+                            homeArea: homeArea
+                        )
+                    }
+                }
+                .disabled(viewModel.isLoading)
+            }
+            .navigationTitle("Set up your profile")
+        }
+    }
+}
+
+// MARK: - Home
+
+struct HomeTabView: View {
+    @ObservedObject var viewModel: AppViewModel
+    @State private var showPostOffer = false
+
+    private var emptyState: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "car.front.waves.up")
+                .font(.system(size: 48))
+                .foregroundColor(.gray)
+            Text("No rides available").font(.headline)
+            Text("Check back soon, or post one yourself")
+                .font(.caption)
+                .foregroundColor(.gray)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    var body: some View {
+        NavigationView {
+            Group {
+                if viewModel.activeOffers.isEmpty && !viewModel.isLoading {
+                    emptyState
+                } else {
+                    List(viewModel.activeOffers, id: \.id) { offer in
+                        NavigationLink(destination: RideDetailView(viewModel: viewModel, offer: offer)) {
+                            RideOfferRow(offer: offer)
+                        }
+                    }
+                    .refreshable { await viewModel.refresh() }
+                }
+            }
+            .navigationTitle("Available rides")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button { showPostOffer = true } label: { Image(systemName: "plus") }
+                }
+            }
+            .sheet(isPresented: $showPostOffer) {
+                PostOfferView(viewModel: viewModel)
+            }
+        }
+    }
+}
+
+// MARK: - Post a ride offer
+
+struct PostOfferView: View {
+    @ObservedObject var viewModel: AppViewModel
+    @Environment(\.presentationMode) private var presentationMode
+
+    @State private var origin = PlaceSelection()
+    @State private var destination = PlaceSelection()
+    @State private var departure = Date().addingTimeInterval(3600)
+    @State private var seats = 3
+    @State private var cost = "10"
+    @State private var vehicleInfo = ""
+    @State private var womenOnly = false
+
+    private var canSubmit: Bool {
+        origin.isResolved && destination.isResolved && !viewModel.isLoading
+    }
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section("Route") {
+                    PlaceField(title: "Pickup", selection: $origin, viewModel: viewModel)
+                    PlaceField(title: "Dropoff", selection: $destination, viewModel: viewModel)
+                }
+
+                Section("Trip") {
+                    DatePicker("Departure", selection: $departure, in: Date()...)
+                    Stepper("Seats: \(seats)", value: $seats, in: 1...8)
+                    TextField("Cost per rider", text: $cost)
+                        .keyboardType(.decimalPad)
+                    TextField("Vehicle (e.g. Blue Civic)", text: $vehicleInfo)
+                    Toggle("Women only", isOn: $womenOnly)
+                }
+
+                if let error = viewModel.errorMessage {
+                    Text(error).font(.caption).foregroundColor(.red)
+                }
+
+                Button("Post ride") { submit() }
+                    .disabled(!canSubmit)
+            }
+            .navigationTitle("Offer a ride")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { presentationMode.wrappedValue.dismiss() }
+                }
+            }
+        }
+    }
+
+    private func submit() {
+        Task {
+            let posted = await viewModel.postRideOffer(
+                origin: origin.name,
+                destination: destination.name,
+                originLat: origin.lat,
+                originLng: origin.lon,
+                destLat: destination.lat,
+                destLng: destination.lon,
+                departureTime: departure,
+                totalSeats: seats,
+                costPerRider: Double(cost) ?? 0,
+                womenOnly: womenOnly,
+                vehicleInfo: vehicleInfo
+            )
+            if posted { presentationMode.wrappedValue.dismiss() }
+        }
+    }
+}
+
+// MARK: - Post a ride request
+
+struct PostRequestView: View {
+    @ObservedObject var viewModel: AppViewModel
+    @Environment(\.presentationMode) private var presentationMode
+
+    @State private var origin = PlaceSelection()
+    @State private var destination = PlaceSelection()
+    @State private var departure = Date().addingTimeInterval(3600)
+    @State private var seats = 1
+    @State private var notes = ""
+    @State private var womenOnly = false
+
+    private var canSubmit: Bool {
+        origin.isResolved && destination.isResolved && !viewModel.isLoading
+    }
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section("Route") {
+                    PlaceField(title: "Pickup", selection: $origin, viewModel: viewModel)
+                    PlaceField(title: "Dropoff", selection: $destination, viewModel: viewModel)
+                }
+
+                Section("Trip") {
+                    DatePicker("Departure", selection: $departure, in: Date()...)
+                    Stepper("Seats needed: \(seats)", value: $seats, in: 1...8)
+                    TextField("Notes", text: $notes)
+                    Toggle("Women only", isOn: $womenOnly)
+                }
+
+                if let error = viewModel.errorMessage {
+                    Text(error).font(.caption).foregroundColor(.red)
+                }
+
+                Button("Post request") { submit() }
+                    .disabled(!canSubmit)
+            }
+            .navigationTitle("Request a ride")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { presentationMode.wrappedValue.dismiss() }
+                }
+            }
+        }
+    }
+
+    private func submit() {
+        Task {
+            let posted = await viewModel.postRideRequest(
+                origin: origin.name,
+                destination: destination.name,
+                originLat: origin.lat,
+                originLng: origin.lon,
+                destLat: destination.lat,
+                destLng: destination.lon,
+                departureTime: departure,
+                seatsNeeded: seats,
+                notes: notes,
+                womenOnly: womenOnly
+            )
+            if posted { presentationMode.wrappedValue.dismiss() }
+        }
+    }
+}
+
+// MARK: - Place picking
+
+/// A typed place plus the coordinates the backend requires. The repository rejects a ride whose
+/// coordinates are still zero, so the form cannot submit until one is chosen from the results.
+struct PlaceSelection {
+    var name = ""
+    var lat = 0.0
+    var lon = 0.0
+
+    var isResolved: Bool { !name.isEmpty && lat != 0.0 && lon != 0.0 }
+}
+
+struct PlaceField: View {
+    let title: String
+    @Binding var selection: PlaceSelection
+    @ObservedObject var viewModel: AppViewModel
+
+    @State private var query = ""
+    @State private var results: [PhotonPlaceResult] = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            TextField(title, text: $query)
+                .onChange(of: query) { newValue in
+                    selection = PlaceSelection()
+                    Task { results = await viewModel.searchPlaces(newValue) }
+                }
+
+            if selection.isResolved {
+                Text(selection.name)
+                    .font(.caption)
+                    .foregroundColor(.green)
+            }
+
+            ForEach(results.prefix(4), id: \.formattedAddress) { place in
+                Button {
+                    selection = PlaceSelection(name: place.name, lat: place.lat, lon: place.lon)
+                    query = place.name
+                    results = []
+                } label: {
+                    VStack(alignment: .leading) {
+                        Text(place.name).font(.callout)
+                        Text(place.formattedAddress).font(.caption2).foregroundColor(.gray)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - My rides
 
 struct MyRidesTabView: View {
     @ObservedObject var viewModel: AppViewModel
+    @State private var showPostRequest = false
 
-    // Split into sub-views deliberately. Swift's type checker gave up on the combined
-    // expression ("unable to type-check this expression in reasonable time") — a large
-    // ViewBuilder body is exactly where that happens, and it is much easier to keep it broken
-    // up than to discover the limit again later.
     private var emptyState: some View {
         VStack(spacing: 16) {
             Image(systemName: "rectangle.and.pencil.and.ellipsis")
                 .font(.system(size: 48))
                 .foregroundColor(.gray)
-
-            Text("No Rides Yet")
-                .font(.headline)
-
+            Text("No rides yet").font(.headline)
             Text("Post a ride offer or request to get started")
                 .font(.caption)
                 .foregroundColor(.gray)
@@ -257,78 +450,99 @@ struct MyRidesTabView: View {
 
     private var ridesList: some View {
         List {
-            Section("Posted Rides") {
-                ForEach(viewModel.activeOffers, id: \.id) { offer in
-                    Text(offer.origin + " → " + offer.destination)
-                }
-            }
-
-            Section("Ride Requests") {
-                ForEach(viewModel.activeRequests, id: \.id) { request in
-                    Text(request.origin + " → " + request.destination)
+            Section("Ride requests you posted") {
+                ForEach(viewModel.myRideRequests, id: \.id) { request in
+                    VStack(alignment: .leading) {
+                        Text("\(request.origin) → \(request.destination)")
+                        Text(request.status).font(.caption).foregroundColor(.gray)
+                    }
                 }
             }
         }
     }
 
-    private var hasNoRides: Bool {
-        viewModel.activeOffers.isEmpty && viewModel.activeRequests.isEmpty
-    }
-
     var body: some View {
         NavigationView {
-            VStack {
-                Text("Your Rides")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding()
-
-                if hasNoRides {
+            Group {
+                if viewModel.myRideRequests.isEmpty {
                     emptyState
                 } else {
                     ridesList
                 }
             }
-            .navigationTitle("My Rides")
+            .navigationTitle("My rides")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button { showPostRequest = true } label: { Image(systemName: "plus") }
+                }
+            }
+            .sheet(isPresented: $showPostRequest) {
+                PostRequestView(viewModel: viewModel)
+            }
         }
     }
 }
 
-// MARK: - Messages Tab
+// MARK: - Matches
 
-struct MessagesTabView: View {
+struct MatchesTabView: View {
+    @ObservedObject var viewModel: AppViewModel
+
     var body: some View {
         NavigationView {
-            VStack {
-                Text("Messages")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding()
-
-                VStack(spacing: 16) {
-                    Image(systemName: "bubble.left.and.bubble.right")
-                        .font(.system(size: 48))
-                        .foregroundColor(.gray)
-
-                    Text("No Messages")
-                        .font(.headline)
-
-                    Text("Start a conversation with other riders")
-                        .font(.caption)
-                        .foregroundColor(.gray)
+            Group {
+                if viewModel.userMatches.isEmpty {
+                    VStack(spacing: 16) {
+                        Image(systemName: "person.2")
+                            .font(.system(size: 48))
+                            .foregroundColor(.gray)
+                        Text("No matches yet").font(.headline)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List(viewModel.userMatches, id: \.id) { match in
+                        MatchRow(viewModel: viewModel, match: match)
+                    }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .navigationTitle("Messages")
+            .navigationTitle("Matches")
         }
     }
 }
 
-// MARK: - Profile Tab
+struct MatchRow: View {
+    @ObservedObject var viewModel: AppViewModel
+    let match: TripMatch
+
+    private var isHost: Bool { viewModel.currentUser?.id == match.hostId }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(match.riderName).font(.headline)
+            Text("Status: \(match.status)").font(.caption).foregroundColor(.gray)
+
+            if isHost && match.status == "pending" {
+                HStack {
+                    Button("Accept") {
+                        Task { await viewModel.acceptMatch(matchId: match.id) }
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button("Decline") {
+                        Task { await viewModel.declineMatch(matchId: match.id) }
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Profile
 
 struct ProfileTabView: View {
     @ObservedObject var viewModel: AppViewModel
-    @Binding var isLoggedIn: Bool
 
     var body: some View {
         NavigationView {
@@ -339,13 +553,8 @@ struct ProfileTabView: View {
                             .font(.system(size: 64))
                             .foregroundColor(.blue)
 
-                        Text(user.name)
-                            .font(.title2)
-                            .fontWeight(.bold)
-
-                        Text(user.email)
-                            .font(.callout)
-                            .foregroundColor(.gray)
+                        Text(user.displayName).font(.title2).fontWeight(.bold)
+                        Text(user.email).font(.callout).foregroundColor(.gray)
 
                         VStack(spacing: 12) {
                             HStack {
@@ -353,21 +562,26 @@ struct ProfileTabView: View {
                                 Spacer()
                                 Text("⭐ \(String(format: "%.1f", user.ratingAvg))")
                             }
-
                             Divider()
-
                             HStack {
-                                Text("Rides Completed")
+                                Text("Ratings received")
                                 Spacer()
                                 Text("\(user.ratingCount)")
+                            }
+                            Divider()
+                            HStack {
+                                Text("Backend")
+                                Spacer()
+                                Text(viewModel.isConnected ? "Connected" : "Offline")
+                                    .foregroundColor(viewModel.isConnected ? .green : .orange)
                             }
                         }
                         .padding()
                         .background(Color(.systemGray6))
                         .cornerRadius(8)
 
-                        Button(action: { isLoggedIn = false }) {
-                            Text("Logout")
+                        Button(action: { viewModel.logOut() }) {
+                            Text("Log out")
                                 .font(.headline)
                                 .frame(maxWidth: .infinity)
                                 .padding()
@@ -386,7 +600,7 @@ struct ProfileTabView: View {
     }
 }
 
-// MARK: - Supporting Views
+// MARK: - Supporting views
 
 struct RideOfferRow: View {
     let offer: TripOffer
@@ -395,9 +609,7 @@ struct RideOfferRow: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(offer.origin)
-                        .font(.headline)
-
+                    Text(offer.origin).font(.headline)
                     Text("Departure: \(formatTime(offer.departureTime))")
                         .font(.caption)
                         .foregroundColor(.gray)
@@ -409,7 +621,6 @@ struct RideOfferRow: View {
                     Text("$\(String(format: "%.0f", offer.costPerRider))")
                         .font(.headline)
                         .foregroundColor(.green)
-
                     Text("\(offer.seatsLeft) seats left")
                         .font(.caption)
                         .foregroundColor(.gray)
@@ -419,14 +630,11 @@ struct RideOfferRow: View {
             Divider()
 
             HStack {
-                Text(offer.destination)
-                    .font(.subheadline)
-
+                Text(offer.destination).font(.subheadline)
                 Spacer()
-
-                Text("🚗 \(offer.vehicleInfo)")
-                    .font(.caption)
-                    .foregroundColor(.gray)
+                if !offer.vehicleInfo.isEmpty {
+                    Text("🚗 \(offer.vehicleInfo)").font(.caption).foregroundColor(.gray)
+                }
             }
         }
         .padding(.vertical, 4)
@@ -434,66 +642,67 @@ struct RideOfferRow: View {
 
     private func formatTime(_ timestamp: Int64) -> String {
         guard timestamp > 0 else { return "Time TBD" }
-        let date = Date(timeIntervalSince1970: Double(timestamp) / 1000)
         let formatter = DateFormatter()
+        formatter.dateStyle = .short
         formatter.timeStyle = .short
-        return formatter.string(from: date)
+        return formatter.string(from: Date(epochMillis: timestamp))
     }
 }
 
 struct RideDetailView: View {
+    @ObservedObject var viewModel: AppViewModel
     let offer: TripOffer
-    @Environment(\.presentationMode) var presentationMode
+    @Environment(\.presentationMode) private var presentationMode
+
+    private var details: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Ride details").font(.title2).fontWeight(.bold)
+
+            HStack { Text("From:"); Spacer(); Text(offer.origin) }
+            HStack { Text("To:"); Spacer(); Text(offer.destination) }
+            HStack {
+                Text("Cost:")
+                Spacer()
+                Text("$\(String(format: "%.0f", offer.costPerRider))")
+            }
+            HStack { Text("Seats available:"); Spacer(); Text("\(offer.seatsLeft)") }
+            HStack { Text("Host:"); Spacer(); Text(offer.hostName) }
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(8)
+    }
 
     var body: some View {
         VStack(spacing: 20) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Ride Details")
-                    .font(.title2)
-                    .fontWeight(.bold)
+            details
 
-                HStack {
-                    Text("From:")
-                    Spacer()
-                    Text(offer.origin)
-                }
-
-                HStack {
-                    Text("To:")
-                    Spacer()
-                    Text(offer.destination)
-                }
-
-                HStack {
-                    Text("Cost:")
-                    Spacer()
-                    Text("$\(String(format: "%.0f", offer.costPerRider))")
-                }
-
-                HStack {
-                    Text("Seats Available:")
-                    Spacer()
-                    Text("\(offer.seatsLeft)")
-                }
+            if let error = viewModel.errorMessage {
+                Text(error).font(.caption).foregroundColor(.red)
             }
-            .padding()
-            .background(Color(.systemGray6))
-            .cornerRadius(8)
 
-            Button(action: { presentationMode.wrappedValue.dismiss() }) {
-                Text("Request Ride")
+            Button {
+                Task {
+                    // Reserves a seat, exactly as the Android "Join ride" button does.
+                    if await viewModel.joinRide(offerId: offer.id) {
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                }
+            } label: {
+                Text(offer.seatsLeft > 0 ? "Reserve a seat" : "Full")
                     .font(.headline)
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .background(Color.blue)
+                    .background(offer.seatsLeft > 0 ? Color.blue : Color.gray)
                     .foregroundColor(.white)
                     .cornerRadius(8)
             }
+            .disabled(offer.seatsLeft <= 0 || viewModel.isLoading)
 
             Spacer()
         }
         .padding()
-        .navigationTitle("Ride Details")
+        .navigationTitle("Ride details")
         .navigationBarTitleDisplayMode(.inline)
     }
 }

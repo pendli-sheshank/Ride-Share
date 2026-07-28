@@ -305,6 +305,13 @@ def create_xcode_project():
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				INFOPLIST_FILE = iosApp/Info.plist;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					"CFNetwork",
+					"-framework",
+					"Security",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = {bundle_id};
 				PRODUCT_NAME = iosApp;
 				SDKROOT = iphoneos;
@@ -372,6 +379,13 @@ def create_xcode_project():
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				INFOPLIST_FILE = iosApp/Info.plist;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					"CFNetwork",
+					"-framework",
+					"Security",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = {bundle_id};
 				PRODUCT_NAME = iosApp;
 				SDKROOT = iphoneos;

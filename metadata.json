@@ -1,5 +1,5 @@
 {
-  "name": "SawaariShare",
+  "name": "Split Cruiser",
   "description": "A cost-sharing carpool app for the Indian student community in the US.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

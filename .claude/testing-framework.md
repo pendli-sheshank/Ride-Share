@@ -1,7 +1,7 @@
-# Comprehensive Testing Framework for SawaariShare Multiplatform App
+# Comprehensive Testing Framework for Split Cruiser Multiplatform App
 
 ## Overview
-This document outlines the complete testing strategy for the SawaariShare multiplatform application, covering unit tests, integration tests, and UI tests across Android and iOS platforms.
+This document outlines the complete testing strategy for the Split Cruiser multiplatform application, covering unit tests, integration tests, and UI tests across Android and iOS platforms.
 
 ## Testing Architecture
 
@@ -105,7 +105,7 @@ Tests authentication and user verification logic.
 
 **Location:** `app/src/test/java/com/splitcruiser/app/data/`
 
-**SawaariRepositoryTest.kt**
+**SplitCruiserRepositoryTest.kt**
 Tests the Android repository layer and state management.
 
 **Tests:**
@@ -131,7 +131,7 @@ Tests the Android repository layer and state management.
 
 **Location:** `app/src/androidTest/java/com/splitcruiser/app/ui/`
 
-**SawaariAppUITest.kt**
+**SplitCruiserAppUITest.kt**
 Integration tests for Android UI layer using Compose test framework.
 
 **Tests:**

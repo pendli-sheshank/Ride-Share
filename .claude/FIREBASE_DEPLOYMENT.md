@@ -167,7 +167,7 @@ i  Starting emulators...
 
 **Step 3: Connect App to Emulator**
 
-In `SawaariRepository.kt`, add emulator configuration:
+In `SplitCruiserRepository.kt`, add emulator configuration:
 
 ```kotlin
 fun initializeFirebase(context: Context, useEmulator: Boolean = BuildConfig.DEBUG) {

@@ -1,8 +1,8 @@
-# SawaariShare Implementation Status
+# Split Cruiser Implementation Status
 
 ## Project Overview
 
-SawaariShare is a community-driven ride-sharing platform for students, enabling cost-efficient carpooling through a P2P model where every user can post rides and make requests.
+Split Cruiser is a community-driven ride-sharing platform for students, enabling cost-efficient carpooling through a P2P model where every user can post rides and make requests.
 
 ## Project Summary
 
@@ -128,7 +128,7 @@ SawaariShare is a community-driven ride-sharing platform for students, enabling 
 - **Indexes Ready:** Composite indexes for common queries
 
 ### Repository Layer
-- **SawaariRepository.kt:** 1700+ lines
+- **SplitCruiserRepository.kt:** 1700+ lines
 - **Methods Implemented:** 50+ suspend functions
 - **StateFlows:** 15 public observable data streams
 - **Listeners:** 6 real-time snapshot listeners
@@ -278,7 +278,7 @@ SawaariShare is a community-driven ride-sharing platform for students, enabling 
 **Deliverables:**
 - `.claude/TESTING_GUIDE.md` - Complete testing reference (400+ lines)
 - `.claude/PERFORMANCE_OPTIMIZATION.md` - Performance guide (500+ lines)
-- `app/src/test/java/com/example/data/SawaariRepositoryTest.kt` - 30+ unit tests
+- `app/src/test/java/com/example/data/SplitCruiserRepositoryTest.kt` - 30+ unit tests
 - `app/src/test/java/com/example/ui/MainViewModelTest.kt` - 25+ ViewModel tests
 - `app/src/androidTest/java/com/example/ui/AuthenticationScreensTest.kt` - 10+ UI tests
 - `app/src/androidTest/java/com/example/ui/RideFlowIntegrationTest.kt` - 8+ integration tests
@@ -361,7 +361,7 @@ SawaariShare is a community-driven ride-sharing platform for students, enabling 
 └─────────────────────────────────────────────┘
            ↓ (Network)
 ┌─────────────────────────────────────────────┐
-│     SawaariRepository (Kotlin)              │
+│     SplitCruiserRepository (Kotlin)              │
 │  ├─ Local StateFlows (Cache)                │
 │  ├─ JSON Files (Fallback)                   │
 │  └─ 50+ Methods (Business Logic)            │
@@ -577,7 +577,7 @@ SawaariShare is a community-driven ride-sharing platform for students, enabling 
 
 ## Conclusion
 
-SawaariShare has a solid foundation with 7 completed feature areas and comprehensive documentation. The core backend logic (50+ repository methods) handles the complex marketplace dynamics of matching, messaging, and real-time sync. Material 3 animations are now integrated throughout the app with spring-based transitions, haptic feedback, and loading states.
+Split Cruiser has a solid foundation with 7 completed feature areas and comprehensive documentation. The core backend logic (50+ repository methods) handles the complex marketplace dynamics of matching, messaging, and real-time sync. Material 3 animations are now integrated throughout the app with spring-based transitions, haptic feedback, and loading states.
 
 **Current Status:** 90% complete toward MVP (Firebase configuration complete)
 **Estimated to MVP:** 10 hours remaining (Task 18 testing, Task 19 launch)

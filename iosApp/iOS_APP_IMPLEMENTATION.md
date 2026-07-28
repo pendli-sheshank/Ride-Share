@@ -1,7 +1,7 @@
 # iOS App Implementation Guide
 
 ## Overview
-The iOS SawaariShare app is built with native SwiftUI and integrates with the shared Kotlin Multiplatform models and business logic via the Shared.framework.
+The iOS Split Cruiser app is built with native SwiftUI and integrates with the shared Kotlin Multiplatform models and business logic via the Shared.framework.
 
 ## Architecture
 
@@ -25,7 +25,7 @@ iosApp/
 
 **Shared Framework** (`../shared/build/XCFrameworks/Shared.xcframework/`)
 - Provides multiplatform models: `User`, `TripOffer`, `RideRequest`, `TripMatch`, etc.
-- Contains business logic through `SawaariRepository`
+- Contains business logic through `SplitCruiserRepository`
 - All models use Kotlin `@Serializable` for JSON/Firestore serialization
 
 **ViewModel Bridge** (`ViewModel.swift`)
@@ -93,7 +93,7 @@ SwiftUI Views
 ViewModel (AppViewModel)
     ↓
 Shared.framework
-    ├── SawaariRepository (business logic)
+    ├── SplitCruiserRepository (business logic)
     └── Models (User, TripOffer, etc.)
     ↓
 Firebase/Firestore (backend)
@@ -263,7 +263,7 @@ To test a specific view:
 - Clean Xcode DerivedData: `rm -rf ~/Library/Developer/Xcode/DerivedData`
 
 ### ViewModel Methods Not Working
-- TODO: Implement repository methods in `SawaariRepository.kt`
+- TODO: Implement repository methods in `SplitCruiserRepository.kt`
 - Current implementation has placeholders for Firebase integration
 - Check `.logs()` in Xcode console for runtime errors
 

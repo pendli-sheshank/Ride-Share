@@ -121,7 +121,11 @@ data class TripMatch(
     val riderRating: Float = 0.0f,
     val contribution: Double = 0.0,
     val status: String = "pending", // "pending", "accepted", "declined", "completed"
-    val timestamp: Long = 0L
+    val timestamp: Long = 0L,
+    // Denormalised [hostId, riderId]. A security rule cannot follow a reference cheaply — Firestore
+    // caps get()/exists() at ten per query — so participation has to be readable from the document
+    // itself for "only participants may read this" to survive a list query.
+    val participants: List<String> = emptyList()
 )
 
 @Serializable
@@ -131,7 +135,9 @@ data class Message(
     val senderId: String = "",
     val senderName: String = "",
     val text: String = "",
-    val timestamp: Long = 0L
+    val timestamp: Long = 0L,
+    /** Denormalised from the match, for the same reason as [TripMatch.participants]. */
+    val participants: List<String> = emptyList()
 )
 
 @Serializable
@@ -160,94 +166,6 @@ data class NotificationAlert(
     val type: String = "", // "email", "push", "ride_accepted", "new_message", "match"
     val timestamp: Long = 0L,
     val isRead: Boolean = false
-)
-
-// Conversion helpers for Firestore/JSON serialization
-fun TripOffer.toMap(): Map<String, Any?> = mapOf(
-    "id" to id,
-    "hostId" to hostId,
-    "hostName" to hostName,
-    "hostRating" to hostRating,
-    "origin" to origin,
-    "destination" to destination,
-    "originLat" to originLat,
-    "originLng" to originLng,
-    "destLat" to destLat,
-    "destLng" to destLng,
-    "originGeohash" to originGeohash,
-    "destGeohash" to destGeohash,
-    "departureTime" to departureTime,
-    "totalSeats" to totalSeats,
-    "seatsLeft" to seatsLeft,
-    "vehicleInfo" to vehicleInfo,
-    "costPerRider" to costPerRider,
-    "womenOnly" to womenOnly,
-    "status" to status,
-    "routeSamplePoints" to routeSamplePoints,
-    "costEstimate" to costEstimate,
-    "passengers" to passengers,
-    "passengerNames" to passengerNames
-)
-
-fun RideRequest.toMap(): Map<String, Any?> = mapOf(
-    "id" to id,
-    "riderId" to riderId,
-    "riderName" to riderName,
-    "riderRating" to riderRating,
-    "origin" to origin,
-    "destination" to destination,
-    "originLat" to originLat,
-    "originLng" to originLng,
-    "destLat" to destLat,
-    "destLng" to destLng,
-    "originGeohash" to originGeohash,
-    "destGeohash" to destGeohash,
-    "departureTime" to departureTime,
-    "seatsNeeded" to seatsNeeded,
-    "notes" to notes,
-    "womenOnly" to womenOnly,
-    "status" to status
-)
-
-fun User.toMap(): Map<String, Any?> = mapOf(
-    "id" to id,
-    "phoneNumber" to phoneNumber,
-    "email" to email,
-    "name" to name,
-    "lastInitial" to lastInitial,
-    "avatarUrl" to avatarUrl,
-    "verifiedTier" to verifiedTier,
-    "invitedBy" to invitedBy,
-    "ratingAvg" to ratingAvg,
-    "ratingCount" to ratingCount,
-    "noShowCount" to noShowCount,
-    "communityId" to communityId,
-    "homeArea" to homeArea,
-    "isWomenOnlyFilterEnabled" to isWomenOnlyFilterEnabled,
-    "fcmToken" to fcmToken,
-    "emailNotificationsEnabled" to emailNotificationsEnabled,
-    "pushNotificationsEnabled" to pushNotificationsEnabled,
-    "collegeName" to collegeName,
-    "verifiedEmail" to verifiedEmail
-)
-
-fun Message.toMap(): Map<String, Any?> = mapOf(
-    "id" to id,
-    "matchId" to matchId,
-    "senderId" to senderId,
-    "senderName" to senderName,
-    "text" to text,
-    "timestamp" to timestamp
-)
-
-fun NotificationAlert.toMap(): Map<String, Any?> = mapOf(
-    "id" to id,
-    "userId" to userId,
-    "title" to title,
-    "message" to message,
-    "type" to type,
-    "timestamp" to timestamp,
-    "isRead" to isRead
 )
 
 @Serializable
@@ -291,4 +209,21 @@ val DEFAULT_LOCATION_PLACES = listOf(
     LocationPlace("Brandeis University", "415 South St, Waltham, MA", "Campus", 42.3653, -71.2586),
     LocationPlace("Worcester Union Station", "2 Washington Square, Worcester, MA", "Transit", 42.2618, -71.7957),
     LocationPlace("Providence Station", "100 Gaspee St, Providence, RI", "Transit", 41.8291, -71.4137)
+)
+
+/**
+ * The communities the app ships with.
+ *
+ * These used to be seeded into the local JSON store on first launch. With Firebase as the only
+ * backend that no longer works: the security rules make `communities` read-only to clients, so a
+ * client-side seed would be denied and the picker would be empty. Shipping them as a constant keeps
+ * the profile-setup screen populated offline and on a first run, and anything present in Firestore
+ * is merged on top.
+ */
+val DEFAULT_COMMUNITIES = listOf(
+    Community("neu_boston", "Northeastern University", "Boston, MA"),
+    Community("asu_tempe", "Arizona State University", "Tempe, AZ"),
+    Community("utd_dallas", "University of Texas at Dallas", "Richardson, TX"),
+    Community("usc_la", "University of Southern California", "Los Angeles, CA"),
+    Community("iub_bloom", "Indiana University Bloomington", "Bloomington, IN")
 )

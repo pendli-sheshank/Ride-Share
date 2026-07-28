@@ -7,13 +7,24 @@ service firebase.storage {
     // ============================================
 
     match /profile_pictures/{userId}.jpg {
-      // Anyone can read profile pictures (public)
+      // Public, so the feed can render an avatar without a signed URL.
       allow read: if true;
 
-      // Only the owner can upload/delete their picture
-      allow write: if request.auth.uid == userId &&
-                      request.resource.size <= 5 * 1024 * 1024 && // Max 5MB
-                      request.resource.contentType == 'image/jpeg';
+      // Two fixes over the previous version:
+      //
+      // 1. On a delete, `request.resource` is null, so `request.resource.size` failed to evaluate
+      //    and the rule denied. Deleting a profile picture could never have worked.
+      // 2. `request.auth.uid` on an unauthenticated request evaluates null.uid, which errors rather
+      //    than denying cleanly.
+      //
+      // The client must send a bare `image/jpeg` content type — appending a charset breaks the
+      // equality check below.
+      allow write: if request.auth != null && request.auth.uid == userId && (
+        request.resource == null || (
+          request.resource.size <= 5 * 1024 * 1024 && // Max 5MB
+          request.resource.contentType == 'image/jpeg'
+        )
+      );
     }
 
     // ============================================

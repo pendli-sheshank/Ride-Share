@@ -17,8 +17,8 @@ DashboardScreen
 │   ├── TripOfferList or RideRequestCards
 │   └── Empty State (if no items)
 └── Trips Tab Content
-    ├── Hosted Sawaaris
-    ├── Joined Sawaaris
+    ├── Hosted Split Cruisers
+    ├── Joined Split Cruisers
     ├── My Ride Requests
     └── Past Rides & History
 ```
@@ -183,12 +183,12 @@ fun RideRequestCard(
 └─────────────────────────────────────────┘
 ```
 
-### 3. My Trips Tab - Hosted Sawaaris
+### 3. My Trips Tab - Hosted Split Cruisers
 
 Shows actively hosted ride offers with management controls:
 ```
 ┌─────────────────────────────────────────┐
-│ HOSTED SAWAARI                          │
+│ HOSTED RIDE                          │
 │                                         │
 │ NEU → Boston Logan Airport              │
 │ Today, 2:00 PM                          │
@@ -207,12 +207,12 @@ Shows actively hosted ride offers with management controls:
 └─────────────────────────────────────────┘
 ```
 
-### 4. My Trips Tab - Joined Sawaaris
+### 4. My Trips Tab - Joined Split Cruisers
 
 Shows actively joined ride offers:
 ```
 ┌─────────────────────────────────────────┐
-│ JOINED SAWAARI                          │
+│ JOINED RIDE                          │
 │                                         │
 │ John S. hosting: NEU → Logan            │
 │ Today, 2:00 PM (45 mins away)           │
@@ -277,7 +277,7 @@ Shows actively joined ride offers:
 ### Loading States
 ```kotlin
 if (isLoading && activeOffers.isEmpty()) {
-    SawaariFeedLoadingSkeleton()
+    Split CruiserFeedLoadingSkeleton()
 }
 ```
 
@@ -286,7 +286,7 @@ Shows shimmer skeleton cards while data loads.
 ### Empty States
 ```kotlin
 @Composable
-fun SawaariEmptyState(
+fun Split CruiserEmptyState(
     title: String,
     description: String,
     icon: androidx.compose.material.icons.Icons,
@@ -346,7 +346,7 @@ Row(
         ) {
             Text(
                 text = if (mode == "Rider") "Rider Mode (Find Ride)" else "Host Mode (Give Ride)",
-                color = if (active) SawaariTextPrimary else Color(0xFF64748B),
+                color = if (active) Split CruiserTextPrimary else Color(0xFF64748B),
                 fontWeight = FontWeight.Bold,
                 fontSize = 13.sp
             )
@@ -457,11 +457,11 @@ Icon(
 ## Theming
 
 ### Color Palette
-- **Primary:** SawaariSaffron (0xFF0061A4) - Blue
-- **Secondary:** SawaariIndigo (0xFFD1E4FF) - Light Blue
-- **Success:** SawaariEmerald (0xFF10B981) - Green
-- **Background:** SawaariDarkBg (0xFFF8F9FF) - Light Gray
-- **Card:** SawaariCardBg (0xFFFFFFFF) - White
+- **Primary:** Split CruiserSaffron (0xFF0061A4) - Blue
+- **Secondary:** Split CruiserIndigo (0xFFD1E4FF) - Light Blue
+- **Success:** Split CruiserEmerald (0xFF10B981) - Green
+- **Background:** Split CruiserDarkBg (0xFFF8F9FF) - Light Gray
+- **Card:** Split CruiserCardBg (0xFFFFFFFF) - White
 
 ### Typography
 - **Headline:** 20sp, Black weight

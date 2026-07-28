@@ -258,7 +258,7 @@ Coordinate with John S.
 
 If can join:
 ```
-[JOIN SAWAARI - RESERVE SEAT] (Large button, blue)
+[JOIN RIDE - RESERVE SEAT] (Large button, blue)
 
 OR PROPOSE CUSTOM CONTRIBUTION:
 [Input field: $] [PROPOSE]
@@ -266,7 +266,7 @@ OR PROPOSE CUSTOM CONTRIBUTION:
 
 If full/completed/cancelled:
 ```
-[SAWAARI IS FULL] (Disabled gray button)
+[RIDE IS FULL] (Disabled gray button)
 ```
 
 ### Ride Request Details (Host/Driver View)
@@ -314,7 +314,7 @@ Preferences: Quiet rider, no music
 
 If no match yet:
 ```
-[ACCEPT & OFFER SAWAARI SHARE] (Large button, blue)
+[ACCEPT & OFFER RIDE SHARE] (Large button, blue)
 [PROPOSE PRICE] (Secondary button)
 [DECLINE REQUEST]
 ```
@@ -342,7 +342,7 @@ If match accepted:
 2. Taps offer card → Navigate to trip_detail/{offerId}/offer
 3. Views full trip details
 4. Sees: Route, Driver, Passengers, Cost
-5. [JOIN SAWAARI] → Creates match in pending status
+5. [JOIN RIDE] → Creates match in pending status
 6. Driver gets notification
 7. Status shows: ⧗ Waiting for Host Confirmation
 8. Driver [ACCEPT] → Match accepted
@@ -532,12 +532,12 @@ host_dashboard
 ## Material 3 Design
 
 ### Colors
-- **Primary Action:** SawaariSaffron (#0061A4) - Blue
-- **Success:** SawaariEmerald (#10B981) - Green  
+- **Primary Action:** Split CruiserSaffron (#0061A4) - Blue
+- **Success:** Split CruiserEmerald (#10B981) - Green  
 - **Warning:** Amber (#D97706) - Orange
 - **Danger:** Red (#DC2626) - Red
-- **Divider:** SawaariDivider (#E2E8F0) - Light Gray
-- **Text:** SawaariTextPrimary (#0F172A) - Dark
+- **Divider:** Split CruiserDivider (#E2E8F0) - Light Gray
+- **Text:** Split CruiserTextPrimary (#0F172A) - Dark
 
 ### Typography
 - **Header:** 20sp Bold
@@ -572,7 +572,7 @@ Icon(
 )
 Button(
     onClick = { /* */ },
-    // semantics { contentDescription = "Join this sawaari" }
+    // semantics { contentDescription = "Join this split-cruiser" }
 ) { /* */ }
 ```
 
@@ -631,7 +631,7 @@ val existingMatch = remember(matches, offer.id) {
    - Cost: $8.50 (under 2x cap of $17)
    - Vehicle: 2020 Silver Camry
    - Passengers: 1 confirmed
-5. [JOIN SAWAARI] → Match created (pending)
+5. [JOIN RIDE] → Match created (pending)
 6. Success dialog shows
 7. Passenger taken to dashboard
 8. Match appears in "Recent Matches"

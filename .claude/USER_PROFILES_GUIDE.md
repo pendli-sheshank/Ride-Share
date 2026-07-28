@@ -2,7 +2,7 @@
 
 ## Overview
 
-SawaariShare maintains detailed user profiles with multi-tier verification system for trust and safety in ride-sharing.
+Split Cruiser maintains detailed user profiles with multi-tier verification system for trust and safety in ride-sharing.
 
 ## Firestore Collection: `users`
 
@@ -46,12 +46,12 @@ modified: Timestamp                     // Auto-generated on update
 **Benefits:**
 - Post rides as driver
 - Join rides as passenger
-- Access to full SawaariShare community
+- Access to full Split Cruiser community
 - Appear in trusted rider/driver listings
 
 **Invite Codes (Pre-populated):**
 ```
-SAWAARISHARE
+SPLITCRUISER
 INDIANSTUDENTS
 WELCOME2026
 VOUCHEDCODE
@@ -147,7 +147,7 @@ Allows users to update profile after initial setup (edit dialog).
 ## Privacy by Design
 
 ### Display Name Strategy
-Instead of full name, SawaariShare displays: **"FirstName LastInitial."**
+Instead of full name, Split Cruiser displays: **"FirstName LastInitial."**
 
 **Example:**
 - Stored: `name = "John Smith"`, `lastInitial = "S"`
@@ -327,7 +327,7 @@ if (!isValidCollegeEmail(email)) {
 ### Scenario 1: Complete Onboarding
 ```
 1. SignUp: test@college.edu / password123
-2. Redeem: SAWAARISHARE
+2. Redeem: SPLITCRUISER
 3. Profile: John | S | NEU Boston | Mission Hill
 4. Verify: john@northeastern.edu
 5. Set Vehicle: 2020 Silver Camry

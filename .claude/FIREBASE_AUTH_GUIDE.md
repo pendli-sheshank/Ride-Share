@@ -2,7 +2,7 @@
 
 ## Overview
 
-SawaariShare uses **Firebase Authentication** with email/password for secure user registration and login. Supports both Firebase and local fallback modes.
+Split Cruiser uses **Firebase Authentication** with email/password for secure user registration and login. Supports both Firebase and local fallback modes.
 
 ## Authentication Flow
 
@@ -38,7 +38,7 @@ SawaariShare uses **Firebase Authentication** with email/password for secure use
 
 ## Implementation Details
 
-### Repository Layer (`SawaariRepository.kt`)
+### Repository Layer (`SplitCruiserRepository.kt`)
 
 #### Sign Up
 ```kotlin
@@ -87,7 +87,7 @@ fun logInWithEmail(
 - Compares password hash
 - Authenticates locally
 
-### UI Layer (`SawaariApp.kt`)
+### UI Layer (`SplitCruiserApp.kt`)
 
 #### EmailPasswordLoginScreen
 Location: Lines 213-461
@@ -314,7 +314,7 @@ if (apiKey.isNotBlank() && !apiKey.contains("PLACEHOLDER")) {
 
 ### 1. Invite Code Redemption
 - User must enter valid invite code
-- Codes pre-populated: SAWAARISHARE, INDIANSTUDENTS, WELCOME2026, VOUCHEDCODE
+- Codes pre-populated: SPLITCRUISER, INDIANSTUDENTS, WELCOME2026, VOUCHEDCODE
 - Marks user as "vouched" tier
 - Stored in `invites.json`
 
@@ -346,7 +346,7 @@ if (apiKey.isNotBlank() && !apiKey.contains("PLACEHOLDER")) {
 | "Passwords do not match" | Signup password mismatch | Retype correctly |
 | "An account with this email already exists." | Email registered | Use different email or login |
 | "Invalid email or password." | Wrong credentials | Check email/password |
-| "Invalid invite code. Try 'SAWAARISHARE'" | Code doesn't exist | Use valid code |
+| "Invalid invite code. Try 'SPLITCRUISER'" | Code doesn't exist | Use valid code |
 
 ## Production Checklist
 

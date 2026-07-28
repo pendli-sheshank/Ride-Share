@@ -1,6 +1,6 @@
-# SawaariShare iOS App
+# Split Cruiser iOS App
 
-iOS implementation of SawaariShare using Kotlin Multiplatform and SwiftUI.
+iOS implementation of Split Cruiser using Kotlin Multiplatform and SwiftUI.
 
 ## Architecture
 

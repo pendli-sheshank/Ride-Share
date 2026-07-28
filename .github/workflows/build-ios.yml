@@ -36,6 +36,13 @@ jobs:
 
       # Step 1: Build Shared.framework for iOS
       - name: Build Shared.framework
+        # iOS reads its Firebase settings from the generated FirebaseBuildConfig baked into the
+        # XCFramework, so they have to be present at Gradle time. On a PR from a fork these are
+        # empty, which is fine: the framework builds and reports itself unconfigured.
+        env:
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
         run: |
           ./gradlew :shared:assembleSharedReleaseXCFramework --stacktrace
           # linkReleaseFrameworkIosFat produces a device+simulator fat binary that App

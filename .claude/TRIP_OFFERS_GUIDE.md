@@ -2,7 +2,7 @@
 
 ## Overview
 
-Trip Offers are the core of SawaariShare - drivers post rides they're offering, and passengers can join. Offers include detailed routing, pricing, and passenger management.
+Trip Offers are the core of Split Cruiser - drivers post rides they're offering, and passengers can join. Offers include detailed routing, pricing, and passenger management.
 
 ## Firestore Collection: `trip_offers`
 
@@ -167,7 +167,7 @@ Example:
 1. Driver posts ride with costPerRider
 2. Passengers join and see total cost
 3. Before/after ride: payment collected
-4. SawaariShare takes commission (e.g., 5-10%)
+4. Split Cruiser takes commission (e.g., 5-10%)
 5. Driver receives: costPerRider × passengers - commission
 
 ## Location & Routing
@@ -361,7 +361,7 @@ fun validateTripOffer(offer: TripOffer): Result<Unit>
 | "Cost per rider cannot be negative." | Negative cost | Enter cost ≥ $0 |
 | "This trip has no seats left!" | Ride full | Choose different ride |
 | "You have already reserved a seat on this trip." | Already joined | Join different ride |
-| "You cannot join your own Sawaari." | Can't join own ride | Only drivers/co-drivers join |
+| "You cannot join your own Split Cruiser." | Can't join own ride | Only drivers/co-drivers join |
 | "Only the host can modify this trip's status." | Wrong user | Host only can update |
 
 ## Testing Scenarios

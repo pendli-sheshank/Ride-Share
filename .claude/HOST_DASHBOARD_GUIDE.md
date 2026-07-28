@@ -174,7 +174,7 @@ totalRevenue = hostedRides.sumOf { it.costPerRider * (it.totalSeats - it.seatsLe
 ```
 For each offer in filteredRides:
   ┌──────────────────────────────────┐
-  │ HOSTED SAWAARI    [ACTIVE]       │
+  │ HOSTED RIDE    [ACTIVE]       │
   │                                  │
   │ 📍 NEU Snell Library             │
   │  → Boston Logan Airport          │
@@ -327,11 +327,11 @@ COMPLETED  NO_SHOW
 ## Material 3 Design
 
 ### Colors
-- **Primary Action:** SawaariSaffron (Blue)
-- **Success:** SawaariEmerald (Green)
+- **Primary Action:** Split CruiserSaffron (Blue)
+- **Success:** Split CruiserEmerald (Green)
 - **Warning:** Color(0xFFEF4444) (Red)
-- **Text:** SawaariTextPrimary (Dark)
-- **Secondary Text:** SawaariLightGray
+- **Text:** Split CruiserTextPrimary (Dark)
+- **Secondary Text:** Split CruiserLightGray
 
 ### Components
 - **Cards:** RoundedCornerShape(12-16dp), subtle borders

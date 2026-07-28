@@ -2,7 +2,7 @@
 
 ## Overview
 
-Trip Matching is the core mechanism connecting drivers and passengers in SawaariShare. When a driver accepts a passenger's ride request (or vice versa), a TripMatch document is created that enables real-time messaging, cost negotiation, and trip coordination.
+Trip Matching is the core mechanism connecting drivers and passengers in Split Cruiser. When a driver accepts a passenger's ride request (or vice versa), a TripMatch document is created that enables real-time messaging, cost negotiation, and trip coordination.
 
 ## Firestore Collection: `trip_matches`
 
@@ -156,7 +156,7 @@ messages/{messageId}
 ├── id: String                          // Unique message ID (msg_xxxxx)
 ├── matchId: String                     // Reference to trip_matches/{matchId}
 ├── senderId: String                    // Sender user ID or "system"
-├── senderName: String                  // Display name or "SawaariBot"
+├── senderName: String                  // Display name or "Split CruiserBot"
 ├── text: String                        // Message content
 └── timestamp: Long                     // Unix timestamp (milliseconds)
 ```
@@ -169,7 +169,7 @@ messages/{messageId}
 - Stored with user ID and display name
 
 **2. System Messages**
-- Sent by SawaariBot (senderId = "system")
+- Sent by Split CruiserBot (senderId = "system")
 - Announce match events:
   - "Match created! Waiting for driver to confirm."
   - "Trip request accepted by host! You can now chat and coordinate cash-in-person split."
@@ -308,7 +308,7 @@ maxContribution = $17.00
 2. Passenger requests X seats
 3. Match created with total contribution
 4. Before/after trip: payment collected
-5. SawaariShare takes commission (5-10%)
+5. Split Cruiser takes commission (5-10%)
 6. Driver receives: contribution - commission
 
 ## Data Retrieval & Queries

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Ride Requests are the passenger side of SawaariShare - riders post their travel needs, and drivers can join or accept them. This complements Trip Offers (driver-centric) with a passenger-centric discovery model.
+Ride Requests are the passenger side of Split Cruiser - riders post their travel needs, and drivers can join or accept them. This complements Trip Offers (driver-centric) with a passenger-centric discovery model.
 
 ## Firestore Collection: `ride_requests`
 
@@ -201,7 +201,7 @@ Example:
 2. Driver accepts with proposed cost
 3. Passenger confirms before pickup
 4. Payment collected (Venmo, card, etc.)
-5. SawaariShare takes commission (5-10%)
+5. Split Cruiser takes commission (5-10%)
 6. Driver receives: (costPerRider × seatsNeeded) - commission
 
 ## Comparison: Trip Offers vs Ride Requests

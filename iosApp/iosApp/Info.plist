@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>SawaariShare</string>
+	<string>Split Cruiser</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -70,8 +70,8 @@
 		<string>_https._tcp</string>
 	</array>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>SawaariShare needs your location to show nearby rides</string>
+	<string>Split Cruiser needs your location to show nearby rides</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>SawaariShare needs your location to show nearby rides</string>
+	<string>Split Cruiser needs your location to show nearby rides</string>
 </dict>
 </plist>

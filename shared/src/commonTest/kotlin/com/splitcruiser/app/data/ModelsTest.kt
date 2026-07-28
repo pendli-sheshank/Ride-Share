@@ -195,97 +195,11 @@ class ModelsTest {
         assertEquals("Airport", logon.category)
     }
 
-    @Test
-    fun testTripOfferToMap() {
-        val offer = TripOffer(
-            id = "offer_123",
-            hostId = "host_456",
-            hostName = "Driver",
-            origin = "Boston",
-            destination = "NYC",
-            costPerRider = 25.0,
-            seatsLeft = 2
-        )
-
-        val map = offer.toMap()
-        assertEquals("offer_123", map["id"])
-        assertEquals("host_456", map["hostId"])
-        assertEquals("Boston", map["origin"])
-        assertEquals(25.0, map["costPerRider"])
-        assertEquals(2, map["seatsLeft"])
-    }
-
-    @Test
-    fun testRideRequestToMap() {
-        val request = RideRequest(
-            id = "request_123",
-            riderId = "rider_456",
-            riderName = "Passenger",
-            origin = "MIT",
-            destination = "Airport",
-            seatsNeeded = 2
-        )
-
-        val map = request.toMap()
-        assertEquals("request_123", map["id"])
-        assertEquals("rider_456", map["riderId"])
-        assertEquals("Passenger", map["riderName"])
-        assertEquals(2, map["seatsNeeded"])
-    }
-
-    @Test
-    fun testUserToMap() {
-        val user = User(
-            id = "user_123",
-            name = "Alice",
-            email = "alice@example.com",
-            phoneNumber = "+1-555-0100",
-            ratingAvg = 4.8f
-        )
-
-        val map = user.toMap()
-        assertEquals("user_123", map["id"])
-        assertEquals("Alice", map["name"])
-        assertEquals("alice@example.com", map["email"])
-        assertEquals(4.8f, map["ratingAvg"])
-    }
-
-    @Test
-    fun testMessageToMap() {
-        val message = Message(
-            id = "msg_123",
-            matchId = "match_001",
-            senderId = "user_123",
-            senderName = "Alice",
-            text = "Hello!",
-            timestamp = 1690000000000L
-        )
-
-        val map = message.toMap()
-        assertEquals("msg_123", map["id"])
-        assertEquals("match_001", map["matchId"])
-        assertEquals("Hello!", map["text"])
-    }
-
-    @Test
-    fun testNotificationAlertToMap() {
-        val alert = NotificationAlert(
-            id = "alert_123",
-            userId = "user_456",
-            title = "Ride Matched",
-            message = "You've been matched with a driver!",
-            type = "match",
-            timestamp = 1690000000000L,
-            isRead = false
-        )
-
-        val map = alert.toMap()
-        assertEquals("alert_123", map["id"])
-        assertEquals("user_456", map["userId"])
-        assertEquals("Ride Matched", map["title"])
-        assertEquals("match", map["type"])
-        assertEquals(false, map["isRead"])
-    }
+    // The five hand-written toMap() helpers these tests covered are gone. They only ever existed
+    // for five of the twelve models and had to be updated by hand whenever a field was added.
+    // FirestoreCodec derives the same thing from the @Serializable declaration for every model, and
+    // FirestoreCodecTest round-trips all of them — a strictly stronger check than asserting a few
+    // keys, so these cases are not reproduced here.
 
     @Test
     fun testModelDefaults() {

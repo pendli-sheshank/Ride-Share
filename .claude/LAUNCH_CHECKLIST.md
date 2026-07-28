@@ -1,4 +1,4 @@
-# SawaariShare Launch Checklist
+# Split Cruiser Launch Checklist
 
 ## Pre-Launch Review (2 hours - Task 19)
 
@@ -205,10 +205,10 @@
 ## Release Notes Template
 
 ```markdown
-# SawaariShare v1.0 Release Notes
+# Split Cruiser v1.0 Release Notes
 
 ## Overview
-SawaariShare is a community-driven ride-sharing platform enabling cost-efficient carpooling 
+Split Cruiser is a community-driven ride-sharing platform enabling cost-efficient carpooling 
 through a peer-to-peer model where users can both host and join rides.
 
 ## New Features
@@ -305,7 +305,7 @@ through a peer-to-peer model where users can both host and join rides.
 ## Installation
 
 ### For Users
-1. Download SawaariShare from Google Play Store
+1. Download Split Cruiser from Google Play Store
 2. Create account with college email
 3. Redeem invite code or wait for acceptance
 4. Complete profile setup
@@ -321,7 +321,7 @@ through a peer-to-peer model where users can both host and join rides.
 ## Support & Feedback
 
 - **Issues:** Report at https://github.com/pendli-sheshank/Ride-Share/issues
-- **Email:** support@sawaarishare.com (when deployed)
+- **Email:** support@splitcruiser.com (when deployed)
 - **FAQ:** See README.md for common questions
 
 ## Credits
@@ -341,7 +341,7 @@ through a peer-to-peer model where users can both host and join rides.
 
 ---
 
-*Thank you for using SawaariShare! Help build a more connected student community.*
+*Thank you for using Split Cruiser! Help build a more connected student community.*
 ```
 
 ---

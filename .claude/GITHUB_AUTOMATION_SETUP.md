@@ -1,6 +1,6 @@
 # GitHub Actions Automation: Complete Setup Guide for SplitCruiser
 
-This guide walks through automating the Google Cloud, Play Store, and Firebase setup for SplitCruiser using GitHub Actions. The app is being rebranded from SawaariShare (com.aistudio.sawaarishare.krqmzb) to SplitCruiser (com.splitcruiser.app).
+This guide walks through automating the Google Cloud, Play Store, and Firebase setup for SplitCruiser using GitHub Actions. The app is being rebranded from Split Cruiser (com.aistudio.splitcruiser.krqmzb) to SplitCruiser (com.splitcruiser.app).
 
 ## Overview of What Gets Automated
 

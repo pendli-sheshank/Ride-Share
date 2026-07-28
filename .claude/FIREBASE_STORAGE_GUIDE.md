@@ -2,14 +2,14 @@
 
 ## Overview
 
-Firebase Storage handles profile picture uploads for the SawaariShare app, enabling users to add profile photos during onboarding or profile editing. Images are optimized for web delivery with CDN caching and fallback to emoji avatars if no photo is available.
+Firebase Storage handles profile picture uploads for the Split Cruiser app, enabling users to add profile photos during onboarding or profile editing. Images are optimized for web delivery with CDN caching and fallback to emoji avatars if no photo is available.
 
 ## Architecture
 
 ### Storage Structure
 
 ```
-gs://sawaari-share-bucket/
+gs://split-cruiser-bucket/
 ├── profile_pictures/
 │   ├── {userId}.jpg          → User's profile picture (512x512 optimized)
 │   ├── {userId}.jpg-metadata → Image metadata (size, upload date)
@@ -36,7 +36,7 @@ Display in StudentAvatar component
 
 ## Implementation
 
-### 1. Firebase Storage Methods (SawaariRepository.kt)
+### 1. Firebase Storage Methods (SplitCruiserRepository.kt)
 
 #### Image Resizing
 ```kotlin
@@ -180,7 +180,7 @@ data class User(
 **Example Download URL:**
 ```
 https://firebasestorage.googleapis.com/v0/b/
-sawaari-share-bucket.appspot.com/o/
+split-cruiser-bucket.appspot.com/o/
 profile_pictures%2Fuser_123.jpg?alt=media&token=abc123xyz
 ```
 

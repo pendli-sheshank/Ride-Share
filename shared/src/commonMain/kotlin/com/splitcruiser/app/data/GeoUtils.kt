@@ -49,12 +49,15 @@ object GeoUtils {
     // Great circle distance (Haversine formula) in miles
     fun distanceInMiles(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
         val r = 3958.8 // Radius of the earth in miles
-        val latDistance = Math.toRadians(lat2 - lat1)
-        val lonDistance = Math.toRadians(lon2 - lon1)
+        val latDistance = (lat2 - lat1).toRadians()
+        val lonDistance = (lon2 - lon1).toRadians()
         val a = sin(latDistance / 2.0) * sin(latDistance / 2.0) +
-                cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) *
+                cos(lat1.toRadians()) * cos(lat2.toRadians()) *
                 sin(lonDistance / 2.0) * sin(lonDistance / 2.0)
         val c = 2.0 * atan2(sqrt(a), sqrt(1.0 - a))
         return r * c
     }
+
+    /** `java.lang.Math` does not exist in commonMain. */
+    private fun Double.toRadians(): Double = this * PI / 180.0
 }
