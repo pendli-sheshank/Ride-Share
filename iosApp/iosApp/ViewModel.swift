@@ -13,22 +13,20 @@ class AppViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String? = nil
 
-    private let repository: SawaariRepository
-
-    init() {
-        // Initialize repository with app context
-        self.repository = SawaariRepository(appContext: nil)
-    }
+    // No repository here. `SawaariRepository` lives in `:app` (Android-only — it takes an
+    // android.content.Context and talks to Firebase), so it is not part of `Shared` and cannot
+    // be imported on iOS. Giving iOS real persistence means writing a repository in
+    // `shared/commonMain` first; until then every method below works on local state only.
 
     // MARK: - User Authentication
 
     func loginUser(phoneNumber: String, password: String) async {
         isLoading = true
         errorMessage = nil
-        defer { isLoading = false }
 
-        // TODO: Implement login logic
-        // This would call repository.loginUser(...) when available
+        // TODO: replace with a real call once a multiplatform repository exists in :shared.
+        // Every parameter is supplied explicitly: Kotlin default arguments do not survive into
+        // the generated Swift initializer, so the memberwise init requires all 19.
         currentUser = User(
             id: "temp_user_\(UUID().uuidString)",
             phoneNumber: phoneNumber,
@@ -36,8 +34,22 @@ class AppViewModel: ObservableObject {
             name: "iOS User",
             lastInitial: "U",
             avatarUrl: "",
-            verifiedTier: "guest"
+            verifiedTier: "guest",
+            invitedBy: "",
+            ratingAvg: 0.0,
+            ratingCount: 0,
+            noShowCount: 0,
+            communityId: "",
+            homeArea: "",
+            isWomenOnlyFilterEnabled: false,
+            fcmToken: "",
+            emailNotificationsEnabled: false,
+            pushNotificationsEnabled: false,
+            collegeName: "",
+            verifiedEmail: ""
         )
+
+        isLoading = false
     }
 
     // MARK: - Trip Offer Management
@@ -45,19 +57,18 @@ class AppViewModel: ObservableObject {
     func createTripOffer(_ offer: TripOffer) async {
         isLoading = true
         errorMessage = nil
-        defer { isLoading = false }
 
-        // TODO: Call repository.createTripOffer(offer)
+        // TODO: Call a multiplatform repository once :shared has one.
         activeOffers.append(offer)
+        isLoading = false
     }
 
     func fetchActiveOffers() async {
         isLoading = true
         errorMessage = nil
-        defer { isLoading = false }
 
-        // TODO: Implement fetching from repository
-        // activeOffers = repository.fetchActiveOffers()
+        // TODO: Fetch from a multiplatform repository once :shared has one.
+        isLoading = false
     }
 
     // MARK: - Ride Request Management
@@ -65,10 +76,10 @@ class AppViewModel: ObservableObject {
     func createRideRequest(_ request: RideRequest) async {
         isLoading = true
         errorMessage = nil
-        defer { isLoading = false }
 
-        // TODO: Call repository.createRideRequest(request)
+        // TODO: Call a multiplatform repository once :shared has one.
         activeRequests.append(request)
+        isLoading = false
     }
 
     // MARK: - Match Management
@@ -76,9 +87,9 @@ class AppViewModel: ObservableObject {
     func acceptMatch(_ match: TripMatch) async {
         isLoading = true
         errorMessage = nil
-        defer { isLoading = false }
 
-        // TODO: Call repository.acceptMatch(match)
+        // TODO: Call a multiplatform repository once :shared has one.
+        isLoading = false
     }
 
     // MARK: - Error Handling

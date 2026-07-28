@@ -519,6 +519,26 @@ references, a missing build setting, a wrong file type, and an uncompiled source
 invisible to the guard written for the previous one. When a generated project misbehaves, do
 not assume the existing checks narrow it down.
 
+### 2026-07-28 — first real Swift type-check: `SawaariRepository` is not in `Shared`
+**Symptom:** `cannot find type 'SawaariRepository' in scope`, plus `missing arguments for
+parameters 'invitedBy', 'ratingAvg', ... in call` on a `User(...)` construction.
+**Cause (1):** `iosApp/ViewModel.swift` was written against a `SawaariRepository` that exists
+only in `:app`. It takes an `android.content.Context` and drives Firebase, so it is
+Android-only and is not — and cannot be — part of the `Shared` framework. iOS gets the models
+from `Shared` and nothing else. The property was also never used: every method was a TODO
+operating on local state.
+**Cause (2):** **Kotlin default arguments do not survive into generated Swift initializers.**
+`User` has 19 properties, all with Kotlin defaults; the generated Swift memberwise init
+requires all 19 explicitly. This applies to every model in `Models.kt` and will bite again
+anywhere Swift constructs one.
+**Fix:** dropped the repository (dead code referencing a nonexistent type) and supplied all 19
+arguments. Also replaced four `defer { isLoading = false }` statements that Swift warns about
+as no-ops when they are the last statement in scope.
+**Consequence worth knowing:** iOS has no persistence layer at all. Giving it one means
+writing a repository in `shared/commonMain` — Firebase and `Context` cannot come along. Until
+then the iOS app is UI over local state, which is fine for TestFlight but is an automatic
+App Store rejection under Guideline 2.1.
+
 ---
 
 ## 8. Pre-flight checklist before merging to `main`
