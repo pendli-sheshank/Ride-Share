@@ -161,6 +161,36 @@ throwaway keychain. It does **not** use `fastlane match`; there is no fastlane i
 7. Play requires **at least one manual upload per track** before the API will accept one. If
    the internal track has never received an AAB, upload one by hand first.
 
+### Firebase — one-time
+
+The `FIREBASE_*` secrets only say *where* the project is. They cannot turn anything on inside it,
+and every one of these steps is invisible to the build — a fully green release ships an app that
+cannot sign anybody in. Do them once, in the console, for the project named by
+`FIREBASE_PROJECT_ID`:
+
+1. Firebase console → **Authentication → Get started**. Until this is clicked the project has no
+   Identity Platform configuration at all and every `accounts:*` call returns
+   `CONFIGURATION_NOT_FOUND` — see §7.
+2. **Sign-in method → Email/Password → Enable.** (Leave "Email link" off; the app sends a password.)
+   Without it the same calls return `OPERATION_NOT_ALLOWED`.
+3. Project settings → General → **Web API key** is what `FIREBASE_API_KEY` must hold. It is *not*
+   the App ID and *not* a service-account key. If the key is restricted under GCP → APIs &
+   Services → Credentials, its allowed-API list must include **Identity Toolkit API**; REST calls
+   carry no app signature, so Android/iOS *app* restrictions will reject them.
+4. Firestore → **Create database**, then `firebase deploy --only firestore:rules,firestore:indexes`.
+5. Storage → **Get started** (profile pictures use the v0 REST API against `FIREBASE_STORAGE_BUCKET`).
+6. Seed the `invites` collection by hand — the rules forbid the client creating them (§7).
+
+Verify without building anything; a real project answers `EMAIL_EXISTS` or `EMAIL_NOT_FOUND`
+rather than a project-level code:
+
+```bash
+curl -s -X POST \
+  "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$FIREBASE_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"probe@example.com","password":"hunter22","returnSecureToken":true}'
+```
+
 ### Apple — one-time *(planned)*
 
 1. Active **paid** Apple Developer Program membership. TestFlight is impossible without it.
@@ -779,6 +809,38 @@ needs to display them.
 **Add to the release checklist:** confirm invite codes exist in Firestore before shipping a build
 that gates signup on them.
 
+### 2026-07-28 — signup and login both failed with "Configuration not found"
+
+The dialog said `Information / Configuration not found` while the header badge read **Firebase
+Live**, so the build *was* configured — the secrets were present and `isFirebaseEnabled` was true.
+That message is `CONFIGURATION_NOT_FOUND` from Identity Toolkit, falling through
+`authErrorMessage`'s last branch, which prettifies unknown SCREAMING_SNAKE codes.
+
+**Cause is server-side, not in the app.** `CONFIGURATION_NOT_FOUND` means the API key is valid and
+reaches Google, but the project behind that key has no Identity Platform configuration — i.e.
+**Firebase Authentication was never enabled** for it, or `FIREBASE_API_KEY` belongs to a *different*
+project than `FIREBASE_PROJECT_ID`. It is worth knowing the neighbouring codes, because they point
+at different consoles:
+
+| Response | What it actually means |
+|---|---|
+| `CONFIGURATION_NOT_FOUND` | key is fine; that project has never had Authentication turned on |
+| `API key not valid. Please pass a valid API key.` | wrong/rotated/deleted key, or the App ID was pasted into `FIREBASE_API_KEY` |
+| `OPERATION_NOT_ALLOWED` | Authentication is on, but the Email/Password provider is off |
+| `PERMISSION_DENIED` / `SERVICE_DISABLED` | Identity Toolkit API disabled on the GCP project |
+
+**Fix (console, one-time):** see "Firebase — one-time" in §4.
+
+**Fix (code):** `authErrorMessage` now names the cause, the console step and the configured project
+id for the four project-level failures, and no longer lowercases Google's English sentences into
+"api key not valid". Every auth endpoint — refresh, `sendOobCode`, `lookup`, `delete` — was going
+through `requireSuccess`, which maps codes the *Firestore* way (`error.status`) and so surfaced
+Identity Toolkit's codes raw; they now share one `requireIdentitySuccess`.
+
+⚠ A curl against `accounts:signUp` with any junk key returns `API_KEY_INVALID`, never
+`CONFIGURATION_NOT_FOUND`. So seeing `CONFIGURATION_NOT_FOUND` is itself proof the key is real and
+the problem is the project's auth setup — no need to re-check the secret first.
+
 ---
 
 ## 8. Pre-flight checklist before merging to `main`
@@ -794,6 +856,8 @@ that gates signup on them.
       of every Gradle step that builds `:app` or the XCFramework — the generated
       `FirebaseBuildConfig` is what configures both apps
 - [ ] Invite codes are seeded in Firestore (the rules forbid the client creating them)
+- [ ] The Firebase project itself is set up — Authentication enabled with the Email/Password
+      provider on (§4). The build cannot tell you this; the `accounts:signUp` curl in §4 can
 - [ ] Nothing exported to Swift returns `Result` or `Pair`, or relies on a default argument
 
 ## 9. Rollback

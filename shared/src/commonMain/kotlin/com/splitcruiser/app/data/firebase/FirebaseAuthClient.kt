@@ -7,8 +7,11 @@ import io.ktor.client.call.body
 import io.ktor.client.request.forms.submitForm
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 import io.ktor.http.parameters
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -42,7 +45,7 @@ internal class FirebaseAuthClient(
                 append("grant_type", "refresh_token")
                 append("refresh_token", refreshToken)
             },
-        ).requireSuccess("Token refresh")
+        ).requireIdentitySuccess()
 
         val body: RefreshResponse = response.body()
         return StoredSession(
@@ -58,21 +61,21 @@ internal class FirebaseAuthClient(
         http.post("${config.identityBase}/accounts:sendOobCode?key=${config.apiKey}") {
             contentType(ContentType.Application.Json)
             setBody(OobRequest(requestType = "VERIFY_EMAIL", idToken = idToken, email = null))
-        }.requireSuccess("Sending the verification email")
+        }.requireIdentitySuccess()
     }
 
     suspend fun sendPasswordReset(email: String) {
         http.post("${config.identityBase}/accounts:sendOobCode?key=${config.apiKey}") {
             contentType(ContentType.Application.Json)
             setBody(OobRequest(requestType = "PASSWORD_RESET", idToken = null, email = email))
-        }.requireSuccess("Sending the password reset email")
+        }.requireIdentitySuccess()
     }
 
     suspend fun lookup(idToken: String): AccountInfo? {
         val response = http.post("${config.identityBase}/accounts:lookup?key=${config.apiKey}") {
             contentType(ContentType.Application.Json)
             setBody(LookupRequest(idToken))
-        }.requireSuccess("Looking up the account")
+        }.requireIdentitySuccess()
         return response.body<LookupResponse>().users.firstOrNull()
     }
 
@@ -80,7 +83,7 @@ internal class FirebaseAuthClient(
         http.post("${config.identityBase}/accounts:delete?key=${config.apiKey}") {
             contentType(ContentType.Application.Json)
             setBody(LookupRequest(idToken))
-        }.requireSuccess("Deleting the account")
+        }.requireIdentitySuccess()
     }
 
     private suspend fun identityCall(path: String, request: IdentityRequest): StoredSession {
@@ -88,11 +91,7 @@ internal class FirebaseAuthClient(
             contentType(ContentType.Application.Json)
             setBody(request)
         }
-        if (!response.status.value.let { it in 200..299 }) {
-            val error = parseFirebaseError(runCatching { response.call.body<String>() }.getOrDefault(""))
-            // Identity Toolkit carries the machine-readable code in `message`, not `status`.
-            throw SplitCruiserException(authErrorMessage(error.message), code = error.message)
-        }
+        response.requireIdentitySuccess()
         val body: IdentityResponse = response.body()
         return StoredSession(
             uid = body.localId,
@@ -106,6 +105,18 @@ internal class FirebaseAuthClient(
     /** `expiresIn` is seconds, and arrives as a string on both endpoints. */
     private fun expiryFrom(expiresIn: String): Long =
         nowMs() + (expiresIn.toLongOrNull() ?: 3600L) * 1000L
+
+    /**
+     * The Identity Toolkit counterpart of [requireSuccess], which maps codes the Firestore way and
+     * would show `CONFIGURATION_NOT_FOUND` raw. Identity Toolkit carries its machine-readable code
+     * in `error.message`, not `error.status`.
+     */
+    private suspend fun HttpResponse.requireIdentitySuccess(): HttpResponse {
+        if (status.isSuccess()) return this
+        val error = parseFirebaseError(runCatching { bodyAsText() }.getOrDefault(""))
+        val code = error.message.ifBlank { error.status }
+        throw SplitCruiserException(authErrorMessage(code, config.projectId), code = code)
+    }
 }
 
 @Serializable

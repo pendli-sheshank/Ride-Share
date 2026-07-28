@@ -19,29 +19,55 @@ class SplitCruiserException(
  * Identity Toolkit reports failures as `{"error":{"code":400,"message":"EMAIL_EXISTS"}}`. Those
  * codes are not fit to show anyone, and the old repository surfaced the raw `e.message` straight
  * into the login screen.
+ *
+ * [projectId] is only used to name the project in the project-level failures — the ones a user
+ * cannot do anything about and whose message therefore has to be aimed at whoever set the build up.
+ * Without it, `CONFIGURATION_NOT_FOUND` reaches the login screen as the useless "Configuration not
+ * found" and nobody can tell which of the two projects in play is misconfigured.
  */
-internal fun authErrorMessage(code: String): String = when {
-    code.startsWith("EMAIL_EXISTS") ->
-        "That email is already registered. Try logging in instead."
-    code.startsWith("EMAIL_NOT_FOUND") ->
-        "No account found for that email."
-    code.startsWith("INVALID_PASSWORD") || code.startsWith("INVALID_LOGIN_CREDENTIALS") ->
-        "Incorrect email or password."
-    code.startsWith("WEAK_PASSWORD") ->
-        "Password must be at least 6 characters."
-    code.startsWith("INVALID_EMAIL") ->
-        "That doesn't look like a valid email address."
-    code.startsWith("TOO_MANY_ATTEMPTS_TRY_LATER") ->
-        "Too many attempts. Please wait a few minutes and try again."
-    code.startsWith("USER_DISABLED") ->
-        "This account has been disabled."
-    code.startsWith("TOKEN_EXPIRED") || code.startsWith("INVALID_REFRESH_TOKEN") ||
-        code.startsWith("USER_NOT_FOUND") ->
-        "Your session expired. Please log in again."
-    code.startsWith("OPERATION_NOT_ALLOWED") ->
-        "Email and password sign-in is not enabled for this Firebase project."
-    code.isBlank() -> "Something went wrong. Please try again."
-    else -> code.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() }
+internal fun authErrorMessage(code: String, projectId: String = ""): String {
+    val project = if (projectId.isBlank()) "this Firebase project" else "Firebase project \"$projectId\""
+    return when {
+        code.startsWith("EMAIL_EXISTS") ->
+            "That email is already registered. Try logging in instead."
+        code.startsWith("EMAIL_NOT_FOUND") ->
+            "No account found for that email."
+        code.startsWith("INVALID_PASSWORD") || code.startsWith("INVALID_LOGIN_CREDENTIALS") ->
+            "Incorrect email or password."
+        code.startsWith("WEAK_PASSWORD") ->
+            "Password must be at least 6 characters."
+        code.startsWith("INVALID_EMAIL") ->
+            "That doesn't look like a valid email address."
+        code.startsWith("TOO_MANY_ATTEMPTS_TRY_LATER") ->
+            "Too many attempts. Please wait a few minutes and try again."
+        code.startsWith("USER_DISABLED") ->
+            "This account has been disabled."
+        code.startsWith("TOKEN_EXPIRED") || code.startsWith("INVALID_REFRESH_TOKEN") ||
+            code.startsWith("USER_NOT_FOUND") ->
+            "Your session expired. Please log in again."
+        code.startsWith("OPERATION_NOT_ALLOWED") || code.startsWith("PASSWORD_LOGIN_DISABLED") ->
+            "Email/password sign-in is turned off for $project. Enable it in the Firebase console " +
+                "under Authentication → Sign-in method."
+        // The account tier of the whole project is missing, not the account being signed in. It
+        // means the API key is valid but its project has never had Firebase Authentication turned
+        // on — or the key belongs to a different project than FIREBASE_PROJECT_ID.
+        code.startsWith("CONFIGURATION_NOT_FOUND") ->
+            "Firebase Authentication has not been set up for $project. In the Firebase console, " +
+                "open Authentication → Get started and enable the Email/Password provider, then " +
+                "check that FIREBASE_API_KEY belongs to that same project."
+        code.contains("API_KEY_INVALID") || code.contains("API key not valid") ->
+            "This build's Firebase API key was rejected. Check the FIREBASE_API_KEY secret — it " +
+                "must be the Web API key of $project."
+        code.contains("SERVICE_DISABLED") || code.contains("has not been used in project") ->
+            "The Identity Toolkit API is disabled for $project. Enable it in the Google Cloud " +
+                "console, then retry in a few minutes."
+        code.isBlank() -> "Something went wrong. Please try again."
+        // A SCREAMING_SNAKE code is one of ours to prettify. Anything else is already an English
+        // sentence from Google, and lowercasing it turns "API key not valid" into "api key not valid".
+        code.all { it.isUpperCase() || it.isDigit() || it == '_' } ->
+            code.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() }
+        else -> code
+    }
 }
 
 /**
