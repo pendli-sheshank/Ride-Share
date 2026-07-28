@@ -219,9 +219,10 @@ class FirestoreCodecTest {
 
     @Test
     fun smallModelsRoundTrip() {
+        // Doubles survive the codec's string/number handling, which is what the coordinates ride on.
         assertEquals(
-            Invite("SPLITCRUISER", true, "user_a", "user_b"),
-            roundTrip(Invite("SPLITCRUISER", true, "user_a", "user_b"))
+            ContactDetails("+16175550100", "12 Mission Hill, Boston, MA", 42.3332, -71.1054),
+            roundTrip(ContactDetails("+16175550100", "12 Mission Hill, Boston, MA", 42.3332, -71.1054))
         )
         assertEquals(
             Community("neu", "Northeastern University", "Boston, MA"),

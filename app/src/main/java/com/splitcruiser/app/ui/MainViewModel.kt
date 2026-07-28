@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import com.splitcruiser.app.auth.GoogleSignInCancelledException
 import com.splitcruiser.app.auth.requestGoogleIdToken
 import com.splitcruiser.app.data.Community
+import com.splitcruiser.app.data.ContactDetails
 import com.splitcruiser.app.data.FirebaseConfig
 import com.splitcruiser.app.data.Message
 import com.splitcruiser.app.data.NotificationAlert
@@ -29,7 +30,6 @@ import com.splitcruiser.app.data.logInWithEmailResult
 import com.splitcruiser.app.data.offerSeatForRequestResult
 import com.splitcruiser.app.data.postRideRequestResult
 import com.splitcruiser.app.data.postTripOfferResult
-import com.splitcruiser.app.data.redeemInviteCodeResult
 import com.splitcruiser.app.data.requestSeatOnOfferResult
 import com.splitcruiser.app.data.sendMessageResult
 import com.splitcruiser.app.data.signInWithGoogleResult
@@ -67,6 +67,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val userMatches: StateFlow<List<TripMatch>> = repository.userMatches
     val allCommunities: StateFlow<List<Community>> = repository.allCommunities
     val notifications: StateFlow<List<NotificationAlert>> = repository.notifications
+
+    /** What onboarding stored: the home address a ride request prefills from. */
+    val contactDetails: StateFlow<ContactDetails?> = repository.contactDetails
 
     private val _hostedRides = MutableStateFlow<List<TripOffer>>(emptyList())
     val hostedRides: StateFlow<List<TripOffer>> = _hostedRides.asStateFlow()
@@ -197,24 +200,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun redeemInviteCode(code: String, onSuccess: () -> Unit) {
-        runGuarded(
-            block = { repository.redeemInviteCodeResult(code) },
-            fallbackMessage = "Invalid invite code.",
-            onSuccess = { onSuccess() },
-        )
-    }
-
     fun completeProfile(
         name: String,
         lastInitial: String,
         communityId: String,
         homeArea: String,
+        contact: ContactDetails,
         vehicle: Vehicle?,
         onSuccess: () -> Unit
     ) {
         runGuarded(
-            block = { repository.createUserProfileResult(name, lastInitial, communityId, homeArea, vehicle) },
+            block = {
+                repository.createUserProfileResult(name, lastInitial, communityId, homeArea, contact, vehicle)
+            },
             fallbackMessage = "Failed to setup profile.",
             onSuccess = { onSuccess() },
         )

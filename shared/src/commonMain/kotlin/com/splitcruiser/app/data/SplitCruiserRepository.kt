@@ -90,6 +90,10 @@ class SplitCruiserRepository internal constructor(
     private val _currentUser = MutableStateFlow<User?>(null)
     val currentUser: StateFlow<User?> = _currentUser.asStateFlow()
 
+    /** Null until onboarding has run, or for an account that predates it. */
+    private val _contactDetails = MutableStateFlow<ContactDetails?>(null)
+    val contactDetails: StateFlow<ContactDetails?> = _contactDetails.asStateFlow()
+
     private val _activeOffers = MutableStateFlow<List<TripOffer>>(emptyList())
     val activeOffers: StateFlow<List<TripOffer>> = _activeOffers.asStateFlow()
 
@@ -428,6 +432,7 @@ class SplitCruiserRepository internal constructor(
         }
 
         adoptUser(user)
+        loadContactDetails(session.uid)
         runCatching { refreshNow() }
             .onFailure { logWarn(LOG_TAG, "First sync after login failed", it) }
         return user.name.isEmpty()
@@ -443,6 +448,7 @@ class SplitCruiserRepository internal constructor(
         stop()
         tokens.clear()
         _currentUser.value = null
+        _contactDetails.value = null
         users.value = emptyMap()
         offers.value = emptyMap()
         requests.value = emptyMap()
@@ -462,6 +468,7 @@ class SplitCruiserRepository internal constructor(
         lastInitial: String,
         communityId: String,
         homeArea: String,
+        contact: ContactDetails,
         vehicle: Vehicle?,
     ) {
         val user = requireUser()
@@ -475,11 +482,31 @@ class SplitCruiserRepository internal constructor(
             lastInitial = lastInitial.trim(),
             communityId = communityId,
             homeArea = homeArea,
+            phoneNumber = contact.phoneNumber.trim(),
         )
         firestore.setDocument("users", user.id, updated, serializer<User>())
         adoptUser(updated)
+
+        // After the user document, and tolerantly: a rejected private write must not strand an
+        // account with no profile at all, which would drop it back onto the onboarding screen.
+        runCatching { saveContactDetails(contact.copy(phoneNumber = contact.phoneNumber.trim())) }
+            .onFailure { logWarn(LOG_TAG, "Could not store the private contact details", it) }
+
         if (vehicle != null) saveVehicle(vehicle.copy(ownerId = user.id))
     }
+
+    /**
+     * The five-argument form, kept because `ViewModel.swift` calls it and Kotlin default arguments
+     * do not survive into Swift. iOS has no onboarding fields yet, so it stores none.
+     */
+    @Throws(Exception::class)
+    suspend fun createUserProfile(
+        name: String,
+        lastInitial: String,
+        communityId: String,
+        homeArea: String,
+        vehicle: Vehicle?,
+    ) = createUserProfile(name, lastInitial, communityId, homeArea, ContactDetails(), vehicle)
 
     @Throws(Exception::class)
     suspend fun updateUserProfileDetails(
@@ -521,26 +548,36 @@ class SplitCruiserRepository internal constructor(
         adoptUser(updated)
     }
 
+    /**
+     * Stores the private half of a profile: where the user lives, so a ride request can fill its own
+     * pickup in.
+     *
+     * A subcollection rather than fields on the user document, because `users` is world-readable —
+     * the feeds need a host's name and rating — and a home address is not something to publish to
+     * everyone who can open the app.
+     */
     @Throws(Exception::class)
-    suspend fun redeemInviteCode(code: String) {
-        val upper = code.trim().uppercase()
+    suspend fun saveContactDetails(details: ContactDetails) {
         val user = requireUser()
-        val invite = firestore.getDocument("invites", upper, serializer<Invite>())
-            ?: throw SplitCruiserException("Invalid invite code. Try '$DEFAULT_INVITE_CODE'")
-        if (invite.used) throw SplitCruiserException("Invite code already used!")
+        firestore.setDocument("users/${user.id}/private", CONTACT_DOC, details, serializer<ContactDetails>())
+        _contactDetails.value = details
 
-        // The rules permit exactly this transition and no other, so the mask must be this narrow.
-        firestore.updateFields(
-            "invites",
-            upper,
-            buildFields(
-                "used" to booleanValue(true),
-                "usedBy" to stringValue(user.id),
-            ),
-        )
-        val updated = user.copy(verifiedTier = "vouched", invitedBy = invite.invitedBy)
-        firestore.setDocument("users", user.id, updated, serializer<User>())
-        adoptUser(updated)
+        // The phone number is the exception: the trip detail screen shows a matched host's number,
+        // so it has to live on the readable document to be of any use.
+        if (details.phoneNumber != user.phoneNumber) {
+            firestore.updateFields(
+                "users",
+                user.id,
+                buildFields("phoneNumber" to stringValue(details.phoneNumber)),
+            )
+            adoptUser(user.copy(phoneNumber = details.phoneNumber))
+        }
+    }
+
+    private suspend fun loadContactDetails(uid: String) {
+        _contactDetails.value = runCatching {
+            firestore.getDocument("users/$uid/private", CONTACT_DOC, serializer<ContactDetails>())
+        }.getOrNull()
     }
 
     @Throws(Exception::class)
@@ -1476,7 +1513,8 @@ class SplitCruiserRepository internal constructor(
     }
 
     private companion object {
-        const val DEFAULT_INVITE_CODE = "SPLITCRUISER"
+        /** The single document under `users/{uid}/private` that onboarding writes. */
+        const val CONTACT_DOC = "profile"
     }
 }
 

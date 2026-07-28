@@ -30,13 +30,25 @@ data class User(
         get() = if (lastInitial.isNotEmpty()) "$name $lastInitial." else name
 }
 
+/**
+ * The details onboarding collects so a ride request can fill itself in.
+ *
+ * Kept in `users/{uid}/private/profile` rather than on the user document, because `users` is
+ * world-readable — feeds show a host's name and rating — and a home address is nobody else's
+ * business. The phone number stays on the public document: the trip detail screen has always
+ * shown a matched host's number, and moving it here would break that without being asked.
+ */
 @Serializable
-data class Invite(
-    val code: String = "",
-    val used: Boolean = false,
-    val invitedBy: String = "",
-    val usedBy: String = ""
-)
+data class ContactDetails(
+    val phoneNumber: String = "",
+    val homeAddress: String = "",
+    val homeLat: Double = 0.0,
+    val homeLng: Double = 0.0,
+) {
+    /** False when onboarding was skipped or predates this, in which case nothing is prefilled. */
+    val hasHomeLocation: Boolean
+        get() = homeAddress.isNotBlank() && homeLat != 0.0 && homeLng != 0.0
+}
 
 @Serializable
 data class LocalCredential(

@@ -193,19 +193,8 @@ cannot sign anybody in. Do them once, in the console, for the project named by
    carry no app signature, so Android/iOS *app* restrictions will reject them.
 4. Firestore → **Create database**, then `firebase deploy --only firestore:rules,firestore:indexes`.
 5. Storage → **Get started** (profile pictures use the v0 REST API against `FIREBASE_STORAGE_BUCKET`).
-6. Seed the `invites` collection by hand — the rules forbid the client creating them (§7). The
-   **document id is the code itself, uppercased**, because that is what `redeemInviteCode` looks
-   up. Four fields, and `used` must exist and be `false` or the redemption rule cannot match:
-
-   | Field | Type | Value |
-   |---|---|---|
-   | `code` | string | same as the document id, e.g. `SPLITCRUISER` |
-   | `used` | boolean | `false` |
-   | `invitedBy` | string | `""` (or a seeding user's uid) |
-   | `usedBy` | string | `""` |
-
-   The invite screen suggests `SPLITCRUISER`, so seed at least that one or the very first signup
-   dead-ends on a screen whose only other button is "Cancel & Log Out".
+6. Nothing to seed. Signup used to be gated on an invite code that only a backend could create;
+   that screen is gone, and `communities` still ships as `DEFAULT_COMMUNITIES` in `commonMain`.
 
 Verify without building anything; a real project answers `EMAIL_EXISTS` or `EMAIL_NOT_FOUND`
 rather than a project-level code:
@@ -924,6 +913,30 @@ Two details worth keeping:
 - The host-side button now needs an actual ride to offer, so the screen picks one: none → an error
   naming the fix, one → use it, several → a chooser. There is no correct id to invent.
 
+### 2026-07-28 — the invite gate is gone; onboarding collects contact and home instead
+
+Supersedes "invites must be seeded out of band or signup is dead" above. Signup no longer asks for
+a code, so there is nothing to seed and no dead funnel to avoid. `InviteCodeScreen`,
+`redeemInviteCode`, the `Invite` model and the `invites` rules block are all deleted — the screen
+was already unreachable, since no route in the `NavHost` ever pointed at it.
+
+Onboarding now takes a contact number and a home address, and `PostRequestScreen` and
+`PostOfferScreen` start their pickup from that address instead of an empty field over hardcoded
+Boston coordinates.
+
+Where those two values live is deliberate and worth not "tidying" later:
+
+- **The home address goes to `users/{uid}/private/profile`**, owner-only. `users` is
+  `allow read: if true` because feeds show a host's name and rating, so a field on the user
+  document is a field published to anyone who can open the app. A residence is not that.
+- **The phone number stays on the user document.** The trip detail screen has always shown a
+  matched host's number; moving it would have broken that. It is world-readable — if that is not
+  wanted, the fix is a rule change and a screen change together, not a quiet move.
+
+`createUserProfile` keeps its five-argument overload because `ViewModel.swift` calls it and Kotlin
+default arguments do not survive into Swift. iOS therefore stores no contact details yet, which is
+the same subset story as the rest of that app.
+
 ---
 
 ## 8. Pre-flight checklist before merging to `main`
@@ -938,7 +951,6 @@ Two details worth keeping:
 - [ ] `FIREBASE_API_KEY` / `FIREBASE_PROJECT_ID` / `FIREBASE_STORAGE_BUCKET` are in the `env:`
       of every Gradle step that builds `:app` or the XCFramework — the generated
       `FirebaseBuildConfig` is what configures both apps
-- [ ] Invite codes are seeded in Firestore (the rules forbid the client creating them)
 - [ ] The Firebase project itself is set up — Authentication enabled with the Email/Password
       provider on (§4). The build cannot tell you this; the `accounts:signUp` curl in §4 can
 - [ ] If `GOOGLE_WEB_CLIENT_ID` is set: it is the **Web** client ID, and this build's signing

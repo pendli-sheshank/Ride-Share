@@ -20,16 +20,19 @@ suspend fun SplitCruiserRepository.logInWithEmailResult(email: String, password:
 suspend fun SplitCruiserRepository.signInWithGoogleResult(googleIdToken: String): Result<Boolean> =
     runCatching { signInWithGoogle(googleIdToken) }
 
-suspend fun SplitCruiserRepository.redeemInviteCodeResult(code: String): Result<Unit> =
-    runCatching { redeemInviteCode(code) }
-
 suspend fun SplitCruiserRepository.createUserProfileResult(
     name: String,
     lastInitial: String,
     communityId: String,
     homeArea: String,
+    contact: ContactDetails,
     vehicle: Vehicle?,
-): Result<Unit> = runCatching { createUserProfile(name, lastInitial, communityId, homeArea, vehicle) }
+): Result<Unit> = runCatching {
+    createUserProfile(name, lastInitial, communityId, homeArea, contact, vehicle)
+}
+
+suspend fun SplitCruiserRepository.saveContactDetailsResult(details: ContactDetails): Result<Unit> =
+    runCatching { saveContactDetails(details) }
 
 suspend fun SplitCruiserRepository.updateUserProfileDetailsResult(
     name: String,

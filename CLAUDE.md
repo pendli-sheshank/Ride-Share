@@ -55,9 +55,9 @@ Consequences worth knowing before changing anything here:
   restores the `Result` shape for the ViewModel; Swift never sees it.
 - **Firebase is the only store.** The old Moshi JSON fallback is gone. An unconfigured build fails
   loudly rather than pretending to work.
-- Firestore rules and indexes are deployable via `firebase.json`. **Invites must be seeded out of
-  band** — the rules make `invites` create-only-by-backend, so a release without seeded codes has
-  a dead signup funnel.
+- Firestore rules and indexes are deployable via `firebase.json`. Signup is **not** gated on an
+  invite code any more; onboarding collects a contact number and a home address instead, and the
+  address lives in `users/{uid}/private/profile` because `users` itself is world-readable.
 
 ## Accuracy of the existing docs
 
@@ -97,6 +97,6 @@ not evidence. Verify against a build.
   filename.
 - The `google-services` and `secrets` Gradle plugins are inert on `:app` now that no native
   Firebase SDK consumes them.
-- Test coverage: 112 tests in `:shared` cover the codec, the REST clients, token refresh, the feed
+- Test coverage: 118 tests in `:shared` cover the codec, the REST clients, token refresh, the feed
   rules and the repository. `:app` has three (a Robolectric label check, a Roborazzi screenshot,
   and an arithmetic placeholder); the androidTest suite is still not run by any CI job.

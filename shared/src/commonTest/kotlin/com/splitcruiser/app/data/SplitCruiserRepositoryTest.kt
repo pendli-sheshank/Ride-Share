@@ -162,6 +162,39 @@ class SplitCruiserRepositoryTest {
     }
 
     @Test
+    fun onboardingKeepsTheHomeAddressOutOfTheReadableDocument() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+
+        repo.createUserProfile(
+            name = "Ana",
+            lastInitial = "R",
+            communityId = "neu",
+            homeArea = "Mission Hill",
+            contact = ContactDetails("+16175550100", "12 Tremont St, Boston, MA", 42.3332, -71.1054),
+            vehicle = null,
+        )
+
+        val writes = requests.filter { it.method.value == "PATCH" }.map { it.url.toString() }
+        // `users` is world-readable, so the address goes to the owner-only subcollection instead.
+        assertTrue(
+            writes.any { it.contains("/users/me/private/profile") },
+            "the private details must be written: $writes",
+        )
+        assertEquals("12 Tremont St, Boston, MA", repo.contactDetails.value?.homeAddress)
+        assertTrue(repo.contactDetails.value?.hasHomeLocation == true)
+        // The phone number is the deliberate exception — the trip detail screen shows a host's.
+        assertEquals("+16175550100", repo.currentUser.value?.phoneNumber)
+    }
+
+    @Test
+    fun signingOutForgetsTheHomeAddress() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+        repo.saveContactDetails(ContactDetails("+16175550100", "12 Tremont St", 42.33, -71.10))
+        repo.logout()
+        assertNull(repo.contactDetails.value)
+    }
+
+    @Test
     fun emptyCredentialsAreRejectedBeforeTheNetwork() = runTest {
         val repo = repository(scriptedBackend())
         assertFailsWith<SplitCruiserException> { repo.logInWithEmail("", "") }
