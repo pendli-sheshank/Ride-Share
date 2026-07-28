@@ -73,13 +73,38 @@ internal fun authErrorMessage(code: String, projectId: String = ""): String {
 /**
  * Firestore reports a missing composite index as FAILED_PRECONDITION with a console URL buried in
  * the message. That is otherwise indistinguishable from a rules rejection, so name it.
+ *
+ * [projectId] names the project in the two failures that are about the project rather than about
+ * the document, for the same reason [authErrorMessage] takes it.
  */
-internal fun firestoreErrorMessage(status: String, raw: String): String = when (status) {
-    "PERMISSION_DENIED" -> "You don't have permission to do that."
-    "NOT_FOUND" -> "That item no longer exists."
-    "FAILED_PRECONDITION" ->
-        "The backend is missing a Firestore index. See firestore.indexes.json. ($raw)"
-    "UNAUTHENTICATED" -> "Your session expired. Please log in again."
-    "RESOURCE_EXHAUSTED" -> "The backend is rate limited. Please try again shortly."
-    else -> raw.ifBlank { "The backend request failed." }
+internal fun firestoreErrorMessage(status: String, raw: String, projectId: String = ""): String {
+    val project = if (projectId.isBlank()) "this Firebase project" else "project \"$projectId\""
+    return when {
+        // Not a missing document: a project with no database answers *every* request with this,
+        // which reached the login screen as "That item no longer exists."
+        isMissingDatabase(raw) ->
+            "$project has no Firestore database yet. In the Firebase console, open Firestore " +
+                "Database → Create database (Native mode, not Datastore), then deploy " +
+                "firestore.rules and firestore.indexes.json."
+        raw.contains("SERVICE_DISABLED") || raw.contains("has not been used in project") ->
+            "The Firestore API is disabled for $project. Enable it in the Google Cloud console, " +
+                "then retry in a few minutes."
+        status == "PERMISSION_DENIED" ->
+            "You don't have permission to do that. If this is a fresh project, check that " +
+                "firestore.rules has been deployed — the default rules deny every request."
+        status == "NOT_FOUND" -> "That item no longer exists."
+        status == "FAILED_PRECONDITION" ->
+            "The backend is missing a Firestore index. See firestore.indexes.json. ($raw)"
+        status == "UNAUTHENTICATED" -> "Your session expired. Please log in again."
+        status == "RESOURCE_EXHAUSTED" -> "The backend is rate limited. Please try again shortly."
+        else -> raw.ifBlank { "The backend request failed." }
+    }
 }
+
+/**
+ * True for the 404 that means "there is no database here", as opposed to "there is no such
+ * document". Firestore uses the same status code for both, and only the prose distinguishes them:
+ * `The database (default) does not exist for project X`.
+ */
+internal fun isMissingDatabase(raw: String): Boolean =
+    raw.contains("database", ignoreCase = true) && raw.contains("does not exist", ignoreCase = true)

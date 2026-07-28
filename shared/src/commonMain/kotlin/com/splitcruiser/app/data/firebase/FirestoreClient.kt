@@ -8,6 +8,7 @@ import io.ktor.client.request.get
 import io.ktor.client.request.patch
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
@@ -44,9 +45,19 @@ internal class FirestoreClient(
                 bearer(token)
             }
         }
-        // A missing document is a normal outcome, not an error.
-        if (response.status == HttpStatusCode.NotFound) return null
-        response.requireSuccess("Reading $path/$id")
+        // A missing document is a normal outcome, not an error — but a project with no Firestore
+        // database answers *every* read with the same 404, and swallowing that one made a login
+        // look like a first-time user and fail on the write three lines later with "That item no
+        // longer exists". Only the prose tells them apart.
+        if (response.status == HttpStatusCode.NotFound) {
+            val body = runCatching { response.bodyAsText() }.getOrDefault("")
+            if (!isMissingDatabase(body)) return null
+            throw SplitCruiserException(
+                firestoreErrorMessage("NOT_FOUND", body, config.projectId),
+                code = "NOT_FOUND",
+            )
+        }
+        response.requireSuccess("Reading $path/$id", config.projectId)
         val document: JsonObject = response.body()
         return FirestoreCodec.decode(deserializer, document.fieldsOrEmpty())
     }
@@ -93,7 +104,7 @@ internal class FirestoreClient(
                 contentType(ContentType.Application.Json)
                 setBody(buildJsonObject { put("fields", fields) })
             }
-        }.requireSuccess("Writing $path/$id")
+        }.requireSuccess("Writing $path/$id", config.projectId)
     }
 
     suspend fun deleteDocument(path: String, id: String) {
@@ -104,7 +115,7 @@ internal class FirestoreClient(
         }
         // Deleting something already gone is success as far as the caller is concerned.
         if (response.status == HttpStatusCode.NotFound) return
-        response.requireSuccess("Deleting $path/$id")
+        response.requireSuccess("Deleting $path/$id", config.projectId)
     }
 
     /**
@@ -124,7 +135,7 @@ internal class FirestoreClient(
                 contentType(ContentType.Application.Json)
                 setBody(buildJsonObject { put("structuredQuery", query.toJson()) })
             }
-        }.requireSuccess("Querying ${query.collection}")
+        }.requireSuccess("Querying ${query.collection}", config.projectId)
 
         val results: JsonArray = response.body()
         return results.mapNotNull { entry ->
@@ -149,7 +160,7 @@ internal class FirestoreClient(
             http.get("${config.firestoreBase}/${path.encodePath()}?pageSize=$pageSize") { bearer(token) }
         }
         if (response.status == HttpStatusCode.NotFound) return emptyList()
-        response.requireSuccess("Listing $path")
+        response.requireSuccess("Listing $path", config.projectId)
         val body: JsonObject = response.body()
         val documents = body["documents"]?.jsonArray ?: return emptyList()
         return documents.mapNotNull { entry ->
@@ -178,7 +189,7 @@ internal class FirestoreClient(
                     }
                 )
             }
-        }.requireSuccess("Committing ${writes.size} writes")
+        }.requireSuccess("Committing ${writes.size} writes", config.projectId)
     }
 
     /**

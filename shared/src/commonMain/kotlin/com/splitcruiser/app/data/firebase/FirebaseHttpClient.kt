@@ -66,15 +66,19 @@ internal fun HttpRequestBuilder.firebaseAuth(idToken: String) {
     header(HttpHeaders.Authorization, "Firebase $idToken")
 }
 
-internal suspend fun HttpResponse.requireSuccess(context: String): HttpResponse {
+internal suspend fun HttpResponse.requireSuccess(context: String, projectId: String = ""): HttpResponse {
     if (status.isSuccess()) return this
     val body = runCatching { bodyAsText() }.getOrDefault("")
     val error = parseFirebaseError(body)
     throw SplitCruiserException(
         message = if (status == HttpStatusCode.Unauthorized || status == HttpStatusCode.Forbidden) {
-            firestoreErrorMessage(error.status.ifBlank { "PERMISSION_DENIED" }, error.message)
+            firestoreErrorMessage(error.status.ifBlank { "PERMISSION_DENIED" }, error.message, projectId)
         } else {
-            firestoreErrorMessage(error.status, error.message.ifBlank { "$context failed ($status)" })
+            firestoreErrorMessage(
+                error.status,
+                error.message.ifBlank { "$context failed ($status)" },
+                projectId,
+            )
         },
         code = error.status.ifBlank { error.message },
     )

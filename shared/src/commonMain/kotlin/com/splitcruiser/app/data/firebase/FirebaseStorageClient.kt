@@ -38,7 +38,7 @@ internal class FirebaseStorageClient(
             // The rules compare contentType for equality, so no charset parameter may be attached.
             contentType(ContentType.parse(contentType))
             setBody(bytes)
-        }.requireSuccess("Uploading $path")
+        }.requireSuccess("Uploading $path", config.projectId)
 
         val body: JsonObject = response.body()
         val downloadToken = body["downloadTokens"]?.jsonPrimitive?.content?.substringBefore(',').orEmpty()
@@ -51,7 +51,7 @@ internal class FirebaseStorageClient(
             firebaseAuth(token)
         }
         if (response.status == HttpStatusCode.NotFound) return
-        response.requireSuccess("Deleting $path")
+        response.requireSuccess("Deleting $path", config.projectId)
     }
 
     fun downloadUrl(path: String, downloadToken: String): String {
