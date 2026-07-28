@@ -1,4 +1,4 @@
-platform :ios, '14.0'
+platform :ios, '16.0'
 
 # No pods are declared. Shared.xcframework is produced by Gradle
 # (./gradlew :shared:assembleSharedReleaseXCFramework) and linked by the Xcode project

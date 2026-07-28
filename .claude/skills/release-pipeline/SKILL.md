@@ -539,6 +539,28 @@ writing a repository in `shared/commonMain` — Firebase and `Context` cannot co
 then the iOS app is UI over local state, which is fine for TestFlight but is an automatic
 App Store rejection under Guideline 2.1.
 
+### 2026-07-28 — modern SwiftUI against a 2020 deployment floor
+**Symptom:** two errors in `ContentView.swift` — `note: add @available attribute to enclosing
+struct` on `LoginView`, and `error: the compiler is unable to type-check this expression in
+reasonable time` on a 40-line `body`.
+**Cause:** `IPHONEOS_DEPLOYMENT_TARGET` was `14.0` while the SwiftUI is written in iOS 15/16
+idiom. The offenders are all *dot-shorthand* forms, which is why a grep for the obvious iOS 15
+APIs (`AsyncImage`, `.task`, `NavigationStack`) found nothing:
+- `.textFieldStyle(.roundedBorder)` and `.progressViewStyle(.circular)` — iOS 15 (iOS 14 needs
+  `RoundedBorderTextFieldStyle()` / `CircularProgressViewStyle()`)
+- `Section("title") { }` — iOS 15 (iOS 14 needs `Section(header: Text(...))`)
+- `NavigationLink("title") { }` — iOS 16
+**The second error was a cascade of the first.** When Swift cannot resolve an initializer it
+explores overloads combinatorially, and inside a large ViewBuilder that exhausts the
+type-checker's budget. "Unable to type-check in reasonable time" next to an availability error
+usually means *one* bug, not two.
+**Fix:** raised the deployment target to `16.0` in all four build configurations and the
+Podfile, rather than rewriting modern SwiftUI into iOS 14 dialect. iOS 14 shipped in 2020;
+iOS 16 is a normal floor now. Also split the offending `body` into computed sub-views as
+insurance, since that is where the limit bites regardless.
+**Check for it:** grep for dot-shorthand style modifiers, not just type names — the shorthand
+is the newer spelling of an API whose long form is often much older.
+
 ---
 
 ## 8. Pre-flight checklist before merging to `main`
