@@ -579,6 +579,22 @@ that what it packaged is actually signed.
 **Check for it:** exit 139 from any Xcode tool is a segfault, never a configuration error
 message you have missed. Look for a required key that is absent rather than one that is wrong.
 
+### 2026-07-28 — upload step died in 0 seconds: BSD `find` rejects `-maxdepth` after a primary
+**Symptom:** `Export signed IPA` succeeded and produced the IPA, then `Upload to App Store
+Connect` failed instantly with no output at all — well before `altool` could have run.
+**Cause:** `find "$dir" -name '*.ipa' -maxdepth 1`. GNU find accepts that ordering; **BSD find
+on macOS rejects `-maxdepth` after another primary** and exits non-zero. Under
+`set -o pipefail` the pipeline failed, and `set -e` killed the step before printing anything.
+**Fix:** replaced `find` with a glob array (`ipas=("$dir"/*.ipa); ipa="${ipas[0]}"`), which is
+portable and shellcheck-clean. Also added an `ls -la` on the failure path so an empty directory
+is visible next time.
+**This is the second BSD-vs-GNU trap in this one workflow** — `base64 -o` was the first. On a
+macOS runner, treat every coreutils/findutils flag as suspect: the GNU spelling usually fails
+silently or with an unhelpful exit code rather than a readable error.
+**Also added:** `altool --validate-app` before `--upload-app`. A build number can never be
+reused once App Store Connect has seen it, so one extra call to reject a bad binary is cheaper
+than burning the number.
+
 ---
 
 ## 8. Pre-flight checklist before merging to `main`

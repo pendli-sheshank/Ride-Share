@@ -243,12 +243,34 @@ jobs:
           mkdir -p "$key_dir"
           printf '%s' "$ASC_PRIVATE_KEY" > "$key_dir/AuthKey_${ASC_KEY_ID}.p8"
 
-          ipa=$(find "$RUNNER_TEMP/export" -name '*.ipa' -maxdepth 1 | head -n 1)
-          if [ -z "$ipa" ]; then
-            echo "::error::No .ipa produced by the export step."
+          # A glob, not `find ... -maxdepth 1`. BSD find (macOS) rejects -maxdepth after another
+          # primary and exits non-zero, which under `set -o pipefail` killed this step in under
+          # a second with no message. Same BSD-vs-GNU trap as `base64 -o` further up.
+          ipas=("$RUNNER_TEMP/export"/*.ipa)
+          ipa="${ipas[0]}"
+          if [ ! -f "$ipa" ]; then
+            echo "::error::No .ipa found in $RUNNER_TEMP/export."
+            ls -la "$RUNNER_TEMP/export" || true
             exit 1
           fi
-          echo "Uploading $ipa"
+          echo "Uploading $ipa ($(du -h "$ipa" | cut -f1))"
+
+          # Validate before uploading. A build number can never be reused once App Store Connect
+          # has seen it, so it is worth one extra call to fail on a bad binary without burning
+          # the number.
+          set +e
+          xcrun altool --validate-app \
+            --file "$ipa" \
+            --type ios \
+            --apiKey "$ASC_KEY_ID" \
+            --apiIssuer "$ASC_ISSUER_ID"
+          validate_status=$?
+          set -e
+          if [ $validate_status -ne 0 ]; then
+            echo "::error::altool --validate-app failed ($validate_status). Not uploading."
+            rm -f "$key_dir/AuthKey_${ASC_KEY_ID}.p8"
+            exit $validate_status
+          fi
 
           xcrun altool --upload-app \
             --file "$ipa" \
