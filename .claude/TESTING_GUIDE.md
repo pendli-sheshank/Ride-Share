@@ -1,14 +1,14 @@
-# SawaariShare Testing Guide
+# Split Cruiser Testing Guide
 
 ## Overview
 
-This document provides comprehensive testing procedures for the SawaariShare application, covering unit tests, UI tests, integration tests, and manual testing strategies.
+This document provides comprehensive testing procedures for the Split Cruiser application, covering unit tests, UI tests, integration tests, and manual testing strategies.
 
 ## Test Coverage
 
 ### 1. Unit Tests (Repository & ViewModel)
 
-#### Repository Tests (`SawaariRepositoryTest.kt`)
+#### Repository Tests (`SplitCruiserRepositoryTest.kt`)
 
 **Trip Offer Tests:**
 - ✅ Create valid trip offer
@@ -143,7 +143,7 @@ cd /home/user/Ride-Share
 ./gradlew test
 
 # Run specific test class
-./gradlew test --tests com.splitcruiser.app.data.SawaariRepositoryTest
+./gradlew test --tests com.splitcruiser.app.data.SplitCruiserRepositoryTest
 
 # Run with coverage report
 ./gradlew testDebugUnitTest --coverage
@@ -204,7 +204,7 @@ firebase emulators:start
 
 ### Connect App to Emulator
 
-In `SawaariRepository.kt`:
+In `SplitCruiserRepository.kt`:
 
 ```kotlin
 fun setupEmulators() {
@@ -400,7 +400,7 @@ fun setupEmulators() {
 
 ```bash
 # CPU profiling
-adb shell am start -n com.splitcruiser.app/com.splitcruiser.app.ui.SawaariApp
+adb shell am start -n com.splitcruiser.app/com.splitcruiser.app.ui.SplitCruiserApp
 # In Android Studio: Profiler → CPU
 
 # Memory profiling
@@ -504,7 +504,7 @@ jobs:
 
 ```kotlin
 // Repository logs
-Log.d("SawaariShare", "Creating offer: $offer")
+Log.d("Split Cruiser", "Creating offer: $offer")
 
 // ViewModel logs
 Log.d("MainViewModel", "User logged in: ${user.id}")

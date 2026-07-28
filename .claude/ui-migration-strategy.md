@@ -1,7 +1,7 @@
 # UI Migration to Compose Multiplatform - Strategy & Progress
 
 ## Overview
-The SawaariShare app currently has an 8000+ line Jetpack Compose UI in the Android module. The goal is to migrate this to Kotlin Multiplatform to support both Android and iOS platforms while sharing UI logic.
+The Split Cruiser app currently has an 8000+ line Jetpack Compose UI in the Android module. The goal is to migrate this to Kotlin Multiplatform to support both Android and iOS platforms while sharing UI logic.
 
 ## Current State (Task #3)
 
@@ -100,7 +100,7 @@ shared/
 
 app/
 ├── ui/
-│   └── SawaariApp.kt (Android Compose UI - 8000 lines)
+│   └── SplitCruiserApp.kt (Android Compose UI - 8000 lines)
 └── ...
 
 iosApp/

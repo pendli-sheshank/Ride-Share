@@ -124,6 +124,13 @@ jobs:
       # device (iosArm64) and simulator (iosX64) slices into one binary, and App Store upload
       # rejects an archive containing simulator slices with ITMS-90240.
       - name: Build Shared.xcframework
+        # The shipped iOS build reads its Firebase settings from the generated
+        # FirebaseBuildConfig inside this framework. Miss these and TestFlight gets a build
+        # that cannot reach the backend at all.
+        env:
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
         run: ./gradlew :shared:assembleSharedReleaseXCFramework --stacktrace
 
       # The Xcode project links ../shared/build/XCFrameworks/release/Shared.xcframework by

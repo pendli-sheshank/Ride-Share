@@ -172,7 +172,7 @@ firebaseFirestore?.collection("users")?.addSnapshotListener { snapshot, error ->
 └─────────────────────────────────────────────────┘
                       ↓
 ┌─────────────────────────────────────────────────┐
-│       SawaariRepository (Local Cache)           │
+│       SplitCruiserRepository (Local Cache)           │
 │  ┌──────────────────────────────────────────┐  │
 │  │ Callback: Document data received         │  │
 │  │ - Parse to object                        │  │
@@ -315,7 +315,7 @@ viewModelScope.launch {
 ### Listener Errors
 ```kotlin
 if (error != null) {
-    Log.e("SawaariShare", "Listen failed: ${error.message}")
+    Log.e("Split Cruiser", "Listen failed: ${error.message}")
     _isConnected.value = false
     // Fall back to JSON cache
     return@addSnapshotListener
@@ -463,7 +463,7 @@ Text("Last sync: ${formatTime(lastSync)}")
 ### Verify Listeners Active
 ```kotlin
 // In Repository (debug only)
-Log.d("SawaariShare", "Active listeners: ${listenerRegistrations.size}")
+Log.d("Split Cruiser", "Active listeners: ${listenerRegistrations.size}")
 // Output: Active listeners: 6 (trip_offers, ride_requests, trip_matches, messages, notifications, users)
 ```
 

@@ -1,7 +1,7 @@
 # iOS App Release Pipeline & App Store Distribution
 
 ## Overview
-This document outlines the complete process for building, testing, and releasing the SawaariShare iOS app on the App Store.
+This document outlines the complete process for building, testing, and releasing the Split Cruiser iOS app on the App Store.
 
 ## Prerequisites
 
@@ -16,7 +16,7 @@ This document outlines the complete process for building, testing, and releasing
    - Add new app with details below
 
 3. **App Information**
-   - **App Name:** SawaariShare
+   - **App Name:** Split Cruiser
    - **Bundle ID:** com.splitcruiser.app
    - **Category:** Transportation
    - **Minimum iOS Version:** 14.0+
@@ -62,7 +62,7 @@ git config --global credential.helper osxkeychain
 ```
 Code Sign Identity: "iPhone Developer" (Debug), "iPhone Distribution" (Release)
 Code Sign Style: Automatic (managed by Xcode)
-Provisioning Profile: SawaariShare AppStore
+Provisioning Profile: Split Cruiser AppStore
 ```
 
 **App Icons & Launch Screen:**
@@ -195,7 +195,7 @@ xcodebuild -exportArchive \
 **App Store Connect Setup:**
 
 1. **App Information**
-   - App Name: SawaariShare
+   - App Name: Split Cruiser
    - Subtitle: US Desi Student Carpools
    - Primary Language: English
    - Privacy Policy: [Link to privacy policy]
@@ -220,7 +220,7 @@ xcodebuild -exportArchive \
 
 5. **Description**
 ```
-SawaariShare connects US Desi students to safe, affordable carpools.
+Split Cruiser connects US Desi students to safe, affordable carpools.
 
 Features:
 • Post and find rides with other students
@@ -238,8 +238,8 @@ Perfect for commuting to campus, airport runs, or road trips!
 - Community, Safe, Affordable
 
 7. **Support URL & Privacy Policy**
-- Support: https://sawaariapp.com/support
-- Privacy: https://sawaariapp.com/privacy
+- Support: https://split-cruiserapp.com/support
+- Privacy: https://split-cruiserapp.com/privacy
 
 **Submit for Review:**
 1. Build version selected

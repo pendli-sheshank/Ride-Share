@@ -1,6 +1,6 @@
 # GitHub Actions Workflows
 
-Automated CI/CD pipelines for SawaariShare across Android and iOS platforms.
+Automated CI/CD pipelines for Split Cruiser across Android and iOS platforms.
 
 ## Available Workflows
 

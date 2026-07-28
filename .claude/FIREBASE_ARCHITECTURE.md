@@ -1,8 +1,8 @@
-# SawaariShare - Firebase-Only Architecture
+# Split Cruiser - Firebase-Only Architecture
 
 ## Architecture Overview
 
-SawaariShare uses a **Firebase-first** architecture with **local JSON-based fallback** for offline support. Room database has been removed entirely.
+Split Cruiser uses a **Firebase-first** architecture with **local JSON-based fallback** for offline support. Room database has been removed entirely.
 
 ## Data Layer Stack
 
@@ -45,7 +45,7 @@ Files persisted locally:
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│              SawaariRepository                       │
+│              SplitCruiserRepository                       │
 ├─────────────────────────────────────────────────────┤
 │  StateFlow<> Reactive Streams (UI Layer)            │
 │  • currentUser, activeOffers, myRideRequests, etc   │
@@ -86,15 +86,15 @@ When Firebase is enabled, the repository registers snapshot listeners on:
 - Build time reduced (no Room annotation processing)
 
 ### Why Removed?
-- SawaariRepository already uses **Moshi JSON serialization** for persistence
+- SplitCruiserRepository already uses **Moshi JSON serialization** for persistence
 - **Firebase Firestore** provides cloud sync without Room
 - **JSON file storage** in `context.filesDir` provides offline cache
 - No need for complex SQL schema or Room overhead
 
 ## Key Implementation Details
 
-### SawaariRepository
-File: `app/src/main/java/com/example/data/SawaariRepository.kt`
+### SplitCruiserRepository
+File: `app/src/main/java/com/example/data/SplitCruiserRepository.kt`
 
 **State Management** (lines 48-79):
 ```kotlin

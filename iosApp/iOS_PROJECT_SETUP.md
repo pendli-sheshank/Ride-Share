@@ -1,6 +1,6 @@
 # iOS Project Setup Guide
 
-This document describes the iOS project structure and how to build and run the SawaariShare app on iOS.
+This document describes the iOS project structure and how to build and run the Split Cruiser app on iOS.
 
 ## Project Structure
 

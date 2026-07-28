@@ -64,9 +64,10 @@ jobs:
           echo "VERSION_CODE=$(( 1000 + GITHUB_RUN_NUMBER ))" >> "$GITHUB_ENV"
           echo "VERSION_NAME=1.0.$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
 
-      # The Secrets Gradle Plugin reads .env from the repo root and turns these into
-      # BuildConfig fields. SawaariRepository skips Firebase init if a value contains
-      # "PLACEHOLDER", so a missing secret yields a working but Firebase-less build.
+      # The Secrets Gradle Plugin turns these into :app BuildConfig fields. Nothing reads them
+      # any more — the backend moved to :shared and reads the environment variables directly in
+      # the "Build release bundle" step below. Kept because the plugin expects the file; remove
+      # both together if the plugin is ever dropped.
       - name: Write .env
         run: |
           cat > .env <<EOF
@@ -96,6 +97,13 @@ jobs:
           STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          # The backend lives in :shared now and reads these at Gradle time to generate
+          # FirebaseBuildConfig. Writing .env above only reaches :app's BuildConfig via the
+          # secrets plugin, which nothing consumes any more, so these are what actually
+          # configure the app. Same three secrets, no new ones.
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
           # VERSION_CODE / VERSION_NAME come from the Compute version step above.
           # Currently published versionCode is 2; the 1000 offset guarantees the value only
           # ever increases. NOTE: github.run_number resets to 1 if this workflow file is

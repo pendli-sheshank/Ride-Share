@@ -2,7 +2,7 @@
 
 ## Overview
 
-This guide covers complete Firebase project setup, security rules, email configuration, and deployment procedures for SawaariShare. The app uses Firebase Authentication, Firestore for real-time data sync, Cloud Storage for profile pictures, and Cloud Functions for backend logic.
+This guide covers complete Firebase project setup, security rules, email configuration, and deployment procedures for Split Cruiser. The app uses Firebase Authentication, Firestore for real-time data sync, Cloud Storage for profile pictures, and Cloud Functions for backend logic.
 
 ## Part 1: Firebase Project Setup
 
@@ -11,7 +11,7 @@ This guide covers complete Firebase project setup, security rules, email configu
 **Steps:**
 1. Go to [Firebase Console](https://console.firebase.google.com/)
 2. Click "Create a project"
-3. Project name: `sawaari-share` (or your preference)
+3. Project name: `split-cruiser` (or your preference)
 4. Disable Google Analytics (can enable later)
 5. Click "Create project"
 
@@ -22,7 +22,7 @@ This guide covers complete Firebase project setup, security rules, email configu
 **Steps:**
 1. In Firebase Console, click "Add app" → Android
 2. Package name: `com.splitcruiser.app`
-3. App nickname: `SawaariShare`
+3. App nickname: `Split Cruiser`
 4. Debug SHA-1: Run `./gradlew signingReport` (see instructions below)
 5. Register app
 6. Download `google-services.json`
@@ -345,10 +345,10 @@ firebase deploy --only storage:rules
 
 #### Email Verification Template
 ```
-Subject: Verify your email for SawaariShare
+Subject: Verify your email for Split Cruiser
 Body:
 ---
-Welcome to SawaariShare! Please verify your email address to complete your account setup.
+Welcome to Split Cruiser! Please verify your email address to complete your account setup.
 
 Verification Link: $LINK
 
@@ -359,7 +359,7 @@ If you didn't request this email, you can ignore it.
 
 #### Password Reset Template
 ```
-Subject: Reset your SawaariShare password
+Subject: Reset your Split Cruiser password
 Body:
 ---
 We received a request to reset your password. Click the link below to set a new password.
@@ -375,10 +375,10 @@ For security, never share your password with anyone.
 
 #### Account Deletion Template
 ```
-Subject: Confirm account deletion from SawaariShare
+Subject: Confirm account deletion from Split Cruiser
 Body:
 ---
-We received a request to delete your SawaariShare account. Click the link below to confirm.
+We received a request to delete your Split Cruiser account. Click the link below to confirm.
 
 Confirmation Link: $LINK
 
@@ -646,9 +646,9 @@ firebase deploy
 **Create `.env` file (DO NOT COMMIT):**
 ```
 FIREBASE_API_KEY=your_api_key
-FIREBASE_AUTH_DOMAIN=sawaari-share.firebaseapp.com
-FIREBASE_PROJECT_ID=sawaari-share
-FIREBASE_STORAGE_BUCKET=sawaari-share.appspot.com
+FIREBASE_AUTH_DOMAIN=split-cruiser.firebaseapp.com
+FIREBASE_PROJECT_ID=split-cruiser
+FIREBASE_STORAGE_BUCKET=split-cruiser.appspot.com
 FIREBASE_MESSAGING_SENDER_ID=your_sender_id
 FIREBASE_APP_ID=your_app_id
 ```

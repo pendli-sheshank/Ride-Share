@@ -1,5 +1,5 @@
 #!/bin/bash
-# Creates Xcode project structure for SawaariShare iOS app
+# Creates Xcode project structure for Split Cruiser iOS app
 # This script delegates to the Python generator for a valid, maintainable .xcodeproj
 
 set -e
