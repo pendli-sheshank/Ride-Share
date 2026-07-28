@@ -97,6 +97,6 @@ not evidence. Verify against a build.
   filename.
 - The `google-services` and `secrets` Gradle plugins are inert on `:app` now that no native
   Firebase SDK consumes them.
-- Test coverage: 121 tests in `:shared` cover the codec, the REST clients, token refresh, the feed
+- Test coverage: 123 tests in `:shared` cover the codec, the REST clients, token refresh, the feed
   rules and the repository. `:app` has three (a Robolectric label check, a Roborazzi screenshot,
   and an arithmetic placeholder); the androidTest suite is still not run by any CI job.

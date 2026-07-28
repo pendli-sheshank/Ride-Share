@@ -112,6 +112,7 @@ once they exist.
 | `FIREBASE_STORAGE_BUCKET` | same |
 | `FIREBASE_APP_ID` | `.env` only. **Unused** — it identifies an app to the native SDKs and has no role in any REST endpoint. |
 | `GOOGLE_WEB_CLIENT_ID` | same `env:` blocks. **Optional** — unset means the app offers email/password only. Must be the OAuth **Web** client ID, not the Android one (§4). |
+| `FIRESTORE_DATABASE_ID` | same `env:` blocks. **Optional** — defaults to `"splitcruiser"`, which is what this project's database is actually named (§7). Only set it if your copy of the project used a different Database ID, including a fresh project's `"(default)"`. |
 
 These three configure the app on *both* platforms, because the backend is one shared Kotlin
 repository. Putting them only in `.env` is not enough: `.env` feeds `:app`'s `BuildConfig` via the
@@ -969,6 +970,26 @@ also mentions undeployed rules, since a fresh database denies everything until t
 Authentication is off; once it is on, a 404 from Firestore means the database does not exist yet;
 once it does, `PERMISSION_DENIED` means the rules have not been deployed. Three separate console
 steps, each invisible to a green build.
+
+### 2026-07-28 — same "database does not exist" 404 after creating the database, because of its name
+
+Immediately followed the fix above. The database existed, and Firestore returned the exact same
+404 anyway: `The database (default) does not exist for project splitcruiser`. The console's
+**Create database** dialog has a Database ID field that defaults to `(default)` but accepts
+anything typed over it, with no warning about the consequence — this project's database had been
+created with the id `splitcruiser` instead. Every REST call this app makes targets
+`databases/(default)/...` by construction, so from the API's point of view a database named
+anything else genuinely does not exist, no matter how real it is in the console.
+
+**Fix:** `FirebaseConfig.firestoreDatabaseId` (default `"splitcruiser"`, since that is what this
+project's database is actually called) is spliced into every Firestore URL and `documentName()`
+call. Overridable per build via the optional `FIRESTORE_DATABASE_ID` secret/env var, for anyone
+who instead creates a fresh database and leaves its id as `(default)`.
+
+⚠ **Check the Database ID at creation time, not after.** Firestore Database → the id is printed
+next to the database name in the console. If it does not say `(default)`, either rename nothing
+and set `FIRESTORE_DATABASE_ID` to match, or delete the empty database and recreate it leaving the
+Database ID field untouched.
 
 ---
 

@@ -132,6 +132,8 @@ jobs:
           FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
           FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
           GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_WEB_CLIENT_ID }}
+          # Optional; only needed if Firestore was created with a non-"(default)" Database ID.
+          FIRESTORE_DATABASE_ID: ${{ secrets.FIRESTORE_DATABASE_ID }}
         run: ./gradlew :shared:assembleSharedReleaseXCFramework --stacktrace
 
       # The Xcode project links ../shared/build/XCFrameworks/release/Shared.xcframework by

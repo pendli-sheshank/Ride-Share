@@ -83,6 +83,14 @@ val firebaseStorageBucket = providers.environmentVariable("FIREBASE_STORAGE_BUCK
 // is a supported state: the Google button hides itself rather than failing at the tap.
 val googleWebClientId = providers.environmentVariable("GOOGLE_WEB_CLIENT_ID").orElse("")
 
+// This project's Firestore database was created with the id "splitcruiser" rather than the
+// "(default)" every project gets automatically — the console's "Create database" dialog accepts
+// any Database ID typed over its suggestion, with no warning that doing so means every
+// `databases/(default)/...` REST call this app makes will 404 against a database that, from the
+// API's point of view, does not exist. Overridable via FIRESTORE_DATABASE_ID for anyone who
+// creates a fresh (default) database instead.
+val firestoreDatabaseId = providers.environmentVariable("FIRESTORE_DATABASE_ID").orElse("splitcruiser")
+
 val firebaseConfigDir: Provider<Directory> = layout.buildDirectory.dir("generated/firebaseConfig")
 
 val generateFirebaseConfig by tasks.registering {
@@ -90,12 +98,14 @@ val generateFirebaseConfig by tasks.registering {
   val projectId = firebaseProjectId
   val storageBucket = firebaseStorageBucket
   val webClientId = googleWebClientId
+  val databaseId = firestoreDatabaseId
   val outputDir = firebaseConfigDir
 
   inputs.property("firebaseApiKey", apiKey)
   inputs.property("firebaseProjectId", projectId)
   inputs.property("firebaseStorageBucket", storageBucket)
   inputs.property("googleWebClientId", webClientId)
+  inputs.property("firestoreDatabaseId", databaseId)
   outputs.dir(outputDir)
 
   doLast {
@@ -128,6 +138,7 @@ val generateFirebaseConfig by tasks.registering {
           const val API_KEY: String = ${quote(apiKey.get())}
           const val PROJECT_ID: String = ${quote(projectId.get())}
           const val STORAGE_BUCKET: String = ${quote(storageBucket.get())}
+          const val FIRESTORE_DATABASE_ID: String = ${quote(databaseId.get())}
           const val GOOGLE_WEB_CLIENT_ID: String = ${quote(webClientId.get())}
       }
       """.trimIndent() + "\n"
