@@ -237,15 +237,35 @@ jobs:
           ASC_ISSUER_ID: ${{ secrets.APPSTORE_CONNECT_ISSUER_ID }}
           ASC_PRIVATE_KEY: ${{ secrets.APPSTORE_CONNECT_PRIVATE_KEY }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
+
           # altool discovers the key by filename in this directory; the name is not arbitrary.
           key_dir="$HOME/.appstoreconnect/private_keys"
+          key_file="$key_dir/AuthKey_${ASC_KEY_ID}.p8"
           mkdir -p "$key_dir"
-          printf '%s' "$ASC_PRIVATE_KEY" > "$key_dir/AuthKey_${ASC_KEY_ID}.p8"
+          printf '%s' "$ASC_PRIVATE_KEY" > "$key_file"
 
-          # A glob, not `find ... -maxdepth 1`. BSD find (macOS) rejects -maxdepth after another
-          # primary and exits non-zero, which under `set -o pipefail` killed this step in under
-          # a second with no message. Same BSD-vs-GNU trap as `base64 -o` further up.
+          # --- Diagnostics -------------------------------------------------------------
+          # Two previous runs died here in under a second with no output at all. Everything
+          # below is printed so the *next* failure is readable from the log rather than
+          # inferred. None of it prints key material.
+          echo "::group::Upload preflight"
+          echo "xcode-select -p : $(xcode-select -p 2>&1)"
+          echo "xcrun --find altool : $(xcrun --find altool 2>&1 || echo NOT-FOUND)"
+          echo "key file present : $([ -f "$key_file" ] && echo yes || echo no)"
+          echo "key file bytes   : $(wc -c < "$key_file" | tr -d ' ')"
+          # A .p8 must be PEM. If the secret was pasted with escaped \n instead of real
+          # newlines this is the only visible symptom, and altool just fails.
+          if head -c 27 "$key_file" | grep -q -- "-----BEGIN PRIVATE KEY-----"; then
+            echo "key file header  : OK (PEM)"
+          else
+            echo "key file header  : BAD — does not start with -----BEGIN PRIVATE KEY-----"
+            echo "::warning::APPSTORE_CONNECT_PRIVATE_KEY does not look like a PEM .p8. Paste the whole file including the BEGIN/END lines and real newlines."
+          fi
+          echo "key id length    : ${#ASC_KEY_ID}"
+          echo "issuer id length : ${#ASC_ISSUER_ID}"
+          echo "::endgroup::"
+
           ipas=("$RUNNER_TEMP/export"/*.ipa)
           ipa="${ipas[0]}"
           if [ ! -f "$ipa" ]; then
@@ -255,30 +275,53 @@ jobs:
           fi
           echo "Uploading $ipa ($(du -h "$ipa" | cut -f1))"
 
-          # Validate before uploading. A build number can never be reused once App Store Connect
-          # has seen it, so it is worth one extra call to fail on a bad binary without burning
-          # the number.
-          set +e
+          log="$RUNNER_TEMP/altool.log"
+
+          # Validate first. A build number can never be reused once App Store Connect has seen
+          # it, so it is worth one extra call to reject a bad binary without burning the number.
           xcrun altool --validate-app \
             --file "$ipa" \
             --type ios \
             --apiKey "$ASC_KEY_ID" \
-            --apiIssuer "$ASC_ISSUER_ID"
+            --apiIssuer "$ASC_ISSUER_ID" > "$log" 2>&1
           validate_status=$?
-          set -e
+          echo "--- altool --validate-app (exit $validate_status) ---"
+          cat "$log"
+
           if [ $validate_status -ne 0 ]; then
-            echo "::error::altool --validate-app failed ($validate_status). Not uploading."
-            rm -f "$key_dir/AuthKey_${ASC_KEY_ID}.p8"
-            exit $validate_status
+            {
+              echo "### Upload failed at \`altool --validate-app\` (exit $validate_status)"
+              echo ""
+              echo '```'
+              tail -n 40 "$log"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            rm -f "$key_file"
+            exit "$validate_status"
           fi
 
           xcrun altool --upload-app \
             --file "$ipa" \
             --type ios \
             --apiKey "$ASC_KEY_ID" \
-            --apiIssuer "$ASC_ISSUER_ID"
+            --apiIssuer "$ASC_ISSUER_ID" > "$log" 2>&1
+          upload_status=$?
+          echo "--- altool --upload-app (exit $upload_status) ---"
+          cat "$log"
 
-          rm -f "$key_dir/AuthKey_${ASC_KEY_ID}.p8"
+          if [ $upload_status -ne 0 ]; then
+            {
+              echo "### Upload failed at \`altool --upload-app\` (exit $upload_status)"
+              echo ""
+              echo '```'
+              tail -n 40 "$log"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            rm -f "$key_file"
+            exit "$upload_status"
+          fi
+
+          rm -f "$key_file"
 
       - name: Upload IPA as a workflow artifact
         if: always()
