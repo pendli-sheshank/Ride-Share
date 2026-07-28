@@ -15,10 +15,12 @@ ARCHIVE="${1:?usage: verify-app-classes.sh <archive> [dex-prefix]}"
 PREFIX="${2:-}"
 # Classes that only exist if the project's own sources were compiled.
 # Check for any of these to be resilient to refactoring.
+# SplitCruiserRepository lives in :shared, so finding it also proves the shared module was
+# compiled and merged in — not just :app's own sources.
 NEEDLES=(
   'com/splitcruiser/app/MainActivity'
-  'com/splitcruiser/app/ui/SawaariAppKt'
-  'com/splitcruiser/app/data/SawaariRepository'
+  'com/splitcruiser/app/ui/MainViewModel'
+  'com/splitcruiser/app/data/SplitCruiserRepository'
 )
 
 if [ ! -f "$ARCHIVE" ]; then

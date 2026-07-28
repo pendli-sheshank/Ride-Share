@@ -7943,15 +7943,17 @@ fun GoogleMapsMatrixCard(
                                     val originPlace = originResults[0]
                                     val destPlace = destResults[0]
 
-                                    val routeResult = OsrmRouteService.getRoute(
+                                    // The shared service throws rather than returning Result, which
+                                    // does not survive the Swift export; this is the null-returning
+                                    // variant for callers that just want to skip the estimate.
+                                    val route = OsrmRouteService.getRouteOrNull(
                                         originLat = originPlace.lat,
                                         originLon = originPlace.lon,
                                         destLat = destPlace.lat,
                                         destLon = destPlace.lon
                                     )
 
-                                    matrixResult = if (routeResult.isSuccess) {
-                                        val route = routeResult.getOrThrow()
+                                    matrixResult = if (route != null) {
                                         MapsRouteMatrixResult(
                                             distanceText = route.distanceText,
                                             durationText = route.durationText,

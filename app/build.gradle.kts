@@ -96,10 +96,10 @@ googleServices {
 dependencies {
   implementation(project(":shared"))
   implementation(platform(libs.androidx.compose.bom))
-  implementation(platform(libs.firebase.bom))
-  implementation(libs.firebase.auth)
-  implementation(libs.firebase.firestore)
-  implementation(libs.firebase.storage)
+  // The native Firebase SDKs are deliberately absent. The backend lives in :shared and speaks
+  // Firebase's REST APIs, which is what lets iOS share it — the iOS SDK would need CocoaPods or
+  // SPM entries in the generated Xcode project. Do not add firebase-auth/firestore/storage back
+  // here without moving the whole backend with them.
   // implementation(libs.accompanist.permissions)
   implementation(libs.androidx.activity.compose)
   // implementation(libs.androidx.camera.camera2)
@@ -119,14 +119,15 @@ dependencies {
   implementation(libs.androidx.lifecycle.viewmodel.compose)
   implementation(libs.androidx.navigation.compose)
   implementation(libs.coil.compose)
-  implementation(libs.converter.moshi)
-  implementation(libs.firebase.ai)
-  implementation(libs.firebase.appcheck.recaptcha)
+  // Retrofit, Moshi and OkHttp went with SawaariRepository and the OSM services. Ktor now does
+  // the HTTP in :shared, and ktor-client-okhttp brings its own OkHttp — leaving the old
+  // logging-interceptor 4.10.0 here would have put two OkHttp versions on the runtime classpath.
+  // implementation(libs.converter.moshi)
+  // implementation(libs.logging.interceptor)
+  // implementation(libs.moshi.kotlin)
+  // implementation(libs.okhttp)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
-  implementation(libs.logging.interceptor)
-  implementation(libs.moshi.kotlin)
-  implementation(libs.okhttp)
   // implementation(libs.play.services.location)
   implementation(libs.retrofit)
   testImplementation(libs.androidx.compose.ui.test.junit4)

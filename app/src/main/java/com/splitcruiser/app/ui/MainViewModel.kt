@@ -7,27 +7,53 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.splitcruiser.app.data.Community
+import com.splitcruiser.app.data.FirebaseConfig
 import com.splitcruiser.app.data.Message
 import com.splitcruiser.app.data.NotificationAlert
+import com.splitcruiser.app.data.ProfileImages
 import com.splitcruiser.app.data.RideRequest
-import com.splitcruiser.app.data.SawaariRepository
+import com.splitcruiser.app.data.SplitCruiserRepository
 import com.splitcruiser.app.data.TripMatch
 import com.splitcruiser.app.data.TripOffer
 import com.splitcruiser.app.data.User
 import com.splitcruiser.app.data.Vehicle
+import com.splitcruiser.app.data.blockUserResult
+import com.splitcruiser.app.data.createUserProfileResult
+import com.splitcruiser.app.data.fetchMyTripsFromFirestore
+import com.splitcruiser.app.data.firebase.SharedPreferencesStore
+import com.splitcruiser.app.data.joinTripOfferDirectResult
+import com.splitcruiser.app.data.logInWithEmailResult
+import com.splitcruiser.app.data.postRideRequestResult
+import com.splitcruiser.app.data.postTripOfferResult
+import com.splitcruiser.app.data.redeemInviteCodeResult
+import com.splitcruiser.app.data.sendMessageResult
+import com.splitcruiser.app.data.signUpWithEmailResult
+import com.splitcruiser.app.data.submitRatingResult
+import com.splitcruiser.app.data.updateRideRequestStatusResult
+import com.splitcruiser.app.data.updateTripOfferStatusResult
+import com.splitcruiser.app.data.updateUserProfileDetailsResult
+import com.splitcruiser.app.data.uploadProfilePictureResult
+import com.splitcruiser.app.data.validateAndCreateMatchResult
+import com.splitcruiser.app.data.verifyCollegeEmailResult
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
-    val repository = SawaariRepository(application.applicationContext)
+    /**
+     * The backend now lives in `:shared`, so iOS runs this same code. The `*Result` extensions
+     * imported above are Android-only wrappers: the shared API throws, because `kotlin.Result`
+     * cannot be exported to Swift.
+     */
+    val repository = SplitCruiserRepository(
+        FirebaseConfig.fromBuild(),
+        SharedPreferencesStore(application.applicationContext),
+    )
 
-    // --- State Streams mapped from SawaariRepository ---
+    // --- State streams mapped from the repository ---
     val currentUser: StateFlow<User?> = repository.currentUser
     val activeOffers: StateFlow<List<TripOffer>> = repository.activeOffers
     val activeRequests: StateFlow<List<RideRequest>> = repository.activeRequests
@@ -43,6 +69,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val joinedRides: StateFlow<List<TripOffer>> = _joinedRides.asStateFlow()
 
     init {
+        // Restores a stored session and starts the polling refreshers.
+        repository.start()
+
         viewModelScope.launch {
             currentUser.collect { user ->
                 if (user != null) {
@@ -53,6 +82,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+    }
+
+    override fun onCleared() {
+        repository.stop()
+        super.onCleared()
     }
 
     fun refreshMyTrips() {
@@ -77,7 +111,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // --- UI Local View State ---
+    // --- UI local view state ---
     var currentMode by mutableStateOf("Rider") // "Rider" or "Host"
         private set
 
@@ -101,23 +135,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _uiError.value = message
     }
 
-    // --- Auth Flows ---
+    // --- Auth ---
     fun loginWithEmail(email: String, password: String, onFinished: (isNewUser: Boolean) -> Unit) {
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                repository.logInWithEmail(
-                    email = email,
-                    password = password,
-                    onSuccess = { isNewUser ->
-                        onFinished(isNewUser)
-                    },
-                    onFailure = { errorMsg ->
-                        _uiError.value = errorMsg
-                    }
+                val result = repository.logInWithEmailResult(email, password)
+                result.fold(
+                    onSuccess = { isNewUser -> onFinished(isNewUser) },
+                    onFailure = { _uiError.value = it.message ?: "Failed to log in." },
                 )
-            } catch (e: Exception) {
-                _uiError.value = e.message ?: "Failed to log in."
             } finally {
                 _isLoading.value = false
             }
@@ -128,18 +155,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                repository.signUpWithEmail(
-                    email = email,
-                    password = password,
-                    onSuccess = { isNewUser ->
-                        onFinished(isNewUser)
-                    },
-                    onFailure = { errorMsg ->
-                        _uiError.value = errorMsg
-                    }
+                val result = repository.signUpWithEmailResult(email, password)
+                result.fold(
+                    onSuccess = { isNewUser -> onFinished(isNewUser) },
+                    onFailure = { _uiError.value = it.message ?: "Failed to sign up." },
                 )
-            } catch (e: Exception) {
-                _uiError.value = e.message ?: "Failed to sign up."
             } finally {
                 _isLoading.value = false
             }
@@ -147,21 +167,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun redeemInviteCode(code: String, onSuccess: () -> Unit) {
-        viewModelScope.launch {
-            _isLoading.value = true
-            try {
-                val result = repository.redeemInviteCode(code)
-                if (result.isSuccess) {
-                    onSuccess()
-                } else {
-                    _uiError.value = result.exceptionOrNull()?.message ?: "Invalid invite code."
-                }
-            } catch (e: Exception) {
-                _uiError.value = e.message ?: "Failed to redeem code."
-            } finally {
-                _isLoading.value = false
-            }
-        }
+        runGuarded(
+            block = { repository.redeemInviteCodeResult(code) },
+            fallbackMessage = "Invalid invite code.",
+            onSuccess = { onSuccess() },
+        )
     }
 
     fun completeProfile(
@@ -172,36 +182,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         vehicle: Vehicle?,
         onSuccess: () -> Unit
     ) {
-        viewModelScope.launch {
-            _isLoading.value = true
-            try {
-                val result = repository.createUserProfile(name, lastInitial, communityId, homeArea, vehicle)
-                if (result.isSuccess) {
-                    onSuccess()
-                } else {
-                    _uiError.value = result.exceptionOrNull()?.message ?: "Failed to setup profile."
-                }
-            } catch (e: Exception) {
-                _uiError.value = e.message ?: "An unexpected error occurred."
-            } finally {
-                _isLoading.value = false
-            }
-        }
+        runGuarded(
+            block = { repository.createUserProfileResult(name, lastInitial, communityId, homeArea, vehicle) },
+            fallbackMessage = "Failed to setup profile.",
+            onSuccess = { onSuccess() },
+        )
     }
 
     fun verifyCollegeEmail(email: String, onSuccess: () -> Unit, onFailure: (String) -> Unit) {
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                val result = repository.verifyCollegeEmail(email)
-                if (result.isSuccess) {
-                    onSuccess()
-                } else {
-                    val errMsg = result.exceptionOrNull()?.message ?: "Verification failed."
-                    onFailure(errMsg)
-                }
-            } catch (e: Exception) {
-                onFailure(e.message ?: "An unexpected error occurred.")
+                repository.verifyCollegeEmailResult(email).fold(
+                    onSuccess = { onSuccess() },
+                    onFailure = { onFailure(it.message ?: "Verification failed.") },
+                )
             } finally {
                 _isLoading.value = false
             }
@@ -216,285 +211,208 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         verifiedEmail: String,
         onSuccess: () -> Unit
     ) {
-        viewModelScope.launch {
-            _isLoading.value = true
-            try {
-                val result = repository.updateUserProfileDetails(name, lastInitial, collegeName, avatarUrl, verifiedEmail)
-                if (result.isSuccess) {
-                    onSuccess()
-                } else {
-                    _uiError.value = result.exceptionOrNull()?.message ?: "Failed to update profile."
-                }
-            } catch (e: Exception) {
-                _uiError.value = e.message ?: "An unexpected error occurred."
-            } finally {
-                _isLoading.value = false
-            }
-        }
+        runGuarded(
+            block = {
+                repository.updateUserProfileDetailsResult(name, lastInitial, collegeName, avatarUrl, verifiedEmail)
+            },
+            fallbackMessage = "Failed to update profile.",
+            onSuccess = { onSuccess() },
+        )
     }
 
-    // --- Core Ride matching and creation ---
+    // --- Core ride matching and creation ---
 
     fun postOffer(offer: TripOffer, onSuccess: () -> Unit) {
-        viewModelScope.launch {
-            _isLoading.value = true
-            try {
-                val result = repository.postTripOffer(offer)
-                if (result.isSuccess) {
-                    refreshMyTrips()
-                    onSuccess()
-                } else {
-                    _uiError.value = result.exceptionOrNull()?.message ?: "Failed to post offer."
-                }
-            } catch (e: Exception) {
-                _uiError.value = e.message ?: "Error posting offer."
-            } finally {
-                _isLoading.value = false
-            }
-        }
+        runGuarded(
+            block = { repository.postTripOfferResult(offer) },
+            fallbackMessage = "Failed to post offer.",
+            onSuccess = {
+                refreshMyTrips()
+                onSuccess()
+            },
+        )
     }
 
     fun postRequest(request: RideRequest, onSuccess: () -> Unit) {
-        viewModelScope.launch {
-            _isLoading.value = true
-            try {
-                val result = repository.postRideRequest(request)
-                if (result.isSuccess) {
-                    onSuccess()
-                } else {
-                    _uiError.value = result.exceptionOrNull()?.message ?: "Failed to post request."
-                }
-            } catch (e: Exception) {
-                _uiError.value = e.message ?: "Error posting request."
-            } finally {
-                _isLoading.value = false
-            }
-        }
+        runGuarded(
+            block = { repository.postRideRequestResult(request) },
+            fallbackMessage = "Failed to post request.",
+            onSuccess = { onSuccess() },
+        )
     }
 
     fun cancelRideRequest(requestId: String, onSuccess: () -> Unit) {
-        viewModelScope.launch {
-            _isLoading.value = true
-            try {
-                val result = repository.updateRideRequestStatus(requestId, "cancelled")
-                if (result.isSuccess) {
-                    onSuccess()
-                } else {
-                    _uiError.value = result.exceptionOrNull()?.message ?: "Failed to cancel ride request."
-                }
-            } catch (e: Exception) {
-                _uiError.value = e.message ?: "Error cancelling ride request."
-            } finally {
-                _isLoading.value = false
-            }
-        }
+        runGuarded(
+            block = { repository.updateRideRequestStatusResult(requestId, "cancelled") },
+            fallbackMessage = "Failed to cancel ride request.",
+            onSuccess = { onSuccess() },
+        )
     }
 
     fun requestJoin(offerId: String, requestId: String, contribution: Double, onSuccess: () -> Unit) {
-        viewModelScope.launch {
-            _isLoading.value = true
-            try {
-                val result = repository.validateAndCreateMatch(offerId, requestId, contribution)
-                if (result.isSuccess) {
-                    onSuccess()
-                } else {
-                    _uiError.value = result.exceptionOrNull()?.message ?: "Failed to join ride."
-                }
-            } catch (e: Exception) {
-                _uiError.value = e.message ?: "Error joining ride."
-            } finally {
-                _isLoading.value = false
-            }
-        }
+        runGuarded(
+            block = { repository.validateAndCreateMatchResult(offerId, requestId, contribution) },
+            fallbackMessage = "Failed to join ride.",
+            onSuccess = { onSuccess() },
+        )
     }
 
     fun joinTripOfferDirect(offerId: String, onSuccess: () -> Unit) {
-        viewModelScope.launch {
-            _isLoading.value = true
-            try {
-                val result = repository.joinTripOfferDirect(offerId)
-                if (result.isSuccess) {
-                    onSuccess()
-                } else {
-                    _uiError.value = result.exceptionOrNull()?.message ?: "Failed to join Sawaari."
-                }
-            } catch (e: Exception) {
-                _uiError.value = e.message ?: "Error joining Sawaari."
-            } finally {
-                _isLoading.value = false
-            }
-        }
+        runGuarded(
+            block = { repository.joinTripOfferDirectResult(offerId) },
+            fallbackMessage = "Failed to join the ride.",
+            onSuccess = { onSuccess() },
+        )
     }
 
     fun updateTripOfferStatus(offerId: String, newStatus: String, onSuccess: () -> Unit) {
-        viewModelScope.launch {
-            _isLoading.value = true
-            try {
-                val result = repository.updateTripOfferStatus(offerId, newStatus)
-                if (result.isSuccess) {
-                    onSuccess()
-                } else {
-                    _uiError.value = result.exceptionOrNull()?.message ?: "Failed to update Sawaari status."
-                }
-            } catch (e: Exception) {
-                _uiError.value = e.message ?: "Error updating status."
-            } finally {
-                _isLoading.value = false
-            }
-        }
+        runGuarded(
+            block = { repository.updateTripOfferStatusResult(offerId, newStatus) },
+            fallbackMessage = "Failed to update the ride status.",
+            onSuccess = { onSuccess() },
+        )
     }
 
     fun acceptMatch(matchId: String) {
         viewModelScope.launch {
-            try {
-                repository.acceptMatch(matchId)
-            } catch (e: Exception) {
-                _uiError.value = e.message ?: "Failed to accept ride."
-            }
+            runCatching { repository.acceptMatch(matchId) }
+                .onFailure { _uiError.value = it.message ?: "Failed to accept ride." }
         }
     }
 
     fun declineMatch(matchId: String) {
         viewModelScope.launch {
-            try {
-                repository.declineMatch(matchId)
-            } catch (e: Exception) {
-                _uiError.value = e.message ?: "Failed to decline ride."
-            }
+            runCatching { repository.declineMatch(matchId) }
+                .onFailure { _uiError.value = it.message ?: "Failed to decline ride." }
         }
     }
 
     fun completeTrip(matchId: String) {
         viewModelScope.launch {
-            try {
-                repository.completeTrip(matchId)
-            } catch (e: Exception) {
-                _uiError.value = e.message ?: "Failed to complete trip."
-            }
+            runCatching { repository.completeTrip(matchId) }
+                .onFailure { _uiError.value = it.message ?: "Failed to complete trip." }
         }
     }
 
     // --- Messaging ---
 
     fun getChatMessages(matchId: String): Flow<List<Message>> {
+        // Tells the refresher to poll this conversation quickly while it is on screen.
+        repository.openChat(matchId)
         return repository.getChatMessages(matchId)
+    }
+
+    fun closeChat() {
+        repository.openChat(null)
     }
 
     fun sendMessage(matchId: String, text: String) {
         viewModelScope.launch {
-            try {
-                val result = repository.sendMessage(matchId, text)
-                if (result.isFailure) {
-                    _uiError.value = result.exceptionOrNull()?.message ?: "Message failed to send."
-                }
-            } catch (e: Exception) {
-                _uiError.value = e.message
-            }
+            repository.sendMessageResult(matchId, text)
+                .onFailure { _uiError.value = it.message ?: "Message failed to send." }
         }
     }
 
-    // --- Ratings, Blocks and Safety ---
+    // --- Ratings, blocks and safety ---
 
     fun submitRating(toUserId: String, rating: Float, comment: String, onSuccess: () -> Unit) {
-        viewModelScope.launch {
-            _isLoading.value = true
-            try {
-                val result = repository.submitRating(toUserId, rating, comment)
-                if (result.isSuccess) {
-                    onSuccess()
-                } else {
-                    _uiError.value = result.exceptionOrNull()?.message ?: "Failed to submit rating."
-                }
-            } catch (e: Exception) {
-                _uiError.value = e.message
-            } finally {
-                _isLoading.value = false
-            }
-        }
+        runGuarded(
+            block = { repository.submitRatingResult(toUserId, rating, comment) },
+            fallbackMessage = "Failed to submit rating.",
+            onSuccess = { onSuccess() },
+        )
     }
 
     /**
      * Uploads a profile picture picked from the gallery. Returns true on success; the repository
      * updates [currentUser] with the new avatarUrl as a side effect.
+     *
+     * Decoding and resizing stay here because they are `android.graphics`; the shared client takes
+     * bytes so iOS can hand it a UIImage's JPEG data instead.
      */
     suspend fun uploadProfilePicture(userId: String, imageUri: android.net.Uri): Boolean {
-        return try {
-            repository.uploadProfilePicture(userId, imageUri).isSuccess
-        } catch (e: Exception) {
-            _uiError.value = e.message
-            false
+        val bytes = ProfileImages.readResizedJpeg(getApplication(), imageUri)
+        if (bytes == null) {
+            _uiError.value = "Could not read that image."
+            return false
         }
+        return repository.uploadProfilePictureResult(userId, bytes)
+            .onFailure { _uiError.value = it.message }
+            .isSuccess
     }
 
     fun blockUser(blockedUserId: String, onSuccess: () -> Unit) {
-        viewModelScope.launch {
-            _isLoading.value = true
-            try {
-                val result = repository.blockUser(blockedUserId)
-                if (result.isSuccess) {
-                    onSuccess()
-                } else {
-                    _uiError.value = result.exceptionOrNull()?.message ?: "Failed to block user."
-                }
-            } catch (e: Exception) {
-                _uiError.value = e.message
-            } finally {
-                _isLoading.value = false
-            }
-        }
+        runGuarded(
+            block = { repository.blockUserResult(blockedUserId) },
+            fallbackMessage = "Failed to block user.",
+            onSuccess = { onSuccess() },
+        )
     }
 
     fun unblockUser(blockedUserId: String) {
         viewModelScope.launch {
-            try {
-                repository.unblockUser(blockedUserId)
-            } catch (e: Exception) {
-                _uiError.value = e.message
-            }
+            runCatching { repository.unblockUser(blockedUserId) }
+                .onFailure { _uiError.value = it.message }
         }
     }
 
-    fun getBlockedUsers(): List<User> {
-        return repository.getBlockedUsers()
-    }
+    fun getBlockedUsers(): List<User> = repository.getBlockedUsers()
 
-    fun getUserPublicProfile(userId: String): User? {
-        return repository.getUserPublicProfile(userId)
-    }
+    fun getUserPublicProfile(userId: String): User? = repository.getUserPublicProfile(userId)
 
-    fun getTripOfferById(offerId: String): TripOffer? {
-        return repository.getTripOfferById(offerId)
-    }
+    fun getTripOfferById(offerId: String): TripOffer? = repository.getTripOfferById(offerId)
 
-    fun getVehicleInfo(userId: String): Vehicle? {
-        return repository.getVehicleInfo(userId)
-    }
+    fun getVehicleInfo(userId: String): Vehicle? = repository.getVehicleInfo(userId)
 
     fun recordNoShow(userId: String) {
-        repository.recordNoShow(userId)
+        viewModelScope.launch {
+            runCatching { repository.recordNoShow(userId) }
+                .onFailure { _uiError.value = it.message }
+        }
     }
 
     fun toggleWomenOnlyFilter(enabled: Boolean) {
-        repository.toggleWomenOnlyFilter(enabled)
+        viewModelScope.launch { repository.toggleWomenOnlyFilter(enabled) }
     }
 
     fun toggleEmailNotifications(enabled: Boolean) {
-        repository.toggleEmailNotifications(enabled)
+        viewModelScope.launch { repository.toggleEmailNotifications(enabled) }
     }
 
     fun togglePushNotifications(enabled: Boolean) {
-        repository.togglePushNotifications(enabled)
+        viewModelScope.launch { repository.togglePushNotifications(enabled) }
     }
 
     fun clearNotifications() {
-        repository.clearNotifications()
+        viewModelScope.launch { repository.clearNotifications() }
     }
 
     fun markNotificationAsRead(id: String) {
-        repository.markNotificationAsRead(id)
+        viewModelScope.launch {
+            runCatching { repository.markNotificationAsRead(id) }
+        }
     }
 
     fun logout() {
         repository.logout()
+    }
+
+    /** The load/error/success dance every one of these actions repeated verbatim. */
+    private fun <T> runGuarded(
+        block: suspend () -> Result<T>,
+        fallbackMessage: String,
+        onSuccess: (T) -> Unit,
+    ) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            try {
+                block().fold(
+                    onSuccess = { onSuccess(it) },
+                    onFailure = { _uiError.value = it.message ?: fallbackMessage },
+                )
+            } finally {
+                _isLoading.value = false
+            }
+        }
     }
 }
