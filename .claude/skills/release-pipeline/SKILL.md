@@ -636,6 +636,49 @@ where `set -e` is suppressed by POSIX rule, so the assignment and everything aft
 command needs `||`, `if`, or an explicit `set +e`. Verify with `bash -e` locally —
 `printf 'set -uo pipefail\nfalse\necho reached\n' | bash -e` prints nothing.
 
+### 2026-07-28 — build 12 rejected: `AppIcon.appiconset` declared 18 PNGs and contained none
+**Symptom:** with the errexit bug fixed, `altool --validate-app` finally printed the real
+reason — five 409s:
+
+```
+Missing required icon file ... iPhone ... exactly '120x120'
+Missing required icon file ... iPad ... exactly '167x167'
+Missing required icon file ... iPad ... exactly '152x152'
+Missing Info.plist value ... 'CFBundleIconName' is missing in the bundle
+SDK version issue. This app was built with the iOS 17.5 SDK ...
+```
+
+**Cause (first four):** `iosApp/iosApp/Assets.xcassets/AppIcon.appiconset/Contents.json`
+listed 18 filenames and the directory held only `Contents.json`. **`actool` treats declared-
+but-absent images as a warning, not an error**, so the archive built, signed and exported
+clean and the problem surfaced only at upload — after a build number was consumed. Note that
+`CFBundleIconName` is *emitted by actool* once it compiles a real icon; it was missing as a
+consequence of the empty catalog, not as a separate Info.plist omission. Fixing the images
+fixed that error too. Do not hand-write the key.
+**Fix:** `iosApp/generate-app-icons.py` renders all 18 slots (dependency-free — no Pillow in
+CI or the container; PNG encoding is ~15 lines of zlib). Icons are RGB with no alpha, because
+Apple rejects an App Store icon that has an alpha channel.
+**Guard added:** `.github/scripts/verify-app-icons.py <appiconset>` checks every declared file
+exists, that its pixel dimensions equal size x scale, and that the 1024 marketing icon has no
+alpha. Wired into `build-ios.yml` and into `ios-release.yml` *before* the build, so it costs
+milliseconds instead of eight minutes and a build number.
+**Check for it:** an empty or partial asset catalog is invisible to every local signal —
+build, archive and export all succeed. Only `altool --validate-app` sees it.
+
+### 2026-07-28 — `macos-14` pins Xcode 15.4; App Store now requires the iOS 26 SDK
+**Symptom:** the fifth 409 on build 12 — *"This app was built with the iOS 17.5 SDK. All iOS
+and iPadOS apps must be built with the iOS 26 SDK or later, included in Xcode 26 or later."*
+**Cause:** the job ran on `macos-14`, whose newest Xcode is 15.4 (iOS 17.5 SDK). Apple raises
+this floor roughly once a year and enforces it at upload, not at build.
+**Fix:** moved both iOS workflows to `macos-15` and added a *Select the newest Xcode and
+verify the iOS SDK* step that enumerates `/Applications/Xcode*.app`, `sort -V`s them, selects
+the highest with `xcode-select`, exports `DEVELOPER_DIR`, and **fails immediately** if the
+newest `iphoneos` SDK is below `MIN_IOS_SDK_MAJOR`. Discovering the newest Xcode beats pinning
+one: the pin expires on Apple's schedule, and the failure then costs a whole release cycle.
+**Check for it:** when Apple next raises the floor, bump `MIN_IOS_SDK_MAJOR` and, if the image
+has no new-enough Xcode, the step's error names the newest version it found — move the job to
+a newer runner image. Do not diagnose this from a build log; the build never complains.
+
 ---
 
 ## 8. Pre-flight checklist before merging to `main`

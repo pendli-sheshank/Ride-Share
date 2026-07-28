@@ -20,9 +20,65 @@ permissions:
 jobs:
   release:
     name: Build, sign and upload iOS build
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+
+      # --- Toolchain ---------------------------------------------------------------------
+      # App Store Connect rejected build 12 with:
+      #   "This app was built with the iOS 17.5 SDK. All iOS and iPadOS apps must be built
+      #    with the iOS 26 SDK or later, included in Xcode 26 or later."
+      # macos-14 ships Xcode 15.4. Apple raises this floor roughly once a year, so select the
+      # newest Xcode present on the image rather than pinning a version that expires, and
+      # check the SDK here — in seconds — instead of after a full build, archive and upload.
+      - name: Select the newest Xcode and verify the iOS SDK
+        env:
+          MIN_IOS_SDK_MAJOR: '26'
+        run: |
+          set -uo pipefail
+
+          # Every command substitution below ends in `|| var=`. `set -e` is on (bash -e {0})
+          # and `pipefail` is set, so an unreadable Xcode or a grep that matches nothing
+          # would kill the step before the explicit error checks could report anything —
+          # the same trap that made the altool failure invisible for two runs.
+          echo "::group::Xcode versions on this runner"
+          for app in /Applications/Xcode*.app; do
+            v=$("$app/Contents/Developer/usr/bin/xcodebuild" -version 2>/dev/null | head -1) || v=""
+            echo "$app — ${v:-unreadable}"
+          done
+          echo "::endgroup::"
+
+          best=$(for app in /Applications/Xcode*.app; do
+            v=$("$app/Contents/Developer/usr/bin/xcodebuild" -version 2>/dev/null | head -1 | awk '{print $2}') || v=""
+            if [ -n "$v" ]; then echo "$v $app"; fi
+          done | sort -V | tail -1) || best=""
+
+          if [ -z "$best" ]; then
+            echo "::error::No usable Xcode found under /Applications."
+            exit 1
+          fi
+
+          xcode_ver=${best%% *}
+          xcode_app=${best#* }
+          sudo xcode-select -s "$xcode_app/Contents/Developer"
+          echo "Selected Xcode $xcode_ver at $xcode_app"
+
+          sdk=$(xcodebuild -showsdks 2>/dev/null | grep -o 'iphoneos[0-9.]*' | sed 's/iphoneos//' | sort -V | tail -1) || sdk=""
+          echo "Newest iOS SDK: ${sdk:-none}"
+
+          if [ -z "$sdk" ]; then
+            echo "::error::Xcode $xcode_ver exposes no iphoneos SDK."
+            exit 1
+          fi
+
+          if [ "${sdk%%.*}" -lt "$MIN_IOS_SDK_MAJOR" ]; then
+            echo "::error::iOS SDK $sdk is below the App Store minimum of ${MIN_IOS_SDK_MAJOR}.0. \
+          The newest Xcode on runner image '${{ runner.os }}/macos-15' is $xcode_ver. \
+          Move the job to a newer runner image, or install Xcode ${MIN_IOS_SDK_MAJOR} explicitly."
+            exit 1
+          fi
+
+          echo "DEVELOPER_DIR=$xcode_app/Contents/Developer" >> "$GITHUB_ENV"
 
       - uses: actions/setup-java@v4
         with:
@@ -56,6 +112,12 @@ jobs:
             exit 1
           fi
           echo "All required secrets are present."
+
+      # Same reasoning as the secret preflight: an incomplete icon set is invisible until
+      # `altool --validate-app`, which is eight minutes and one consumed build number too
+      # late. Build 12 died on exactly this.
+      - name: Verify the app icon set is complete
+        run: python3 .github/scripts/verify-app-icons.py iosApp/iosApp/Assets.xcassets/AppIcon.appiconset
 
       # --- Shared Kotlin framework ------------------------------------------------------
       # assembleSharedReleaseXCFramework, NOT linkReleaseFrameworkIosFat: the latter lipos
