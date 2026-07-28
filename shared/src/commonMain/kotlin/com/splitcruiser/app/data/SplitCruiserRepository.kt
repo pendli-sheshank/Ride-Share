@@ -282,6 +282,7 @@ class SplitCruiserRepository internal constructor(
     }
 
     /** Pull-to-refresh, and what the old `syncDataWithFirestore()` did. */
+    @Throws(Exception::class)
     suspend fun refreshNow() {
         refreshBlocks()
         refreshFeeds()
@@ -337,6 +338,7 @@ class SplitCruiserRepository internal constructor(
      * Throws rather than returning `Result`: `kotlin.Result` is an inline value class and does not
      * export usefully to Swift. Android gets its `Result` shape back through shims in androidMain.
      */
+    @Throws(Exception::class)
     suspend fun signUpWithEmail(email: String, password: String): Boolean {
         val trimmedEmail = email.trim().lowercase()
         val trimmedPassword = password.trim()
@@ -360,6 +362,7 @@ class SplitCruiserRepository internal constructor(
         return true
     }
 
+    @Throws(Exception::class)
     suspend fun logInWithEmail(email: String, password: String): Boolean {
         val trimmedEmail = email.trim().lowercase()
         val trimmedPassword = password.trim()
@@ -395,6 +398,7 @@ class SplitCruiserRepository internal constructor(
         return user.name.isEmpty()
     }
 
+    @Throws(Exception::class)
     suspend fun sendPasswordReset(email: String) {
         requireConfigured()
         auth.sendPasswordReset(email.trim().lowercase())
@@ -417,6 +421,7 @@ class SplitCruiserRepository internal constructor(
 
     // --- Profile ----------------------------------------------------------------------------
 
+    @Throws(Exception::class)
     suspend fun createUserProfile(
         name: String,
         lastInitial: String,
@@ -441,6 +446,7 @@ class SplitCruiserRepository internal constructor(
         if (vehicle != null) saveVehicle(vehicle.copy(ownerId = user.id))
     }
 
+    @Throws(Exception::class)
     suspend fun updateUserProfileDetails(
         name: String,
         lastInitial: String,
@@ -460,6 +466,7 @@ class SplitCruiserRepository internal constructor(
         adoptUser(updated)
     }
 
+    @Throws(Exception::class)
     suspend fun verifyCollegeEmail(collegeEmail: String) {
         val trimmed = collegeEmail.trim().lowercase()
         requireValid(trimmed.contains("@") && trimmed.contains(".")) {
@@ -479,6 +486,7 @@ class SplitCruiserRepository internal constructor(
         adoptUser(updated)
     }
 
+    @Throws(Exception::class)
     suspend fun redeemInviteCode(code: String) {
         val upper = code.trim().uppercase()
         val user = requireUser()
@@ -500,6 +508,7 @@ class SplitCruiserRepository internal constructor(
         adoptUser(updated)
     }
 
+    @Throws(Exception::class)
     suspend fun saveVehicle(vehicle: Vehicle) {
         val user = requireUser()
         firestore.setDocument("vehicles", user.id, vehicle.copy(ownerId = user.id), serializer<Vehicle>())
@@ -508,6 +517,7 @@ class SplitCruiserRepository internal constructor(
 
     fun getVehicleInfo(userId: String): Vehicle? = vehicles.value[userId]
 
+    @Throws(Exception::class)
     suspend fun fetchVehicleInfo(userId: String): Vehicle? {
         val found = runCatching {
             firestore.getDocument("vehicles", userId, serializer<Vehicle>())
@@ -518,6 +528,7 @@ class SplitCruiserRepository internal constructor(
 
     fun getUserPublicProfile(userId: String): User? = users.value[userId]
 
+    @Throws(Exception::class)
     suspend fun fetchUserProfile(userId: String): User {
         val user = firestore.getDocument("users", userId, serializer<User>())
             ?: throw SplitCruiserException("User not found.")
@@ -525,6 +536,7 @@ class SplitCruiserRepository internal constructor(
         return user
     }
 
+    @Throws(Exception::class)
     suspend fun uploadProfilePicture(userId: String, bytes: ByteArray): String {
         val url = storage.uploadBytes("profile_pictures/$userId.jpg", bytes, "image/jpeg")
         val user = requireUser()
@@ -536,6 +548,7 @@ class SplitCruiserRepository internal constructor(
         return url
     }
 
+    @Throws(Exception::class)
     suspend fun deleteProfilePicture(userId: String) {
         storage.delete("profile_pictures/$userId.jpg")
         val user = requireUser()
@@ -548,6 +561,7 @@ class SplitCruiserRepository internal constructor(
 
     // --- Posting rides ----------------------------------------------------------------------
 
+    @Throws(Exception::class)
     suspend fun postTripOffer(offer: TripOffer) {
         val user = requireUser()
         validateTripOfferOrThrow(offer)
@@ -571,6 +585,7 @@ class SplitCruiserRepository internal constructor(
         notifyRidersOfMatchingOffer(finalOffer)
     }
 
+    @Throws(Exception::class)
     suspend fun postRideRequest(request: RideRequest) {
         val user = requireUser()
         validateRideRequestOrThrow(request)
@@ -592,6 +607,7 @@ class SplitCruiserRepository internal constructor(
         notifyHostsOfMatchingRequest(finalRequest)
     }
 
+    @Throws(Exception::class)
     suspend fun updateTripOfferStatus(offerId: String, newStatus: String) {
         val offer = offers.value[offerId] ?: throw SplitCruiserException("Trip offer not found.")
         firestore.updateFields(
@@ -603,6 +619,7 @@ class SplitCruiserRepository internal constructor(
         recomputeFeeds()
     }
 
+    @Throws(Exception::class)
     suspend fun updateRideRequestStatus(requestId: String, newStatus: String) {
         val request = requests.value[requestId] ?: throw SplitCruiserException("Ride request not found.")
         firestore.updateFields(
@@ -616,6 +633,7 @@ class SplitCruiserRepository internal constructor(
 
     // --- Joining and matching ---------------------------------------------------------------
 
+    @Throws(Exception::class)
     suspend fun joinTripOfferDirect(offerId: String) {
         val user = requireUser()
         val offer = loadOffer(offerId)
@@ -656,6 +674,7 @@ class SplitCruiserRepository internal constructor(
     }
 
     /** Requests a seat, subject to the cost cap and seat count. Returns the new match. */
+    @Throws(Exception::class)
     suspend fun validateAndCreateMatch(
         offerId: String,
         requestId: String,
@@ -724,6 +743,7 @@ class SplitCruiserRepository internal constructor(
         return match
     }
 
+    @Throws(Exception::class)
     suspend fun createTripMatch(offerId: String, requestId: String): String {
         requireUser()
         val offer = loadOffer(offerId)
@@ -759,6 +779,7 @@ class SplitCruiserRepository internal constructor(
         return match.id
     }
 
+    @Throws(Exception::class)
     suspend fun acceptMatch(matchId: String) {
         val match = matches.value[matchId] ?: throw SplitCruiserException("Match not found.")
         val request = requests.value[match.requestId]
@@ -823,6 +844,7 @@ class SplitCruiserRepository internal constructor(
         )
     }
 
+    @Throws(Exception::class)
     suspend fun declineMatch(matchId: String) {
         val match = matches.value[matchId] ?: throw SplitCruiserException("Match not found.")
         val offer = offers.value[match.offerId]
@@ -854,6 +876,7 @@ class SplitCruiserRepository internal constructor(
         recomputeFeeds()
     }
 
+    @Throws(Exception::class)
     suspend fun completeTrip(matchId: String) {
         val match = matches.value[matchId] ?: throw SplitCruiserException("Match not found.")
         firestore.updateFields("trip_matches", matchId, buildFields("status" to stringValue("completed")))
@@ -871,6 +894,7 @@ class SplitCruiserRepository internal constructor(
         recomputeFeeds()
     }
 
+    @Throws(Exception::class)
     suspend fun cancelMatch(matchId: String, reason: String) {
         val match = matches.value[matchId] ?: throw SplitCruiserException("Match not found.")
         firestore.updateFields("trip_matches", matchId, buildFields("status" to stringValue("cancelled")))
@@ -887,6 +911,7 @@ class SplitCruiserRepository internal constructor(
     }
 
     /** Overload without a reason — Kotlin default arguments do not reach Swift. */
+    @Throws(Exception::class)
     suspend fun cancelMatch(matchId: String) = cancelMatch(matchId, "")
 
     fun getTripMatchById(matchId: String): TripMatch? = matches.value[matchId]
@@ -895,6 +920,7 @@ class SplitCruiserRepository internal constructor(
         matches.value.values.filter { it.status == "accepted" || it.status == "pending" }
 
     /** Hosted and joined rides for the signed-in user. A named type, not a Pair, so Swift can read it. */
+    @Throws(Exception::class)
     suspend fun fetchMyTrips(): MyTrips {
         val uid = tokens.uid ?: throw SplitCruiserException("You need to be logged in.")
         val hosted = firestore.runQuery(
@@ -932,6 +958,7 @@ class SplitCruiserRepository internal constructor(
         messages.map { all -> all.values.filter { it.matchId == matchId }.sortedBy { it.timestamp } }
             .distinctUntilChanged()
 
+    @Throws(Exception::class)
     suspend fun sendMessage(matchId: String, text: String) {
         val user = requireUser()
         val match = matches.value[matchId]
@@ -981,6 +1008,7 @@ class SplitCruiserRepository internal constructor(
 
     // --- Ratings, blocks, notifications ------------------------------------------------------
 
+    @Throws(Exception::class)
     suspend fun submitRating(toUserId: String, ratingValue: Float, comment: String) {
         val user = requireUser()
         val rating = Rating(
@@ -1025,6 +1053,7 @@ class SplitCruiserRepository internal constructor(
         }
     }
 
+    @Throws(Exception::class)
     suspend fun recordNoShow(userId: String) {
         val user = users.value[userId] ?: fetchUserProfile(userId)
         firestore.updateFields(
@@ -1037,6 +1066,7 @@ class SplitCruiserRepository internal constructor(
         if (_currentUser.value?.id == userId) _currentUser.value = updated
     }
 
+    @Throws(Exception::class)
     suspend fun blockUser(blockedUserId: String) {
         val user = requireUser()
         if (user.id == blockedUserId) throw SplitCruiserException("You cannot block yourself.")
@@ -1049,6 +1079,7 @@ class SplitCruiserRepository internal constructor(
         recomputeFeeds()
     }
 
+    @Throws(Exception::class)
     suspend fun unblockUser(blockedUserId: String) {
         val user = requireUser()
         firestore.deleteDocument("users/${user.id}/blockedUsers", blockedUserId)
@@ -1070,6 +1101,7 @@ class SplitCruiserRepository internal constructor(
         recomputeFeeds()
     }
 
+    @Throws(Exception::class)
     suspend fun sendNotificationAlert(
         targetUserId: String,
         title: String,
@@ -1095,11 +1127,13 @@ class SplitCruiserRepository internal constructor(
         }
     }
 
+    @Throws(Exception::class)
     suspend fun markNotificationAsRead(id: String) {
         firestore.updateFields("notifications", id, buildFields("isRead" to booleanValue(true)))
         _notifications.value = _notifications.value.map { if (it.id == id) it.copy(isRead = true) else it }
     }
 
+    @Throws(Exception::class)
     suspend fun clearNotifications() {
         val current = _notifications.value
         _notifications.value = emptyList()
@@ -1110,12 +1144,15 @@ class SplitCruiserRepository internal constructor(
 
     // --- Settings ---------------------------------------------------------------------------
 
+    @Throws(Exception::class)
     suspend fun toggleWomenOnlyFilter(enabled: Boolean) =
         updateOwnFlag("isWomenOnlyFilterEnabled", enabled) { it.copy(isWomenOnlyFilterEnabled = enabled) }
 
+    @Throws(Exception::class)
     suspend fun toggleEmailNotifications(enabled: Boolean) =
         updateOwnFlag("emailNotificationsEnabled", enabled) { it.copy(emailNotificationsEnabled = enabled) }
 
+    @Throws(Exception::class)
     suspend fun togglePushNotifications(enabled: Boolean) =
         updateOwnFlag("pushNotificationsEnabled", enabled) { it.copy(pushNotificationsEnabled = enabled) }
 
@@ -1156,6 +1193,7 @@ class SplitCruiserRepository internal constructor(
         }
     }
 
+    @Throws(Exception::class)
     suspend fun getMatchDetails(matchId: String): MatchDetails {
         val match = matches.value[matchId]
             ?: firestore.getDocument("trip_matches", matchId, serializer<TripMatch>())
@@ -1201,6 +1239,38 @@ class SplitCruiserRepository internal constructor(
         requireValid(request.departureTime > nowMs()) { "Departure time must be in the future." }
         requireValid(request.seatsNeeded in 1..8) { "Seats needed must be between 1 and 8." }
     }
+
+    // --- Swift observation --------------------------------------------------------------------
+    //
+    // Members rather than extensions, so Swift calls `repository.observeActiveOffers { ... }`
+    // instead of a synthetic file class. Android ignores these and collects the StateFlows.
+
+    fun observeCurrentUser(onChange: (User?) -> Unit): FlowSubscription =
+        currentUser.subscribeOnMain(onChange)
+
+    fun observeActiveOffers(onChange: (List<TripOffer>) -> Unit): FlowSubscription =
+        activeOffers.subscribeOnMain(onChange)
+
+    fun observeActiveRequests(onChange: (List<RideRequest>) -> Unit): FlowSubscription =
+        activeRequests.subscribeOnMain(onChange)
+
+    fun observeMyRideRequests(onChange: (List<RideRequest>) -> Unit): FlowSubscription =
+        myRideRequests.subscribeOnMain(onChange)
+
+    fun observeUserMatches(onChange: (List<TripMatch>) -> Unit): FlowSubscription =
+        userMatches.subscribeOnMain(onChange)
+
+    fun observeCommunities(onChange: (List<Community>) -> Unit): FlowSubscription =
+        allCommunities.subscribeOnMain(onChange)
+
+    fun observeNotifications(onChange: (List<NotificationAlert>) -> Unit): FlowSubscription =
+        notifications.subscribeOnMain(onChange)
+
+    fun observeConnection(onChange: (Boolean) -> Unit): FlowSubscription =
+        isConnected.subscribeOnMain(onChange)
+
+    fun observeChat(matchId: String, onChange: (List<Message>) -> Unit): FlowSubscription =
+        getChatMessages(matchId).subscribeOnMain(onChange)
 
     // --- Internals --------------------------------------------------------------------------
 

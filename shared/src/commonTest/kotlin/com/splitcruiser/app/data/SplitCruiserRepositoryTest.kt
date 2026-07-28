@@ -162,7 +162,7 @@ class SplitCruiserRepositoryTest {
     fun postingARideFillsInIdentityGeohashAndSeats() = runTest {
         val repo = signedIn(repository(scriptedBackend()))
         repo.postTripOffer(
-            newTripOffer(
+            RideFactory.newTripOffer(
                 origin = "Snell Library",
                 destination = "Logan Airport",
                 originLat = 42.3383,
@@ -189,7 +189,7 @@ class SplitCruiserRepositoryTest {
         val repo = signedIn(repository(scriptedBackend()))
         val failure = assertFailsWith<SplitCruiserException> {
             repo.postTripOffer(
-                newTripOffer(
+                RideFactory.newTripOffer(
                     "A", "B", 1.0, 1.0, 2.0, 2.0,
                     departureTime = now - 1, totalSeats = 2, costPerRider = 5.0,
                     womenOnly = false, vehicleInfo = "",
@@ -204,7 +204,7 @@ class SplitCruiserRepositoryTest {
         val repo = signedIn(repository(scriptedBackend()))
         assertFailsWith<SplitCruiserException> {
             repo.postTripOffer(
-                newTripOffer(
+                RideFactory.newTripOffer(
                     "A", "B", 0.0, 0.0, 0.0, 0.0,
                     departureTime = future, totalSeats = 2, costPerRider = 5.0,
                     womenOnly = false, vehicleInfo = "",
@@ -218,7 +218,7 @@ class SplitCruiserRepositoryTest {
         val repo = repository(scriptedBackend())
         val failure = assertFailsWith<SplitCruiserException> {
             repo.postRideRequest(
-                newRideRequest("A", "B", 1.0, 1.0, 2.0, 2.0, future, 1, "", false)
+                RideFactory.newRideRequest("A", "B", 1.0, 1.0, 2.0, 2.0, future, 1, "", false)
             )
         }
         assertEquals("UNAUTHENTICATED", failure.code)
@@ -228,7 +228,7 @@ class SplitCruiserRepositoryTest {
     fun postingARideRequestFillsInTheRiderAndGeohashes() = runTest {
         val repo = signedIn(repository(scriptedBackend()))
         repo.postRideRequest(
-            newRideRequest("Back Bay", "South Station", 42.3503, -71.081, 42.3519, -71.0552, future, 2, "Two bags", false)
+            RideFactory.newRideRequest("Back Bay", "South Station", 42.3503, -71.081, 42.3519, -71.0552, future, 2, "Two bags", false)
         )
         val posted = repo.getPassengerRequests("me").single()
         assertEquals("me", posted.riderId)
@@ -405,7 +405,7 @@ class SplitCruiserRepositoryTest {
     fun matchingOffersUseTheLooseOriginComparison() = runTest {
         val repo = signedIn(repository(scriptedBackend()))
         repo.postTripOffer(
-            newTripOffer(
+            RideFactory.newTripOffer(
                 origin = "Snell Library Boston",
                 destination = "Logan Airport",
                 originLat = 42.3383, originLng = -71.0881,
@@ -415,7 +415,7 @@ class SplitCruiserRepositoryTest {
             )
         )
         val matches = repo.findMatchingOffers(
-            newRideRequest("Snell Library", "Logan Airport", 1.0, 1.0, 2.0, 2.0, future, 1, "", false)
+            RideFactory.newRideRequest("Snell Library", "Logan Airport", 1.0, 1.0, 2.0, 2.0, future, 1, "", false)
         )
         assertEquals(1, matches.size)
     }
