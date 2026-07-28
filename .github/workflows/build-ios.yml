@@ -44,7 +44,7 @@ jobs:
       # as "the project is damaged", with no file, line or ID — and only on a macOS runner,
       # minutes into a release build. This runs in milliseconds, on any platform.
       - name: Verify the Xcode project graph is intact
-        run: python3 .github/scripts/verify-xcodeproj.py iosApp/iosApp.xcodeproj/project.pbxproj
+        run: python3 .github/scripts/verify-xcodeproj.py iosApp/iosApp.xcodeproj/project.pbxproj iosApp/iosApp
 
       # The generator is deterministic, so a regenerated project must be byte-identical to the
       # committed one. If it is not, the checked-in project was hand-edited and the next
