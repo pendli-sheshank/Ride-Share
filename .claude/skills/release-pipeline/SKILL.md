@@ -191,7 +191,9 @@ cannot sign anybody in. Do them once, in the console, for the project named by
    the App ID and *not* a service-account key. If the key is restricted under GCP → APIs &
    Services → Credentials, its allowed-API list must include **Identity Toolkit API**; REST calls
    carry no app signature, so Android/iOS *app* restrictions will reject them.
-4. Firestore → **Create database**, then `firebase deploy --only firestore:rules,firestore:indexes`.
+4. Firestore → **Create database**, in **Native mode** (not Datastore), then
+   `firebase deploy --only firestore:rules,firestore:indexes`. Skip this and every Firestore call
+   returns a 404 that used to reach the login screen as "That item no longer exists" — see §7.
 5. Storage → **Get started** (profile pictures use the v0 REST API against `FIREBASE_STORAGE_BUCKET`).
 6. Nothing to seed. Signup used to be gated on an invite code that only a backend could create;
    that screen is gone, and `communities` still ships as `DEFAULT_COMMUNITIES` in `commonMain`.
@@ -936,6 +938,37 @@ Where those two values live is deliberate and worth not "tidying" later:
 `createUserProfile` keeps its five-argument overload because `ViewModel.swift` calls it and Kotlin
 default arguments do not survive into Swift. iOS therefore stores no contact details yet, which is
 the same subset story as the rest of that app.
+
+### 2026-07-28 — login failed with "That item no longer exists" once Auth was enabled
+
+The sequel to `CONFIGURATION_NOT_FOUND`. With Authentication switched on, sign-in succeeded and the
+*Firestore* call after it failed. `firestoreErrorMessage` mapped its `NOT_FOUND` to "That item no
+longer exists.", which reads as a deleted ride and sent debugging in the wrong direction entirely.
+
+**Cause:** the project had no Firestore database. A project where Firestore was never created
+answers **every** request — read, write, query — with
+
+```json
+{"error":{"code":404,"message":"The database (default) does not exist for project X","status":"NOT_FOUND"}}
+```
+
+and the client could not tell that from a missing document, because Firestore uses one status code
+for both and only the prose differs. `getDocument` swallowed the 404 as "no such document", so the
+login looked like a first-time user, went on to *write* the profile, and blew up there instead —
+one step removed from the actual cause.
+
+**Fix (console):** Firestore Database → **Create database**, Native mode (not Datastore), then
+`firebase deploy --only firestore:rules,firestore:indexes`. §4 step 4.
+
+**Fix (code):** `isMissingDatabase(raw)` distinguishes the two 404s; `getDocument` throws for the
+database one and still returns null for a real missing document; `firestoreErrorMessage` names the
+project and the console step, and does the same for `SERVICE_DISABLED`. `PERMISSION_DENIED` now
+also mentions undeployed rules, since a fresh database denies everything until they are pushed.
+
+⚠ **The order these two failures appear in is the setup order.** `CONFIGURATION_NOT_FOUND` means
+Authentication is off; once it is on, a 404 from Firestore means the database does not exist yet;
+once it does, `PERMISSION_DENIED` means the rules have not been deployed. Three separate console
+steps, each invisible to a green build.
 
 ---
 

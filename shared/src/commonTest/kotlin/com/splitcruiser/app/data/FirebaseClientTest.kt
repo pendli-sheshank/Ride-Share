@@ -218,6 +218,60 @@ class FirebaseClientTest {
         assertContains(body, "providerId=google.com")
     }
 
+    // --- Firestore project-level failures ---------------------------------------------------
+
+    /**
+     * A project whose Firestore database was never created answers every request with a 404. The
+     * read swallowed it as "no such document", so a login looked like a first-time user and then
+     * failed on the write with "That item no longer exists" — which sent the reader looking for a
+     * deleted ride.
+     */
+    @Test
+    fun aMissingDatabaseIsNotReportedAsAMissingDocument() = runTest {
+        val http = createFirebaseHttpClient(
+            engine {
+                HttpStatusCode.NotFound to """
+                {"error":{"code":404,"message":"The database (default) does not exist for project split-cruiser-test",
+                 "status":"NOT_FOUND"}}
+                """.trimIndent()
+            }
+        )
+        val failure = assertFailsWith<SplitCruiserException> {
+            FirestoreClient(http, config, tokenProvider()).getDocument("users", "me", serializer<User>())
+        }
+        assertContains(failure.message!!, "no Firestore database")
+        assertContains(failure.message!!, "split-cruiser-test")
+    }
+
+    @Test
+    fun aGenuinelyMissingDocumentIsStillJustNull() = runTest {
+        val http = createFirebaseHttpClient(
+            engine {
+                HttpStatusCode.NotFound to
+                    """{"error":{"code":404,"message":"Document not found.","status":"NOT_FOUND"}}"""
+            }
+        )
+        assertNull(
+            FirestoreClient(http, config, tokenProvider()).getDocument("users", "nobody", serializer<User>())
+        )
+    }
+
+    @Test
+    fun aDisabledFirestoreApiSaysSo() = runTest {
+        val http = createFirebaseHttpClient(
+            engine {
+                HttpStatusCode.Forbidden to """
+                {"error":{"code":403,"message":"Cloud Firestore API has not been used in project 1234 before or it is disabled.",
+                 "status":"PERMISSION_DENIED"}}
+                """.trimIndent()
+            }
+        )
+        val failure = assertFailsWith<SplitCruiserException> {
+            FirestoreClient(http, config, tokenProvider()).getDocument("users", "me", serializer<User>())
+        }
+        assertContains(failure.message!!, "Firestore API is disabled")
+    }
+
     // --- Token refresh ---------------------------------------------------------------------
 
     @Test
