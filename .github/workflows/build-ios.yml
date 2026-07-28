@@ -19,7 +19,9 @@ permissions:
 jobs:
   build:
     name: Build iOS App
-    runs-on: macos-14
+    # Kept in step with ios-release.yml so the PR gate compiles against the same SDK the
+    # release build uses. macos-14 pins Xcode 15.4 / iOS 17.5, below the App Store floor.
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
@@ -45,6 +47,12 @@ jobs:
       # minutes into a release build. This runs in milliseconds, on any platform.
       - name: Verify the Xcode project graph is intact
         run: python3 .github/scripts/verify-xcodeproj.py iosApp/iosApp.xcodeproj/project.pbxproj iosApp/iosApp
+
+      # actool only warns when an .appiconset declares images it does not have, so a catalog
+      # with zero PNGs builds, signs and exports clean and is rejected at upload instead.
+      # That cost build 12 and a burned build number. This check is milliseconds.
+      - name: Verify the app icon set is complete
+        run: python3 .github/scripts/verify-app-icons.py iosApp/iosApp/Assets.xcassets/AppIcon.appiconset
 
       # The generator is deterministic, so a regenerated project must be byte-identical to the
       # committed one. If it is not, the checked-in project was hand-edited and the next
