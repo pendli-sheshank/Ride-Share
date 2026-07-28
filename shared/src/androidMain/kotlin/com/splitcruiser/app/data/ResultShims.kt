@@ -53,6 +53,17 @@ suspend fun SplitCruiserRepository.postRideRequestResult(request: RideRequest): 
 suspend fun SplitCruiserRepository.joinTripOfferDirectResult(offerId: String): Result<Unit> =
     runCatching { joinTripOfferDirect(offerId) }
 
+suspend fun SplitCruiserRepository.requestSeatOnOfferResult(
+    offerId: String,
+    contribution: Double,
+): Result<TripMatch> = runCatching { requestSeatOnOffer(offerId, contribution) }
+
+suspend fun SplitCruiserRepository.offerSeatForRequestResult(
+    requestId: String,
+    offerId: String,
+    contribution: Double,
+): Result<TripMatch> = runCatching { offerSeatForRequest(requestId, offerId, contribution) }
+
 suspend fun SplitCruiserRepository.validateAndCreateMatchResult(
     offerId: String,
     requestId: String,

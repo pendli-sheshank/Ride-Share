@@ -1795,8 +1795,9 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                                 viewModel = viewModel,
                                 navController = navController,
                                 onJoinClick = { offer ->
-                                    val dummyRequestId = "req_joined_${System.currentTimeMillis().toString().takeLast(6)}"
-                                    viewModel.requestJoin(offer.id, dummyRequestId, offer.costPerRider) {
+                                    // The request id is the repository's to generate: this used to
+                                    // be the clock's last six digits, which repeat every 17 minutes.
+                                    viewModel.requestSeat(offer.id, offer.costPerRider) {
                                         selectedOfferForDialog = offer
                                         showSuccessDialog = true
                                     }
@@ -5649,8 +5650,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                         Button(
                                             onClick = {
                                                 val contributionDouble = customContribution.toDoubleOrNull() ?: offer.costPerRider
-                                                val dummyRequestId = "req_joined_${System.currentTimeMillis().toString().takeLast(6)}"
-                                                viewModel.requestJoin(offer.id, dummyRequestId, contributionDouble) {
+                                                viewModel.requestSeat(offer.id, contributionDouble) {
                                                     showSuccessDialog = true
                                                 }
                                             },
@@ -5904,12 +5904,72 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                         }
                     }
                 } else {
+                    // A seat can only be offered on a ride that exists. This used to pass an id
+                    // made up from the clock, so the button failed with "Trip offer not found"
+                    // every time it was pressed.
+                    val hostedRides by viewModel.hostedRides.collectAsState()
+                    val offerable = hostedRides.filter {
+                        it.status == "active" &&
+                            it.departureTime > System.currentTimeMillis() &&
+                            it.seatsLeft >= request.seatsNeeded
+                    }
+                    var showOfferPicker by remember { mutableStateOf(false) }
+
+                    if (showOfferPicker) {
+                        AlertDialog(
+                            onDismissRequest = { showOfferPicker = false },
+                            containerColor = SplitCruiserCardBg,
+                            title = {
+                                Text(
+                                    "Which ride are you offering?",
+                                    color = SplitCruiserTextPrimary,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            },
+                            text = {
+                                Column {
+                                    offerable.forEach { hostedOffer ->
+                                        TextButton(
+                                            onClick = {
+                                                showOfferPicker = false
+                                                viewModel.offerSeat(
+                                                    request.id,
+                                                    hostedOffer.id,
+                                                    hostedOffer.costPerRider * request.seatsNeeded,
+                                                ) {}
+                                            },
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Text(
+                                                "${hostedOffer.origin} → ${hostedOffer.destination} " +
+                                                    "(${hostedOffer.seatsLeft} seats left)",
+                                                color = SplitCruiserTextPrimary
+                                            )
+                                        }
+                                    }
+                                }
+                            },
+                            confirmButton = {
+                                TextButton(onClick = { showOfferPicker = false }) {
+                                    Text("Cancel", color = SplitCruiserSaffron)
+                                }
+                            }
+                        )
+                    }
+
                     Button(
                         onClick = {
-                            // Propose a quick direct match
-                            val dummyOfferId = "offer_quick_${System.currentTimeMillis().toString().takeLast(6)}"
-                            viewModel.requestJoin(dummyOfferId, request.id, 15.0) {
-                                // Match request submitted
+                            when (offerable.size) {
+                                0 -> viewModel.setError(
+                                    "You have no upcoming ride with ${request.seatsNeeded} free " +
+                                        "seat(s). Post a ride first, then offer it here."
+                                )
+                                1 -> viewModel.offerSeat(
+                                    request.id,
+                                    offerable.first().id,
+                                    offerable.first().costPerRider * request.seatsNeeded,
+                                ) {}
+                                else -> showOfferPicker = true
                             }
                         },
                         modifier = Modifier

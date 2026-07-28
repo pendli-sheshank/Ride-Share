@@ -389,7 +389,7 @@ class SplitCruiserRepositoryTest {
         }
         signedIn(repo)
         val failure = assertFailsWith<SplitCruiserException> {
-            repo.validateAndCreateMatch("offer_1", "request_1", contribution = 25.0)
+            repo.requestSeatOnOffer("offer_1", contribution = 25.0)
         }
         assertContains(failure.message!!, "cost cap")
     }
@@ -414,11 +414,92 @@ class SplitCruiserRepositoryTest {
             }
         }
         signedIn(repo)
-        val match = repo.validateAndCreateMatch("offer_1", "request_1", contribution = 10.0)
+        val match = repo.requestSeatOnOffer("offer_1", contribution = 10.0)
 
         // Rules cannot follow a reference cheaply, so participation must be on the document.
         assertEquals(listOf("bo", "me"), match.participants)
         assertEquals("pending", match.status)
+    }
+
+    /**
+     * The screens used to invent this id from the clock and let the repository create a ride
+     * request document under it, which put demand nobody had expressed into the host feed.
+     */
+    @Test
+    fun aMatchAgainstAMissingRequestIsRefusedRatherThanInvented() = runTest {
+        documents["trip_offers/offer_1"] = """
+            {"fields":{"id":{"stringValue":"offer_1"},"hostId":{"stringValue":"bo"},
+             "seatsLeft":{"integerValue":"3"},"costPerRider":{"doubleValue":10.0},
+             "status":{"stringValue":"active"}}}
+        """.trimIndent()
+        val repo = signedIn(repository(scriptedBackend()))
+
+        val failure = assertFailsWith<SplitCruiserException> {
+            repo.validateAndCreateMatch("offer_1", "req_joined_123456", contribution = 10.0)
+        }
+        assertContains(failure.message!!, "no longer exists")
+        assertTrue(
+            requests.none { it.url.toString().contains("/ride_requests/req_joined_123456") && it.method.value == "PATCH" },
+            "a request document must not be conjured out of a made-up id",
+        )
+    }
+
+    @Test
+    fun theRequestBackingASeatRequestIsNotAdvertisedToHosts() = runTest {
+        documents["trip_offers/offer_1"] = """
+            {"fields":{"id":{"stringValue":"offer_1"},"hostId":{"stringValue":"bo"},
+             "seatsLeft":{"integerValue":"3"},"costPerRider":{"doubleValue":10.0},
+             "status":{"stringValue":"active"}}}
+        """.trimIndent()
+        val repo = signedIn(repository(scriptedBackend()))
+
+        repo.requestSeatOnOffer("offer_1", contribution = 10.0)
+
+        val created = repo.myRideRequests.value.single()
+        // "active" would put it in every host's feed as a rider still looking for a ride.
+        assertEquals("pending", created.status)
+        assertEquals("me", created.riderId)
+
+        // And a second tap must not open a second match on the same ride.
+        val failure = assertFailsWith<SplitCruiserException> {
+            repo.requestSeatOnOffer("offer_1", contribution = 10.0)
+        }
+        assertContains(failure.message!!, "already have a request")
+    }
+
+    @Test
+    fun aHostOfferingASeatAcceptsTheRiderOutright() = runTest {
+        documents["trip_offers/offer_mine"] = """
+            {"fields":{"id":{"stringValue":"offer_mine"},"hostId":{"stringValue":"me"},
+             "seatsLeft":{"integerValue":"3"},"totalSeats":{"integerValue":"3"},
+             "costPerRider":{"doubleValue":10.0},"status":{"stringValue":"active"}}}
+        """.trimIndent()
+        documents["ride_requests/req_1"] = """
+            {"fields":{"id":{"stringValue":"req_1"},"riderId":{"stringValue":"zo"},
+             "riderName":{"stringValue":"Zo"},"seatsNeeded":{"integerValue":"1"},
+             "status":{"stringValue":"active"}}}
+        """.trimIndent()
+        val repo = signedIn(repository(scriptedBackend()))
+
+        val match = repo.offerSeatForRequest("req_1", "offer_mine", contribution = 10.0)
+
+        assertEquals("accepted", match.status)
+        assertEquals(2, repo.getTripOfferById("offer_mine")?.seatsLeft)
+    }
+
+    @Test
+    fun aSeatCannotBeOfferedOnSomeoneElsesRide() = runTest {
+        documents["trip_offers/offer_1"] = """
+            {"fields":{"id":{"stringValue":"offer_1"},"hostId":{"stringValue":"bo"},
+             "seatsLeft":{"integerValue":"3"},"costPerRider":{"doubleValue":10.0},
+             "status":{"stringValue":"active"}}}
+        """.trimIndent()
+        val repo = signedIn(repository(scriptedBackend()))
+
+        val failure = assertFailsWith<SplitCruiserException> {
+            repo.offerSeatForRequest("req_1", "offer_1", contribution = 10.0)
+        }
+        assertContains(failure.message!!, "you are hosting")
     }
 
     // --- Cost split ------------------------------------------------------------------------

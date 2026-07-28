@@ -708,34 +708,119 @@ class SplitCruiserRepository internal constructor(
         )
     }
 
-    /** Requests a seat, subject to the cost cap and seat count. Returns the new match. */
+    /**
+     * A rider asking a specific host for a seat, subject to the cost cap and seat count.
+     *
+     * This exists because the screens used to invent a request id — `"req_joined_" + the last six
+     * digits of the clock` — and hand it to [validateAndCreateMatch], which then created a ride
+     * request document under that id. Two consequences, both real: those fabricated requests showed
+     * up in the host feed as demand nobody had expressed, and the six-digit id repeats every ~17
+     * minutes, so a second rider could land on the first rider's document and be denied by the
+     * rules for writing a request that was not theirs.
+     *
+     * The backing request is created here instead, with a generated id and the offer's own route,
+     * and is reused if the rider already has an open one for the same trip.
+     */
+    @Throws(Exception::class)
+    suspend fun requestSeatOnOffer(offerId: String, contribution: Double): TripMatch {
+        val user = requireUser()
+        val offer = loadOffer(offerId)
+
+        if (offer.hostId == user.id) {
+            throw SplitCruiserException("You cannot request a seat on your own ride.")
+        }
+        if (offer.status != "active") {
+            throw SplitCruiserException("This ride is no longer taking riders.")
+        }
+        val pending = matches.value.values.find {
+            it.offerId == offerId && it.riderId == user.id && it.status != "declined"
+        }
+        if (pending != null) {
+            throw SplitCruiserException("You already have a request on this ride.")
+        }
+
+        // "pending", not "active": this request exists to back a match, and an active one would be
+        // advertised to every host as a rider looking for a ride they have already found.
+        val request = requests.value.values.find {
+            it.riderId == user.id && it.status == "pending" &&
+                it.departureTime == offer.departureTime &&
+                it.origin == offer.origin && it.destination == offer.destination
+        } ?: RideRequest(
+            id = newId("request"),
+            riderId = user.id,
+            riderName = user.displayName,
+            riderRating = user.ratingAvg,
+            origin = offer.origin,
+            destination = offer.destination,
+            originLat = offer.originLat,
+            originLng = offer.originLng,
+            destLat = offer.destLat,
+            destLng = offer.destLng,
+            originGeohash = offer.originGeohash,
+            destGeohash = offer.destGeohash,
+            seatsNeeded = 1,
+            departureTime = offer.departureTime,
+            status = "pending",
+        ).also {
+            firestore.setDocument("ride_requests", it.id, it, serializer<RideRequest>())
+            requests.value = requests.value + (it.id to it)
+        }
+
+        return createMatch(offer, request, contribution)
+    }
+
+    /**
+     * The host side of the same handshake: agreeing to carry a rider who posted a request.
+     *
+     * [offerId] must be one of the caller's own rides. The screen used to invent this id too —
+     * `"offer_quick_" + the clock` — which named no document at all, so the button failed with
+     * "Trip offer not found" every single time it was pressed.
+     *
+     * Creating the match *is* the host accepting it, so the seat bookkeeping runs immediately
+     * rather than leaving a pending match only the host could approve.
+     */
+    @Throws(Exception::class)
+    suspend fun offerSeatForRequest(requestId: String, offerId: String, contribution: Double): TripMatch {
+        val host = requireUser()
+        val offer = loadOffer(offerId)
+
+        if (offer.hostId != host.id) {
+            throw SplitCruiserException("You can only offer a seat on a ride you are hosting.")
+        }
+        if (offer.status != "active") {
+            throw SplitCruiserException("That ride of yours is no longer active.")
+        }
+        val request = loadRequest(requestId)
+        if (request.riderId == host.id) {
+            throw SplitCruiserException("That is your own ride request.")
+        }
+        if (request.status != "active" && request.status != "pending") {
+            throw SplitCruiserException("That rider is no longer looking for a seat.")
+        }
+
+        val match = createMatch(offer, request, contribution, notifyHost = false)
+        acceptMatch(match.id)
+        return matches.value[match.id] ?: match
+    }
+
+    /** Requests a seat against an existing ride request. Returns the new match. */
     @Throws(Exception::class)
     suspend fun validateAndCreateMatch(
         offerId: String,
         requestId: String,
         contribution: Double,
     ): TripMatch {
-        val user = requireUser()
-        val offer = loadOffer(offerId)
+        requireUser()
+        return createMatch(loadOffer(offerId), loadRequest(requestId), contribution)
+    }
 
-        val request = requests.value[requestId]
-            ?: runCatching { firestore.getDocument("ride_requests", requestId, serializer<RideRequest>()) }
-                .getOrNull()
-            ?: RideRequest(
-                id = requestId,
-                riderId = user.id,
-                riderName = user.displayName,
-                riderRating = user.ratingAvg,
-                origin = offer.origin,
-                destination = offer.destination,
-                seatsNeeded = 1,
-                departureTime = offer.departureTime,
-                status = "active",
-            ).also {
-                firestore.setDocument("ride_requests", requestId, it, serializer<RideRequest>())
-                requests.value = requests.value + (requestId to it)
-            }
-
+    /** The checks and the write shared by every way of pairing an offer with a request. */
+    private suspend fun createMatch(
+        offer: TripOffer,
+        request: RideRequest,
+        contribution: Double,
+        notifyHost: Boolean = true,
+    ): TripMatch {
         val costLimit = offer.costPerRider * 2.0
         if (contribution > costLimit) {
             throw SplitCruiserException(
@@ -748,14 +833,14 @@ class SplitCruiserRepository internal constructor(
             )
         }
         val duplicate = matches.value.values.find {
-            it.offerId == offerId && it.requestId == requestId && it.status != "declined"
+            it.offerId == offer.id && it.requestId == request.id && it.status != "declined"
         }
         if (duplicate != null) throw SplitCruiserException("Match already exists or is pending!")
 
         val match = TripMatch(
             id = newId("match"),
-            offerId = offerId,
-            requestId = requestId,
+            offerId = offer.id,
+            requestId = request.id,
             hostId = offer.hostId,
             riderId = request.riderId,
             riderName = request.riderName,
@@ -769,12 +854,15 @@ class SplitCruiserRepository internal constructor(
         matches.value = matches.value + (match.id to match)
         recomputeFeeds()
 
-        sendNotificationAlert(
-            targetUserId = offer.hostId,
-            title = "New Ride Request Received! 🚗",
-            message = "${request.riderName} requested a seat on your ride from ${offer.origin} to ${offer.destination}.",
-            type = "match",
-        )
+        if (notifyHost) {
+            sendNotificationAlert(
+                targetUserId = offer.hostId,
+                title = "New Ride Request Received! 🚗",
+                message = "${request.riderName} requested a seat on your ride from ${offer.origin} " +
+                    "to ${offer.destination}.",
+                type = "match",
+            )
+        }
         return match
     }
 
@@ -1313,6 +1401,12 @@ class SplitCruiserRepository internal constructor(
         offers.value[offerId]
             ?: firestore.getDocument("trip_offers", offerId, serializer<TripOffer>())
             ?: throw SplitCruiserException("Trip offer not found.")
+
+    private suspend fun loadRequest(requestId: String): RideRequest =
+        requests.value[requestId]
+            ?: runCatching { firestore.getDocument("ride_requests", requestId, serializer<RideRequest>()) }
+                .getOrNull()
+            ?: throw SplitCruiserException("That ride request no longer exists.")
 
     private fun adoptUser(user: User) {
         users.value = users.value + (user.id to user)

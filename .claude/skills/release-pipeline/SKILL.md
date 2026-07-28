@@ -193,7 +193,19 @@ cannot sign anybody in. Do them once, in the console, for the project named by
    carry no app signature, so Android/iOS *app* restrictions will reject them.
 4. Firestore → **Create database**, then `firebase deploy --only firestore:rules,firestore:indexes`.
 5. Storage → **Get started** (profile pictures use the v0 REST API against `FIREBASE_STORAGE_BUCKET`).
-6. Seed the `invites` collection by hand — the rules forbid the client creating them (§7).
+6. Seed the `invites` collection by hand — the rules forbid the client creating them (§7). The
+   **document id is the code itself, uppercased**, because that is what `redeemInviteCode` looks
+   up. Four fields, and `used` must exist and be `false` or the redemption rule cannot match:
+
+   | Field | Type | Value |
+   |---|---|---|
+   | `code` | string | same as the document id, e.g. `SPLITCRUISER` |
+   | `used` | boolean | `false` |
+   | `invitedBy` | string | `""` (or a seeding user's uid) |
+   | `usedBy` | string | `""` |
+
+   The invite screen suggests `SPLITCRUISER`, so seed at least that one or the very first signup
+   dead-ends on a screen whose only other button is "Cancel & Log Out".
 
 Verify without building anything; a real project answers `EMAIL_EXISTS` or `EMAIL_NOT_FOUND`
 rather than a project-level code:
@@ -884,6 +896,33 @@ Three things that only fail on a device, never in CI:
 already, but nothing acquires the token: that needs `ASWebAuthenticationSession` plus a reversed-
 client-id URL scheme in `Info.plist` and `generate-project.py`, none of which can be compile-checked
 on Linux. iOS shows email/password only until then.
+
+### 2026-07-28 — the screens invented Firestore document ids from the clock
+
+Three buttons built ids like `"req_joined_" + System.currentTimeMillis().toString().takeLast(6)`
+and handed them to the repository as if they named real documents. What that produced:
+
+- **Joining a ride** (feed and detail screens): `validateAndCreateMatch` did not find the request,
+  so it *created* one under the made-up id. Those documents were `status: "active"`, so every host
+  saw demand no rider had expressed. Worse, six digits of millis repeat every ~17 minutes, so a
+  second rider could land on the first rider's document; the rules correctly refused to let them
+  rewrite a request that was not theirs, and the join failed with a permission error.
+- **"Accept & Offer Ride Share"** (host viewing a rider's request): the fabricated *offer* id named
+  nothing at all, so `loadOffer` threw and the button failed 100% of the time it was pressed.
+
+**Fix:** ids are the repository's to mint. `requestSeatOnOffer(offerId, contribution)` creates the
+backing request itself with `newId("request")` and the offer's own route, and reuses an open one
+rather than piling up documents; `offerSeatForRequest(requestId, offerId, contribution)` takes a
+real offer of the caller's own and accepts the rider outright. `validateAndCreateMatch` now refuses
+a request id it cannot find instead of conjuring one.
+
+Two details worth keeping:
+
+- The backing request is written with `status: "pending"`, not `"active"`. The feed query and
+  `FeedProjector` both key on `"active"`, so a pending one stays out of the browse feeds while
+  still being a real, rider-owned document that `acceptMatch` can flip to `"matched"`.
+- The host-side button now needs an actual ride to offer, so the screen picks one: none → an error
+  naming the fix, one → use it, several → a chooser. There is no correct id to invent.
 
 ---
 

@@ -26,9 +26,11 @@ import com.splitcruiser.app.data.fetchMyTripsFromFirestore
 import com.splitcruiser.app.data.firebase.SharedPreferencesStore
 import com.splitcruiser.app.data.joinTripOfferDirectResult
 import com.splitcruiser.app.data.logInWithEmailResult
+import com.splitcruiser.app.data.offerSeatForRequestResult
 import com.splitcruiser.app.data.postRideRequestResult
 import com.splitcruiser.app.data.postTripOfferResult
 import com.splitcruiser.app.data.redeemInviteCodeResult
+import com.splitcruiser.app.data.requestSeatOnOfferResult
 import com.splitcruiser.app.data.sendMessageResult
 import com.splitcruiser.app.data.signInWithGoogleResult
 import com.splitcruiser.app.data.signUpWithEmailResult
@@ -275,6 +277,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             block = { repository.updateRideRequestStatusResult(requestId, "cancelled") },
             fallbackMessage = "Failed to cancel ride request.",
             onSuccess = { onSuccess() },
+        )
+    }
+
+    /**
+     * A rider asking for a seat. The backing ride request is created by the repository, which is
+     * the point: the screens used to invent an id from the clock, and two riders joining in the
+     * same 17-minute window could collide on it.
+     */
+    fun requestSeat(offerId: String, contribution: Double, onSuccess: () -> Unit) {
+        runGuarded(
+            block = { repository.requestSeatOnOfferResult(offerId, contribution) },
+            fallbackMessage = "Failed to request a seat.",
+            onSuccess = { onSuccess() },
+        )
+    }
+
+    /** The host offering one of their own rides to a rider who posted a request. */
+    fun offerSeat(requestId: String, offerId: String, contribution: Double, onSuccess: () -> Unit) {
+        runGuarded(
+            block = { repository.offerSeatForRequestResult(requestId, offerId, contribution) },
+            fallbackMessage = "Failed to offer the ride.",
+            onSuccess = {
+                refreshMyTrips()
+                onSuccess()
+            },
         )
     }
 
