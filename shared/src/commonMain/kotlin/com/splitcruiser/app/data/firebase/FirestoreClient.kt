@@ -134,6 +134,32 @@ internal class FirestoreClient(
     }
 
     /**
+     * Lists a collection's documents.
+     *
+     * Subcollections cannot be reached with `runQuery` from the database root — a structured query
+     * names one collection id relative to a parent — so listing is how `users/{uid}/blockedUsers`
+     * gets read.
+     */
+    suspend fun <T> listDocuments(
+        path: String,
+        deserializer: DeserializationStrategy<T>,
+        pageSize: Int,
+    ): List<T> {
+        val response = authorized { token ->
+            http.get("${config.firestoreBase}/${path.encodePath()}?pageSize=$pageSize") { bearer(token) }
+        }
+        if (response.status == HttpStatusCode.NotFound) return emptyList()
+        response.requireSuccess("Listing $path")
+        val body: JsonObject = response.body()
+        val documents = body["documents"]?.jsonArray ?: return emptyList()
+        return documents.mapNotNull { entry ->
+            runCatching {
+                FirestoreCodec.decode(deserializer, entry.jsonObject.fieldsOrEmpty())
+            }.getOrNull()
+        }
+    }
+
+    /**
      * Applies several writes atomically.
      *
      * The old repository issued three or four independent `set()` calls for a single logical action,
@@ -244,6 +270,15 @@ internal fun integerValue(value: Long): JsonElement =
 
 internal fun booleanValue(value: Boolean): JsonElement =
     buildJsonObject { put("booleanValue", value) }
+
+internal fun doubleValue(value: Double): JsonElement =
+    buildJsonObject { put("doubleValue", value) }
+
+internal fun arrayOfStrings(values: List<String>): JsonElement = buildJsonObject {
+    putJsonObject("arrayValue") {
+        putJsonArray("values") { values.forEach { add(buildJsonObject { put("stringValue", it) }) } }
+    }
+}
 
 // --- Batched writes ------------------------------------------------------------------------
 
