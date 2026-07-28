@@ -595,6 +595,25 @@ silently or with an unhelpful exit code rather than a readable error.
 reused once App Store Connect has seen it, so one extra call to reject a bad binary is cheaper
 than burning the number.
 
+### 2026-07-28 — `altool` failed in 1s with no output; cause was a malformed `.p8` secret
+**Symptom:** `Upload to App Store Connect` failed in about a second, printing nothing. The
+archive, export and artifact upload had all succeeded — a valid 839 KB signed IPA existed.
+**Cause:** `APPSTORE_CONNECT_PRIVATE_KEY` did not contain a PEM `.p8`. `altool` exits without
+any usable message when the key it is handed cannot be parsed, so the failure was invisible
+from the workflow's own output. The usual way to get this wrong is to paste the key as a
+single line, or with literal `\n` escapes instead of real newlines, or to paste only the
+base64 body without the `-----BEGIN PRIVATE KEY-----` / `-----END PRIVATE KEY-----` lines.
+**Fix (workflow):** the step now preflights before calling `altool` and prints, without ever
+echoing key material: whether the key file exists, its byte count, whether its first 27 bytes
+are `-----BEGIN PRIVATE KEY-----`, and the *lengths* of the Key ID (must be 10) and Issuer ID
+(must be 36, a UUID). A bad header emits `::warning::` naming the secret. `altool` output is
+tee'd to a log and its last 40 lines are appended to `$GITHUB_STEP_SUMMARY` on failure.
+**Fix (secret):** re-paste the whole `AuthKey_<KEYID>.p8` file, BEGIN/END lines included, with
+real newlines. GitHub's secret box accepts multi-line values as-is.
+**Check for it:** a CI step that fails in ~1s with no output is almost always failing on its
+*input*, not its work. Make the step describe its inputs before blaming the tool — two
+guessing rounds here cost more than the preflight did to write.
+
 ---
 
 ## 8. Pre-flight checklist before merging to `main`
