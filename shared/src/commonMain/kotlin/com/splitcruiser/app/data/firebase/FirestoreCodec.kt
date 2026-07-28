@@ -1,6 +1,7 @@
 package com.splitcruiser.app.data.firebase
 
-import kotlinx.serialization.KSerializer
+import kotlinx.serialization.DeserializationStrategy
+import kotlinx.serialization.SerializationStrategy
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -39,14 +40,14 @@ object FirestoreCodec {
     }
 
     /** Serialises [value] into the `fields` map of a Firestore document. */
-    fun <T> encode(serializer: KSerializer<T>, value: T): JsonObject {
+    fun <T> encode(serializer: SerializationStrategy<T>, value: T): JsonObject {
         val element = json.encodeToJsonElement(serializer, value)
         check(element is JsonObject) { "Only object-shaped models can be Firestore documents" }
         return JsonObject(element.mapValues { (_, field) -> toFirestoreValue(field) })
     }
 
     /** Reads a Firestore document's `fields` map back into [T]. A null or absent map yields defaults. */
-    fun <T> decode(serializer: KSerializer<T>, fields: JsonObject?): T {
+    fun <T> decode(serializer: DeserializationStrategy<T>, fields: JsonObject?): T {
         val plain = JsonObject(
             (fields ?: JsonObject(emptyMap())).mapValues { (_, field) -> fromFirestoreValue(field) }
         )
