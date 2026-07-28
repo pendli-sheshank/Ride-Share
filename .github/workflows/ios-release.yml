@@ -279,12 +279,16 @@ jobs:
 
           # Validate first. A build number can never be reused once App Store Connect has seen
           # it, so it is worth one extra call to reject a bad binary without burning the number.
+          # `|| validate_status=$?` is load-bearing, not style. GitHub runs this step as
+          # `bash -e {0}`, so `set -e` is on regardless of the `set` line above — a bare
+          # `cmd` followed by `status=$?` never reaches the assignment, and every diagnostic
+          # below it is dead code. One run was lost to exactly that. Keep the `||`.
+          validate_status=0
           xcrun altool --validate-app \
             --file "$ipa" \
             --type ios \
             --apiKey "$ASC_KEY_ID" \
-            --apiIssuer "$ASC_ISSUER_ID" > "$log" 2>&1
-          validate_status=$?
+            --apiIssuer "$ASC_ISSUER_ID" > "$log" 2>&1 || validate_status=$?
           echo "--- altool --validate-app (exit $validate_status) ---"
           cat "$log"
 
@@ -300,12 +304,12 @@ jobs:
             exit "$validate_status"
           fi
 
+          upload_status=0
           xcrun altool --upload-app \
             --file "$ipa" \
             --type ios \
             --apiKey "$ASC_KEY_ID" \
-            --apiIssuer "$ASC_ISSUER_ID" > "$log" 2>&1
-          upload_status=$?
+            --apiIssuer "$ASC_ISSUER_ID" > "$log" 2>&1 || upload_status=$?
           echo "--- altool --upload-app (exit $upload_status) ---"
           cat "$log"
 
