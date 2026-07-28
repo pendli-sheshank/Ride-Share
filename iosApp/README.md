@@ -6,7 +6,7 @@ iOS implementation of SawaariShare using Kotlin Multiplatform and SwiftUI.
 
 - **Shared Framework**: `../shared/` — Kotlin Multiplatform code compiled to `Shared.xcframework`
 - **iOS App**: Swift/SwiftUI frontend that calls Kotlin code via the framework
-- **Deployment Target**: iOS 14.0+
+- **Deployment Target**: iOS 16.0+
 
 ## Prerequisites
 

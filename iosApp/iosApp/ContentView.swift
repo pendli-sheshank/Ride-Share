@@ -235,6 +235,46 @@ struct HomeTabView: View {
 struct MyRidesTabView: View {
     @ObservedObject var viewModel: AppViewModel
 
+    // Split into sub-views deliberately. Swift's type checker gave up on the combined
+    // expression ("unable to type-check this expression in reasonable time") — a large
+    // ViewBuilder body is exactly where that happens, and it is much easier to keep it broken
+    // up than to discover the limit again later.
+    private var emptyState: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "rectangle.and.pencil.and.ellipsis")
+                .font(.system(size: 48))
+                .foregroundColor(.gray)
+
+            Text("No Rides Yet")
+                .font(.headline)
+
+            Text("Post a ride offer or request to get started")
+                .font(.caption)
+                .foregroundColor(.gray)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var ridesList: some View {
+        List {
+            Section("Posted Rides") {
+                ForEach(viewModel.activeOffers, id: \.id) { offer in
+                    Text(offer.origin + " → " + offer.destination)
+                }
+            }
+
+            Section("Ride Requests") {
+                ForEach(viewModel.activeRequests, id: \.id) { request in
+                    Text(request.origin + " → " + request.destination)
+                }
+            }
+        }
+    }
+
+    private var hasNoRides: Bool {
+        viewModel.activeOffers.isEmpty && viewModel.activeRequests.isEmpty
+    }
+
     var body: some View {
         NavigationView {
             VStack {
@@ -243,34 +283,10 @@ struct MyRidesTabView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding()
 
-                if viewModel.activeOffers.isEmpty && viewModel.activeRequests.isEmpty {
-                    VStack(spacing: 16) {
-                        Image(systemName: "rectangle.and.pencil.and.ellipsis")
-                            .font(.system(size: 48))
-                            .foregroundColor(.gray)
-
-                        Text("No Rides Yet")
-                            .font(.headline)
-
-                        Text("Post a ride offer or request to get started")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if hasNoRides {
+                    emptyState
                 } else {
-                    List {
-                        Section("Posted Rides") {
-                            ForEach(viewModel.activeOffers, id: \.id) { offer in
-                                Text(offer.origin + " → " + offer.destination)
-                            }
-                        }
-
-                        Section("Ride Requests") {
-                            ForEach(viewModel.activeRequests, id: \.id) { request in
-                                Text(request.origin + " → " + request.destination)
-                            }
-                        }
-                    }
+                    ridesList
                 }
             }
             .navigationTitle("My Rides")

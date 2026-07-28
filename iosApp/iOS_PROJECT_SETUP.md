@@ -118,7 +118,7 @@ This framework contains all Kotlin Multiplatform code compiled for iOS.
 
 ### Target Deployment
 
-- **Minimum Deployment Target**: iOS 14.0
+- **Minimum Deployment Target**: iOS 16.0
 - **Supported Devices**: iPhone and iPad (both orientations)
 - **Swift Version**: 5.0
 

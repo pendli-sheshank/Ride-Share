@@ -54,7 +54,7 @@ git config --global credential.helper osxkeychain
 
 **General Tab:**
 - Bundle Identifier: `com.splitcruiser.app`
-- Minimum Deployment Target: `iOS 14.0`
+- Minimum Deployment Target: `iOS 16.0`
 - Team: [Your Developer Team]
 - Signing Certificate: Select distribution certificate
 
