@@ -991,6 +991,47 @@ next to the database name in the console. If it does not say `(default)`, either
 and set `FIRESTORE_DATABASE_ID` to match, or delete the empty database and recreate it leaving the
 Database ID field untouched.
 
+### 2026-07-28 — the "splitcruiser" default from the fix above never reached the Play build
+
+Signup and login both failed on the very next Play internal testing build with a new, unrelated-
+looking error, verbatim from Google: **"Missing project ID."** Confusingly, the account really was
+being created — Firebase Authentication showed the email registered, and a second signup attempt
+correctly reported `EMAIL_EXISTS` — but every login attempt hung on this error and never reached
+the app. That split is the tell: Identity Toolkit calls do not depend on `firestoreDatabaseId` at
+all, so signup/login themselves kept working; only the Firestore read/write that follows every one
+of them (writing the profile on signup, reading it on login) was broken, on every single attempt.
+
+**Cause:** the Gradle default never survived the release workflow. `firestoreDatabaseId` was
+declared as
+
+```kotlin
+providers.environmentVariable("FIRESTORE_DATABASE_ID").orElse("splitcruiser")
+```
+
+but `release-android.yml`'s `env:` block sets `FIRESTORE_DATABASE_ID: ${{ secrets.FIRESTORE_DATABASE_ID }}`
+unconditionally. With no such secret defined, GitHub Actions does not omit the variable — it sets
+it to the **empty string**. `providers.environmentVariable(...)` sees a variable that is *present*,
+just empty, so `.orElse("splitcruiser")` never fires: Gradle never falls back, because from its
+point of view there was nothing to fall back from. Every Play build shipped with
+`FIRESTORE_DATABASE_ID = ""`, producing a Firestore URL with an empty database segment —
+`.../projects/splitcruiser/databases//documents/...` — which Google's edge routing rejects with a
+message that does not mention Firestore, a database, or an empty segment at all.
+
+This is exactly the trap the `.orElse("")` on every *other* `FIREBASE_*` var above was already
+written to avoid — the comment on `firebaseApiKey` says so explicitly. Using `.orElse("splitcruiser")`
+here ignored that comment two sections up.
+
+**Fix:** the environment provider goes back to `.orElse("")`, matching the others. The
+`"splitcruiser"` fallback is applied to the *value* instead, at the point `FirebaseBuildConfig.kt`
+is generated: `databaseId.get().ifBlank { "splitcruiser" }`. `ifBlank` catches both an absent
+variable and a present-but-empty one, which `.orElse` on the provider cannot.
+
+⚠ **Any new optional `FIREBASE_*`/config env var needs this same shape if its fallback is not the
+empty string.** `.orElse("")` on the provider, a non-empty fallback applied with `ifBlank` at the
+point the value is written — never `.orElse(nonEmptyDefault)` directly on the provider. Verified
+by generating `FirebaseBuildConfig.kt` three ways and inspecting the output: env var absent, env
+var set to `""` (the CI shape), and env var set to an explicit override.
+
 ---
 
 ## 8. Pre-flight checklist before merging to `main`
