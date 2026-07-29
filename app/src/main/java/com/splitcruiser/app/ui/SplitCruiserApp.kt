@@ -5002,10 +5002,34 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
     var showSuccessDialog by remember { mutableStateOf(false) }
 
     if (type == "offer") {
-        val offer = offers.find { it.id == id }
-            ?: viewModel.repository.activeOffers.value.find { it.id == id } // fallback safety
+        // `activeOffers` is deliberately filtered to exclude the viewer's own rides and anything
+        // past/completed — exactly the offers a host or a returning rider need to open. The cache
+        // accessor below reads the same underlying store without that filter; the network fetch is
+        // only needed for a cold cache (e.g. a deep link before the first feed poll completes).
+        var fetchedOffer by remember(id) { mutableStateOf<TripOffer?>(null) }
+        var offerFetchAttempted by remember(id) { mutableStateOf(false) }
+        val cachedOffer = offers.find { it.id == id } ?: viewModel.getTripOfferById(id)
+        val offer = cachedOffer ?: fetchedOffer
+
+        LaunchedEffect(id, cachedOffer) {
+            if (cachedOffer == null && !offerFetchAttempted) {
+                viewModel.fetchTripOffer(id) { fetched ->
+                    fetchedOffer = fetched
+                    offerFetchAttempted = true
+                }
+            }
+        }
 
         if (offer == null) {
+            if (!offerFetchAttempted) {
+                Box(
+                    modifier = Modifier.fillMaxSize().background(SplitCruiserDarkBg),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(color = SplitCruiserSaffron)
+                }
+                return
+            }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -5521,6 +5545,16 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                     textAlign = TextAlign.Center,
                                     modifier = Modifier.padding(top = 4.dp)
                                 )
+                                if (existingMatch != null) {
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Button(
+                                        onClick = { navController.navigate("chat/${existingMatch.id}") },
+                                        colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserEmerald),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("Open Chat with ${offer.hostName}", color = Color.White, fontWeight = FontWeight.Bold)
+                                    }
+                                }
                             }
                         }
                     } else {
@@ -5563,10 +5597,15 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                         onClick = {
                                             joinButtonPressed = true
                                             vibrate(context, 50)
-                                            viewModel.joinTripOfferDirect(offer.id) {
+                                            viewModel.joinTripOfferDirect(offer.id) { match ->
                                                 joinButtonPressed = false
                                                 vibrateSuccess(context)
-                                                Toast.makeText(context, "Successfully joined the ride!", Toast.LENGTH_LONG).show()
+                                                Toast.makeText(
+                                                    context,
+                                                    "Seat reserved! Opening chat with ${offer.hostName}...",
+                                                    Toast.LENGTH_LONG
+                                                ).show()
+                                                navController.navigate("chat/${match.id}")
                                             }
                                         },
                                         modifier = Modifier
@@ -5581,18 +5620,25 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Text("Join Ride (Reserve Seat)", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                                     }
-                                    
+                                    Text(
+                                        text = "Reserves your seat immediately at $${offer.costPerRider} — no host approval needed.",
+                                        color = SplitCruiserLightGray,
+                                        fontSize = 11.sp,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
+                                    )
+
                                     Spacer(modifier = Modifier.height(20.dp))
-                                    
+
                                     // Alternatively keep the original Request to Join Match system as secondary option
                                     Text(
-                                        text = "OR PROPOSE CUSTOM CONTRIBUTION:",
+                                        text = "OR PROPOSE A DIFFERENT AMOUNT (HOST MUST APPROVE):",
                                         color = SplitCruiserLightGray,
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
                                         modifier = Modifier.align(Alignment.CenterHorizontally)
                                     )
-                                    
+
                                     Spacer(modifier = Modifier.height(12.dp))
 
                                     if (existingMatch == null) {
@@ -5678,10 +5724,35 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
         }
     } else {
         // REQUEST DETAIL (Host views this to offer/accept ride)
-        val request = requests.find { it.id == id }
-            ?: viewModel.repository.activeRequests.value.find { it.id == id }
+        //
+        // `activeRequests` only holds status == "active" requests. A request the host just
+        // successfully accepted flips to "matched" as part of that acceptance — so reading only
+        // from that feed made a *successful* accept look identical to a deleted request. The cache
+        // accessor below reads the underlying store without that status filter.
+        var fetchedRequest by remember(id) { mutableStateOf<RideRequest?>(null) }
+        var requestFetchAttempted by remember(id) { mutableStateOf(false) }
+        val cachedRequest = requests.find { it.id == id } ?: viewModel.getRideRequestById(id)
+        val request = cachedRequest ?: fetchedRequest
+
+        LaunchedEffect(id, cachedRequest) {
+            if (cachedRequest == null && !requestFetchAttempted) {
+                viewModel.fetchRideRequest(id) { fetched ->
+                    fetchedRequest = fetched
+                    requestFetchAttempted = true
+                }
+            }
+        }
 
         if (request == null) {
+            if (!requestFetchAttempted) {
+                Box(
+                    modifier = Modifier.fillMaxSize().background(SplitCruiserDarkBg),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(color = SplitCruiserSaffron)
+                }
+                return
+            }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -5865,7 +5936,11 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                     Text("Decline", color = Color.White)
                                 }
                                 Button(
-                                    onClick = { viewModel.acceptMatch(activePendingMatch.id) },
+                                    onClick = {
+                                        viewModel.acceptMatch(activePendingMatch.id) {
+                                            navController.navigate("chat/${activePendingMatch.id}")
+                                        }
+                                    },
                                     colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserEmerald),
                                     modifier = Modifier.weight(1f).padding(start = 6.dp),
                                     shape = RoundedCornerShape(8.dp)
@@ -5908,7 +5983,14 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                                     request.id,
                                                     hostedOffer.id,
                                                     hostedOffer.costPerRider * request.seatsNeeded,
-                                                ) {}
+                                                ) { match ->
+                                                    Toast.makeText(
+                                                        context,
+                                                        "Ride offered! Opening chat with ${request.riderName}...",
+                                                        Toast.LENGTH_LONG
+                                                    ).show()
+                                                    navController.navigate("chat/${match.id}")
+                                                }
                                             },
                                             modifier = Modifier.fillMaxWidth()
                                         ) {
@@ -5940,7 +6022,14 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                     request.id,
                                     offerable.first().id,
                                     offerable.first().costPerRider * request.seatsNeeded,
-                                ) {}
+                                ) { match ->
+                                    Toast.makeText(
+                                        context,
+                                        "Ride offered! Opening chat with ${request.riderName}...",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                    navController.navigate("chat/${match.id}")
+                                }
                                 else -> showOfferPicker = true
                             }
                         },
@@ -5958,7 +6047,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
     }
 
     if (showSuccessDialog && type == "offer") {
-        val offer = offers.find { it.id == id } ?: viewModel.repository.activeOffers.value.find { it.id == id }
+        val offer = offers.find { it.id == id } ?: viewModel.getTripOfferById(id)
         if (offer != null) {
             JoinSuccessDialog(
                 offer = offer,
@@ -6270,7 +6359,7 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
             ) {
                 items(messageList) { msg ->
                     val isMe = (msg.senderId == currentUser?.id)
-                    val isSystem = (msg.senderId == "system")
+                    val isSystem = msg.isSystem
                     val isProposal = msg.text.startsWith("[PROPOSAL]")
                     val isConfirmed = msg.text.startsWith("[CONFIRMED]")
 

@@ -1032,6 +1032,55 @@ point the value is written — never `.orElse(nonEmptyDefault)` directly on the 
 by generating `FirebaseBuildConfig.kt` three ways and inspecting the output: env var absent, env
 var set to `""` (the CI shape), and env var set to an explicit override.
 
+### 2026-07-29 — the two "join a ride" buttons, and the host's "accept", all had the same shape of bug
+
+Three separate reports turned out to share one root cause: screens reading only from the
+status-filtered feeds (`activeOffers`/`activeRequests`, via `FeedProjector`) instead of the
+underlying cache, for exactly the documents those feeds are designed to exclude.
+
+- **A host could not open their own posted ride.** `TripDetailScreen`'s offer lookup read only
+  `activeOffers`, which `FeedProjector` filters to `offer.hostId != currentUserId` on purpose (so a
+  host doesn't see their own ride in the browse feed) — but "My Trips → Hosted Rides" navigates to
+  that exact screen for the host's own offers. The screen's existing "fallback" read the identical
+  filtered `StateFlow` a second time, so it never helped; past/completed rides hit the same wall.
+- **A host's successful accept looked like a failure.** The request branch read only
+  `activeRequests`, filtered to `status == "active"`. `offerSeatForRequest` flips the request to
+  `"matched"` as part of a *successful* accept, so the screen fell into "Request Unavailable... may
+  have been matched, cancelled, or deleted" — an accidentally-true message that reads as an error.
+  Compounded by an empty `onSuccess {}` on the button itself: no toast, no navigation, nothing.
+- **Instant-reserve riders had no chat at all.** "Join Ride (Reserve Seat)"
+  (`joinTripOfferDirect`) mutated the offer directly and created no `TripMatch`, so a rider who used
+  it had no `matchId` and no way to ever open chat with the host — despite being told to "coordinate
+  details" with them. Meanwhile "Accept & Chat" (the host's button) only accepted; it didn't
+  navigate to chat, so the host had to notice the card changed and tap a second button. And the
+  automatic "Trip request accepted" system message rendered as the host talking to themselves,
+  because `sendSystemMessage` set `senderId` to the real accepting user's uid while `ChatScreen`
+  checked for the literal string `"system"` — which can never match.
+
+**Fix:** `getRideRequestById`/`fetchTripOffer`/`fetchRideRequest` read the cache (and, on a cold
+cache, the network) without the feed filters, mirroring the existing `fetchUserProfile` pattern;
+`TripDetailScreen` uses them with a brief loading spinner instead of an instant wrong "Unavailable."
+`joinTripOfferDirect` now goes through the same `createMatch` + accept machinery
+`offerSeatForRequest` uses — extracted into `findOrCreateBackingRequest` and
+`applyAcceptedMatch(match, notifyRider, systemMessageText)` — so every successful join produces a
+real chat thread, whichever button created it. "Accept & Chat" and the host's accept button now
+navigate to `chat/{matchId}` on success. `Message` gained `isSystem: Boolean`, since a literal
+`senderId = "system"` cannot work: the `messages` create rule requires
+`senderId == request.auth.uid`, and no user is ever authenticated as `"system"`.
+
+⚠ **A client-set `isSystem` boolean is spoofable** — nothing stops a participant flagging their own
+message as a system message. Accepted deliberately, same trade-off as the client-aggregated rating
+fields elsewhere in this repo: low severity (each thread only has the two match participants, so
+there's no third party to deceive), and the real fix in both cases is a Cloud Function.
+
+**Left alone, not fixed here:** cancelling a synthetic request doesn't touch its pending match;
+`declineMatch` sends no notification; `validateAndCreateMatch`/`MainViewModel.requestJoin`,
+`createTripMatch`, and `cancelMatch` are dead code with zero UI call sites (left over from before
+these screens created their own backing request/match); posting a ride request has a looser
+client-side check than the server validation; and chat polish (no auto-scroll, `closeChat()` never
+called so fast-polling never stops, an always-on unread badge, no confirmation before "Complete
+Trip"). All confirmed during this investigation, none in the approved scope for this round.
+
 ---
 
 ## 8. Pre-flight checklist before merging to `main`

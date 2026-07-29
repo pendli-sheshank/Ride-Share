@@ -149,7 +149,16 @@ data class Message(
     val text: String = "",
     val timestamp: Long = 0L,
     /** Denormalised from the match, for the same reason as [TripMatch.participants]. */
-    val participants: List<String> = emptyList()
+    val participants: List<String> = emptyList(),
+    /**
+     * True for messages the app injects on the sender's behalf (e.g. "request accepted"), so the
+     * chat screen can render them as a neutral system bubble rather than the sender's own.
+     *
+     * `senderId` still has to be a real participant's uid, not a literal `"system"`: the `messages`
+     * Firestore rule requires `senderId == request.auth.uid` on create, and no user is ever
+     * authenticated as `"system"`.
+     */
+    val isSystem: Boolean = false
 )
 
 @Serializable

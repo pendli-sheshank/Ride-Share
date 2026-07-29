@@ -191,6 +191,20 @@ class FirestoreCodecTest {
     }
 
     @Test
+    fun systemMessageFlagRoundTrips() {
+        val original = Message(
+            id = "msg_sys_1",
+            matchId = "match_1",
+            senderId = "user_host",
+            senderName = "Split Cruiser",
+            text = "Trip request accepted by the host.",
+            timestamp = 1753900000000L,
+            isSystem = true,
+        )
+        assertEquals(original, roundTrip(original))
+    }
+
+    @Test
     fun ratingRoundTrips() {
         val original = Rating(
             id = "rating_1",
