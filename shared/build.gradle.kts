@@ -89,7 +89,13 @@ val googleWebClientId = providers.environmentVariable("GOOGLE_WEB_CLIENT_ID").or
 // `databases/(default)/...` REST call this app makes will 404 against a database that, from the
 // API's point of view, does not exist. Overridable via FIRESTORE_DATABASE_ID for anyone who
 // creates a fresh (default) database instead.
-val firestoreDatabaseId = providers.environmentVariable("FIRESTORE_DATABASE_ID").orElse("splitcruiser")
+//
+// `.orElse("")`, not `.orElse("splitcruiser")` — matching every other FIREBASE_* var above, and
+// for the same reason: a GitHub Actions `env:` line referencing an unset secret does not leave the
+// variable absent, it sets it to the empty string, so `.orElse(...)` never fires in CI regardless
+// of what it names. The "splitcruiser" fallback that actually reaches production is applied to the
+// *value*, below, with `ifBlank`, which catches both "absent" and "present but empty".
+val firestoreDatabaseId = providers.environmentVariable("FIRESTORE_DATABASE_ID").orElse("")
 
 val firebaseConfigDir: Provider<Directory> = layout.buildDirectory.dir("generated/firebaseConfig")
 
@@ -138,7 +144,7 @@ val generateFirebaseConfig by tasks.registering {
           const val API_KEY: String = ${quote(apiKey.get())}
           const val PROJECT_ID: String = ${quote(projectId.get())}
           const val STORAGE_BUCKET: String = ${quote(storageBucket.get())}
-          const val FIRESTORE_DATABASE_ID: String = ${quote(databaseId.get())}
+          const val FIRESTORE_DATABASE_ID: String = ${quote(databaseId.get().ifBlank { "splitcruiser" })}
           const val GOOGLE_WEB_CLIENT_ID: String = ${quote(webClientId.get())}
       }
       """.trimIndent() + "\n"
