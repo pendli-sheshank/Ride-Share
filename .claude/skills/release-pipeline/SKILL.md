@@ -1081,6 +1081,53 @@ client-side check than the server validation; and chat polish (no auto-scroll, `
 called so fast-polling never stops, an always-on unread badge, no confirmation before "Complete
 Trip"). All confirmed during this investigation, none in the approved scope for this round.
 
+### 2026-07-29 — removed the college-only framing; the app is open to any rider
+
+Onboarding forced a pick from five hardcoded US universities (`Community`/`DEFAULT_COMMUNITIES` in
+`Models.kt`), and profile settings had a separate "verify college email" feature. Both are gone —
+the product is for anyone booking a ride, not gated on any affiliation.
+
+Removed: `Community`, `DEFAULT_COMMUNITIES`, `User.communityId`/`collegeName`/`verifiedEmail`,
+`SplitCruiserRepository.allCommunities`/`refreshCommunities`/`observeCommunities`/
+`verifyCollegeEmail`, the `communities` Firestore rule, and every UI piece that read them (the
+onboarding picker, the "VERIFY COLLEGE STUDENT STATUS" card, the college/verified-email fields in
+`EditProfileDialog`, and their displays on `ProfileScreen` and the trip-detail host card).
+
+**This reached iOS too** — `ContentView.swift`'s `ProfileSetupView` had its own "Campus" `Picker`
+fed by `ViewModel.swift`'s `communities`/`observeCommunities`, plus a "Student carpools, cost
+split" tagline and a "College email" field placeholder on the login screen. Anyone editing
+onboarding or auth screens going forward needs to check both platforms — they are not kept in sync
+by anything automatic.
+
+`createUserProfile`'s `requireValid` check used to require `communityId.isNotEmpty()`; removing the
+picker without also removing that check would have made onboarding fail unconditionally, since
+nothing would ever supply the field again. Caught by compiling before touching tests, not by a test
+catching it after the fact — worth remembering that a required-field check in the backend can
+silently outlive the UI field that used to satisfy it.
+
+`verifiedTier` itself (the "vouched"/"guest" mechanism) is untouched — it already defaults to
+`"vouched"` for every real account regardless of this feature, so removing college-email
+verification changes almost nothing behaviorally; only the "VERIFIED STUDENT"/"GUEST USER" badge
+labels were renamed to drop the student wording, since the badge now always renders under a
+condition that was previously `OR`'d with `verifiedEmail.isNotEmpty()`.
+
+### 2026-07-29 — a merge-conflict resolution silently dropped a Known Issues entry
+
+PR #32 (`claude/fix-requesting-and-chat-flow`) branched before PR #31 (`claude/open-to-general-public`)
+merged, so both PRs appended a Known Issues entry at the same anchor point in this file, producing a
+real conflict once #31 landed on `main` first. Whoever resolved it kept only PR #32's entry and
+dropped PR #31's "removed the college-only framing" entry entirely, along with a stray extra `---`
+separator — and that resolution shipped to `main` unnoticed, since nothing checks this file's
+structure.
+
+**Fix:** re-added the missing entry (above). Also caught in the same pass: the "135 tests" figure in
+`CLAUDE.md` had drifted to "136" through the same conflict.
+
+⚠ **A content conflict in this file needs a human (or an agent) to actually read both sides** — git
+has no way to know two Known Issues entries are both worth keeping rather than alternatives of each
+other. When resolving a conflict here, default to keeping every entry present on either side unless
+one clearly supersedes the other.
+
 ---
 
 ## 8. Pre-flight checklist before merging to `main`
