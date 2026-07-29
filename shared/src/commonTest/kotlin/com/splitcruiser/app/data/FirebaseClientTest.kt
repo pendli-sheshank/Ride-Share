@@ -317,6 +317,35 @@ class FirebaseClientTest {
 
     // --- Firestore -------------------------------------------------------------------------
 
+    /**
+     * This project's Firestore database has the id "splitcruiser", not the "(default)" every
+     * project gets automatically — the console's "Create database" dialog accepts any Database ID
+     * typed over its suggestion, with no warning that doing so orphans every
+     * `databases/(default)/...` REST call this app makes; they 404 against a database that, from
+     * the API's point of view, does not exist. [FirebaseConfig.firestoreDatabaseId] defaults to
+     * "splitcruiser" for exactly that reason, and every URL must carry it.
+     */
+    @Test
+    fun theDefaultDatabaseIdIsSplitcruiserNotDefault() = runTest {
+        val http = createFirebaseHttpClient(engine { HttpStatusCode.OK to "{}" })
+        FirestoreClient(http, config, tokenProvider())
+            .setDocument("users", "me", User(id = "me"), serializer<User>())
+
+        val url = requests.single().url.toString()
+        assertContains(url, "/databases/splitcruiser/documents/")
+        assertTrue(!url.contains("(default)"), "must not fall back to (default): $url")
+    }
+
+    @Test
+    fun aDifferentDatabaseIdReplacesItInEveryUrl() = runTest {
+        val defaultDbConfig = config.copy(firestoreDatabaseId = "(default)")
+        val http = createFirebaseHttpClient(engine { HttpStatusCode.OK to "{}" })
+        FirestoreClient(http, defaultDbConfig, tokenProvider())
+            .setDocument("users", "me", User(id = "me"), serializer<User>())
+
+        assertContains(requests.single().url.toString(), "/databases/(default)/documents/")
+    }
+
     @Test
     fun aFullWriteSendsAnUpdateMaskForEveryField() = runTest {
         val http = createFirebaseHttpClient(engine { HttpStatusCode.OK to "{}" })

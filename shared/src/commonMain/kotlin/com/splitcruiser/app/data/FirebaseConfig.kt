@@ -23,6 +23,18 @@ data class FirebaseConfig(
      * Identity Toolkit infers the audience from the API key.
      */
     val googleWebClientId: String = "",
+    /**
+     * The Firestore database id within [projectId].
+     *
+     * Defaults to `"splitcruiser"`, not the `"(default)"` every project gets automatically —
+     * because that is the id this project's database actually has. The console's "Create
+     * database" dialog has a Database ID field that accepts anything typed over its suggestion,
+     * with no warning that doing so means every `databases/(default)/...` REST call this app
+     * makes will 404 against a database that, from the API's point of view, does not exist. A
+     * project that creates a fresh `(default)` database instead can override this back with
+     * `FIRESTORE_DATABASE_ID=(default)`.
+     */
+    val firestoreDatabaseId: String = "splitcruiser",
 ) {
     /**
      * False when a value is missing or is still the placeholder committed in `.env.example`.
@@ -49,14 +61,14 @@ data class FirebaseConfig(
         get() = "https://securetoken.googleapis.com/v1"
 
     val firestoreBase: String
-        get() = "https://firestore.googleapis.com/v1/projects/$projectId/databases/(default)/documents"
+        get() = "https://firestore.googleapis.com/v1/projects/$projectId/databases/$firestoreDatabaseId/documents"
 
     val storageBase: String
         get() = "https://firebasestorage.googleapis.com/v0/b/$storageBucket/o"
 
     /** Fully-qualified Firestore document name, as `commit` and reference values require. */
     fun documentName(path: String): String =
-        "projects/$projectId/databases/(default)/documents/$path"
+        "projects/$projectId/databases/$firestoreDatabaseId/documents/$path"
 
     companion object {
         /**
@@ -68,6 +80,7 @@ data class FirebaseConfig(
             projectId = FirebaseBuildConfig.PROJECT_ID,
             storageBucket = FirebaseBuildConfig.STORAGE_BUCKET,
             googleWebClientId = FirebaseBuildConfig.GOOGLE_WEB_CLIENT_ID,
+            firestoreDatabaseId = FirebaseBuildConfig.FIRESTORE_DATABASE_ID,
         )
     }
 }
