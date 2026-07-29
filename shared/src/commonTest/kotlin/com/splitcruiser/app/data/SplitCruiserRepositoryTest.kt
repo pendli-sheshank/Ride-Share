@@ -7,6 +7,7 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.client.request.HttpRequestData
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.content.TextContent
 import io.ktor.http.headersOf
 import io.ktor.utils.io.ByteReadChannel
 import kotlinx.coroutines.test.runTest
@@ -387,6 +388,221 @@ class SplitCruiserRepositoryTest {
         }
         signedIn(repo)
         assertFailsWith<SplitCruiserException> { repo.joinTripOfferDirect("offer_1") }
+    }
+
+    /**
+     * Instant-reserve used to mutate the offer directly and create no [TripMatch] at all, so a
+     * rider who used this button had no `matchId` and no way to ever open chat with the host. It
+     * now goes through the same accept path [offerSeatForRequest] uses.
+     */
+    @Test
+    fun joinTripOfferDirectCreatesAnAcceptedMatchWithChatParticipants() = runTest {
+        documents["trip_offers/offer_1"] = """
+            {"fields":{"id":{"stringValue":"offer_1"},"hostId":{"stringValue":"bo"},
+             "seatsLeft":{"integerValue":"3"},"totalSeats":{"integerValue":"3"},
+             "costPerRider":{"doubleValue":10.0},"status":{"stringValue":"active"}}}
+        """.trimIndent()
+        val repo = signedIn(repository(scriptedBackend()))
+
+        val match = repo.joinTripOfferDirect("offer_1")
+
+        assertEquals("accepted", match.status)
+        assertEquals(listOf("bo", "me"), match.participants)
+        assertTrue(repo.userMatches.value.any { it.id == match.id })
+    }
+
+    @Test
+    fun joinTripOfferDirectDoesNotSelfNotifyTheRider() = runTest {
+        documents["trip_offers/offer_1"] = """
+            {"fields":{"id":{"stringValue":"offer_1"},"hostId":{"stringValue":"bo"},
+             "seatsLeft":{"integerValue":"3"},"totalSeats":{"integerValue":"3"},
+             "costPerRider":{"doubleValue":10.0},"status":{"stringValue":"active"}}}
+        """.trimIndent()
+        val repo = signedIn(repository(scriptedBackend()))
+
+        repo.joinTripOfferDirect("offer_1")
+
+        // The rider is the one who just tapped the button; a "your request was accepted"
+        // notification about their own instant action would be pointless.
+        assertTrue(repo.notifications.value.none { it.title.contains("Ride Request Accepted") })
+    }
+
+    @Test
+    fun joinTripOfferDirectNotifiesTheHost() = runTest {
+        documents["trip_offers/offer_1"] = """
+            {"fields":{"id":{"stringValue":"offer_1"},"hostId":{"stringValue":"bo"},
+             "seatsLeft":{"integerValue":"3"},"totalSeats":{"integerValue":"3"},
+             "costPerRider":{"doubleValue":10.0},"status":{"stringValue":"active"}}}
+        """.trimIndent()
+        val repo = signedIn(repository(scriptedBackend()))
+
+        repo.joinTripOfferDirect("offer_1")
+
+        val notificationWrite = requests.singleOrNull {
+            it.url.toString().contains("/documents/notifications/") && it.method.value == "PATCH"
+        }
+        assertTrue(notificationWrite != null, "the host must be notified of the instant join")
+        val body = (notificationWrite!!.body as TextContent).text
+        assertContains(body, "\"bo\"")
+    }
+
+    @Test
+    fun joinTripOfferDirectSeedsAnInstantJoinSystemMessageDistinctFromAnAcceptedProposal() = runTest {
+        documents["trip_offers/offer_1"] = """
+            {"fields":{"id":{"stringValue":"offer_1"},"hostId":{"stringValue":"bo"},
+             "seatsLeft":{"integerValue":"3"},"totalSeats":{"integerValue":"3"},
+             "costPerRider":{"doubleValue":10.0},"status":{"stringValue":"active"}}}
+        """.trimIndent()
+        val repo = signedIn(repository(scriptedBackend()))
+
+        val match = repo.joinTripOfferDirect("offer_1")
+
+        val messageWrite = requests.first {
+            it.url.toString().contains("/documents/messages/") && it.method.value == "PATCH"
+        }
+        val body = (messageWrite.body as TextContent).text
+        assertTrue(!body.contains("accepted by the host"), "nobody approved an instant reservation")
+        assertContains(body, "\"isSystem\":{\"booleanValue\":true}")
+        assertTrue(match.status == "accepted")
+    }
+
+    @Test
+    fun joinTripOfferDirectReusesAPendingProposalRequestAndRejectsTheDoubleMatch() = runTest {
+        documents["trip_offers/offer_1"] = """
+            {"fields":{"id":{"stringValue":"offer_1"},"hostId":{"stringValue":"bo"},
+             "seatsLeft":{"integerValue":"3"},"costPerRider":{"doubleValue":10.0},
+             "status":{"stringValue":"active"}}}
+        """.trimIndent()
+        val repo = signedIn(repository(scriptedBackend()))
+
+        repo.requestSeatOnOffer("offer_1", contribution = 10.0)
+        val failure = assertFailsWith<SplitCruiserException> { repo.joinTripOfferDirect("offer_1") }
+        assertContains(failure.message!!, "already exists")
+    }
+
+    // --- Reading a request/offer that a filtered feed excludes -----------------------------
+
+    @Test
+    fun getRideRequestByIdReturnsFromCacheEvenAfterItLeavesActiveRequests() = runTest {
+        documents["trip_offers/offer_mine"] = """
+            {"fields":{"id":{"stringValue":"offer_mine"},"hostId":{"stringValue":"me"},
+             "seatsLeft":{"integerValue":"3"},"totalSeats":{"integerValue":"3"},
+             "costPerRider":{"doubleValue":10.0},"status":{"stringValue":"active"}}}
+        """.trimIndent()
+        documents["ride_requests/req_1"] = """
+            {"fields":{"id":{"stringValue":"req_1"},"riderId":{"stringValue":"zo"},
+             "riderName":{"stringValue":"Zo"},"seatsNeeded":{"integerValue":"1"},
+             "status":{"stringValue":"active"}}}
+        """.trimIndent()
+        val repo = signedIn(repository(scriptedBackend()))
+
+        repo.offerSeatForRequest("req_1", "offer_mine", contribution = 10.0)
+
+        // acceptMatch flips this to "matched", which activeRequests excludes — the exact case
+        // that made a successful accept look like the request had vanished.
+        assertEquals("matched", repo.getRideRequestById("req_1")?.status)
+    }
+
+    @Test
+    fun fetchTripOfferFallsBackToNetworkAndPopulatesTheCache() = runTest {
+        documents["trip_offers/offer_cold"] = """
+            {"fields":{"id":{"stringValue":"offer_cold"},"hostId":{"stringValue":"bo"},
+             "status":{"stringValue":"active"}}}
+        """.trimIndent()
+        val repo = signedIn(repository(scriptedBackend()))
+        assertNull(repo.getTripOfferById("offer_cold"), "must start with an empty cache")
+
+        val fetched = repo.fetchTripOffer("offer_cold")
+
+        assertEquals("bo", fetched.hostId)
+        assertEquals("offer_cold", repo.getTripOfferById("offer_cold")?.id)
+    }
+
+    @Test
+    fun fetchRideRequestFallsBackToNetworkAndPopulatesTheCache() = runTest {
+        documents["ride_requests/req_cold"] = """
+            {"fields":{"id":{"stringValue":"req_cold"},"riderId":{"stringValue":"zo"},
+             "status":{"stringValue":"matched"}}}
+        """.trimIndent()
+        val repo = signedIn(repository(scriptedBackend()))
+        assertNull(repo.getRideRequestById("req_cold"))
+
+        val fetched = repo.fetchRideRequest("req_cold")
+
+        assertEquals("zo", fetched.riderId)
+        assertEquals("req_cold", repo.getRideRequestById("req_cold")?.id)
+    }
+
+    @Test
+    fun fetchTripOfferThrowsWhenTrulyMissing() = runTest {
+        val repo = signedIn(repository(scriptedBackend())) // no trip_offers/ghost seeded -> 404
+        val failure = assertFailsWith<SplitCruiserException> { repo.fetchTripOffer("ghost") }
+        assertContains(failure.message!!, "not found")
+    }
+
+    @Test
+    fun fetchRideRequestThrowsWhenTrulyMissing() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+        val failure = assertFailsWith<SplitCruiserException> { repo.fetchRideRequest("ghost") }
+        assertContains(failure.message!!, "no longer exists")
+    }
+
+    // --- Accepting -------------------------------------------------------------------------
+
+    @Test
+    fun acceptingAMatchStillNotifiesTheRiderAndSeedsTheDefaultChatMessage() = runTest {
+        documents["trip_offers/offer_mine"] = """
+            {"fields":{"id":{"stringValue":"offer_mine"},"hostId":{"stringValue":"me"},
+             "seatsLeft":{"integerValue":"3"},"totalSeats":{"integerValue":"3"},
+             "costPerRider":{"doubleValue":10.0},"status":{"stringValue":"active"}}}
+        """.trimIndent()
+        documents["ride_requests/req_1"] = """
+            {"fields":{"id":{"stringValue":"req_1"},"riderId":{"stringValue":"zo"},
+             "riderName":{"stringValue":"Zo"},"seatsNeeded":{"integerValue":"1"},
+             "status":{"stringValue":"active"}}}
+        """.trimIndent()
+        val repo = signedIn(repository(scriptedBackend()))
+
+        // offerSeatForRequest already calls acceptMatch internally; this asserts the notification
+        // and system message acceptMatch itself is responsible for, which no test covered before.
+        repo.offerSeatForRequest("req_1", "offer_mine", contribution = 10.0)
+
+        val notificationWrite = requests.singleOrNull {
+            it.url.toString().contains("/documents/notifications/") && it.method.value == "PATCH"
+        }
+        assertTrue(notificationWrite != null, "the rider must be notified of the acceptance")
+        assertContains((notificationWrite!!.body as TextContent).text, "\"zo\"")
+
+        val messageWrite = requests.first {
+            it.url.toString().contains("/documents/messages/") && it.method.value == "PATCH"
+        }
+        assertContains((messageWrite.body as TextContent).text, "accepted by the host")
+    }
+
+    @Test
+    fun sendSystemMessageIsFlaggedIsSystemAndKeepsARealSenderId() = runTest {
+        documents["trip_offers/offer_mine"] = """
+            {"fields":{"id":{"stringValue":"offer_mine"},"hostId":{"stringValue":"me"},
+             "seatsLeft":{"integerValue":"3"},"totalSeats":{"integerValue":"3"},
+             "costPerRider":{"doubleValue":10.0},"status":{"stringValue":"active"}}}
+        """.trimIndent()
+        documents["ride_requests/req_1"] = """
+            {"fields":{"id":{"stringValue":"req_1"},"riderId":{"stringValue":"zo"},
+             "riderName":{"stringValue":"Zo"},"seatsNeeded":{"integerValue":"1"},
+             "status":{"stringValue":"active"}}}
+        """.trimIndent()
+        val repo = signedIn(repository(scriptedBackend()))
+
+        repo.offerSeatForRequest("req_1", "offer_mine", contribution = 10.0)
+
+        // A literal senderId of "system" would be rejected by the messages create rule, which
+        // requires senderId == request.auth.uid — the real accepting user's uid, "me" here.
+        val messageWrite = requests.first {
+            it.url.toString().contains("/documents/messages/") && it.method.value == "PATCH"
+        }
+        val body = (messageWrite.body as TextContent).text
+        assertContains(body, "\"senderId\":{\"stringValue\":\"me\"}")
+        assertContains(body, "\"isSystem\":{\"booleanValue\":true}")
     }
 
     // --- Matching --------------------------------------------------------------------------

@@ -272,13 +272,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** The host offering one of their own rides to a rider who posted a request. */
-    fun offerSeat(requestId: String, offerId: String, contribution: Double, onSuccess: () -> Unit) {
+    fun offerSeat(requestId: String, offerId: String, contribution: Double, onSuccess: (TripMatch) -> Unit) {
         runGuarded(
             block = { repository.offerSeatForRequestResult(requestId, offerId, contribution) },
             fallbackMessage = "Failed to offer the ride.",
-            onSuccess = {
+            onSuccess = { match ->
                 refreshMyTrips()
-                onSuccess()
+                onSuccess(match)
             },
         )
     }
@@ -291,11 +291,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    fun joinTripOfferDirect(offerId: String, onSuccess: () -> Unit) {
+    fun joinTripOfferDirect(offerId: String, onSuccess: (TripMatch) -> Unit) {
         runGuarded(
             block = { repository.joinTripOfferDirectResult(offerId) },
             fallbackMessage = "Failed to join the ride.",
-            onSuccess = { onSuccess() },
+            onSuccess = { match -> onSuccess(match) },
         )
     }
 
@@ -307,9 +307,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    fun acceptMatch(matchId: String) {
+    fun acceptMatch(matchId: String, onSuccess: () -> Unit = {}) {
         viewModelScope.launch {
             runCatching { repository.acceptMatch(matchId) }
+                .onSuccess { onSuccess() }
                 .onFailure { _uiError.value = it.message ?: "Failed to accept ride." }
         }
     }
@@ -395,6 +396,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun getUserPublicProfile(userId: String): User? = repository.getUserPublicProfile(userId)
 
     fun getTripOfferById(offerId: String): TripOffer? = repository.getTripOfferById(offerId)
+
+    fun getRideRequestById(requestId: String): RideRequest? = repository.getRideRequestById(requestId)
+
+    /** Cold-cache fallback for [getTripOfferById] — a network fetch that populates the cache. */
+    fun fetchTripOffer(offerId: String, onResult: (TripOffer?) -> Unit) {
+        viewModelScope.launch { onResult(runCatching { repository.fetchTripOffer(offerId) }.getOrNull()) }
+    }
+
+    /** Cold-cache fallback for [getRideRequestById]. */
+    fun fetchRideRequest(requestId: String, onResult: (RideRequest?) -> Unit) {
+        viewModelScope.launch { onResult(runCatching { repository.fetchRideRequest(requestId) }.getOrNull()) }
+    }
 
     fun getVehicleInfo(userId: String): Vehicle? = repository.getVehicleInfo(userId)
 
