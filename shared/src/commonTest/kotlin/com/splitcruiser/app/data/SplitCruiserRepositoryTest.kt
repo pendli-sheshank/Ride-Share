@@ -103,15 +103,6 @@ class SplitCruiserRepositoryTest {
         assertEquals("NOT_CONFIGURED", failure.code)
     }
 
-    @Test
-    fun communitiesArePopulatedBeforeAnyNetworkCall() = runTest {
-        val repo = repository(scriptedBackend())
-        // The rules make `communities` read-only, so a client-side seed would be denied and the
-        // profile-setup picker would be empty on a first run.
-        assertTrue(repo.allCommunities.value.isNotEmpty())
-        assertContains(repo.allCommunities.value.map { it.name }, "Northeastern University")
-    }
-
     // --- Auth ------------------------------------------------------------------------------
 
     @Test
@@ -148,8 +139,8 @@ class SplitCruiserRepositoryTest {
         val needsProfile = repo.signInWithGoogle("google-jwt")
 
         // Google knows the display name, but filling it in would make the profile screen — the only
-        // place community and home area are collected — think it had already run.
-        assertTrue(needsProfile, "a Google account still has to pick a community")
+        // place a name and home area are collected — think it had already run.
+        assertTrue(needsProfile, "a Google account still has to complete onboarding")
         assertEquals("https://lh3.example/ana.jpg", repo.currentUser.value?.avatarUrl)
         assertEquals("ana@gmail.com", repo.currentUser.value?.email)
     }
@@ -168,7 +159,6 @@ class SplitCruiserRepositoryTest {
         repo.createUserProfile(
             name = "Ana",
             lastInitial = "R",
-            communityId = "neu",
             homeArea = "Mission Hill",
             contact = ContactDetails("+16175550100", "12 Tremont St, Boston, MA", 42.3332, -71.1054),
             vehicle = null,

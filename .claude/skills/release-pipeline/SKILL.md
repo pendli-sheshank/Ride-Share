@@ -1032,6 +1032,36 @@ point the value is written — never `.orElse(nonEmptyDefault)` directly on the 
 by generating `FirebaseBuildConfig.kt` three ways and inspecting the output: env var absent, env
 var set to `""` (the CI shape), and env var set to an explicit override.
 
+### 2026-07-29 — removed the college-only framing; the app is open to any rider
+
+Onboarding forced a pick from five hardcoded US universities (`Community`/`DEFAULT_COMMUNITIES` in
+`Models.kt`), and profile settings had a separate "verify college email" feature. Both are gone —
+the product is for anyone booking a ride, not gated on any affiliation.
+
+Removed: `Community`, `DEFAULT_COMMUNITIES`, `User.communityId`/`collegeName`/`verifiedEmail`,
+`SplitCruiserRepository.allCommunities`/`refreshCommunities`/`observeCommunities`/
+`verifyCollegeEmail`, the `communities` Firestore rule, and every UI piece that read them (the
+onboarding picker, the "VERIFY COLLEGE STUDENT STATUS" card, the college/verified-email fields in
+`EditProfileDialog`, and their displays on `ProfileScreen` and the trip-detail host card).
+
+**This reached iOS too** — `ContentView.swift`'s `ProfileSetupView` had its own "Campus" `Picker`
+fed by `ViewModel.swift`'s `communities`/`observeCommunities`, plus a "Student carpools, cost
+split" tagline and a "College email" field placeholder on the login screen. Anyone editing
+onboarding or auth screens going forward needs to check both platforms — they are not kept in sync
+by anything automatic.
+
+`createUserProfile`'s `requireValid` check used to require `communityId.isNotEmpty()`; removing the
+picker without also removing that check would have made onboarding fail unconditionally, since
+nothing would ever supply the field again. Caught by compiling before touching tests, not by a test
+catching it after the fact — worth remembering that a required-field check in the backend can
+silently outlive the UI field that used to satisfy it.
+
+`verifiedTier` itself (the "vouched"/"guest" mechanism) is untouched — it already defaults to
+`"vouched"` for every real account regardless of this feature, so removing college-email
+verification changes almost nothing behaviorally; only the "VERIFIED STUDENT"/"GUEST USER" badge
+labels were renamed to drop the student wording, since the badge now always renders under a
+condition that was previously `OR`'d with `verifiedEmail.isNotEmpty()`.
+
 ---
 
 ## 8. Pre-flight checklist before merging to `main`

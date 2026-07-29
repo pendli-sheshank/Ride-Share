@@ -9,7 +9,6 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.splitcruiser.app.auth.GoogleSignInCancelledException
 import com.splitcruiser.app.auth.requestGoogleIdToken
-import com.splitcruiser.app.data.Community
 import com.splitcruiser.app.data.ContactDetails
 import com.splitcruiser.app.data.FirebaseConfig
 import com.splitcruiser.app.data.Message
@@ -40,7 +39,6 @@ import com.splitcruiser.app.data.updateTripOfferStatusResult
 import com.splitcruiser.app.data.updateUserProfileDetailsResult
 import com.splitcruiser.app.data.uploadProfilePictureResult
 import com.splitcruiser.app.data.validateAndCreateMatchResult
-import com.splitcruiser.app.data.verifyCollegeEmailResult
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -65,7 +63,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val activeRequests: StateFlow<List<RideRequest>> = repository.activeRequests
     val myRideRequests: StateFlow<List<RideRequest>> = repository.myRideRequests
     val userMatches: StateFlow<List<TripMatch>> = repository.userMatches
-    val allCommunities: StateFlow<List<Community>> = repository.allCommunities
     val notifications: StateFlow<List<NotificationAlert>> = repository.notifications
 
     /** What onboarding stored: the home address a ride request prefills from. */
@@ -203,7 +200,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun completeProfile(
         name: String,
         lastInitial: String,
-        communityId: String,
         homeArea: String,
         contact: ContactDetails,
         vehicle: Vehicle?,
@@ -211,38 +207,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         runGuarded(
             block = {
-                repository.createUserProfileResult(name, lastInitial, communityId, homeArea, contact, vehicle)
+                repository.createUserProfileResult(name, lastInitial, homeArea, contact, vehicle)
             },
             fallbackMessage = "Failed to setup profile.",
             onSuccess = { onSuccess() },
         )
     }
 
-    fun verifyCollegeEmail(email: String, onSuccess: () -> Unit, onFailure: (String) -> Unit) {
-        viewModelScope.launch {
-            _isLoading.value = true
-            try {
-                repository.verifyCollegeEmailResult(email).fold(
-                    onSuccess = { onSuccess() },
-                    onFailure = { onFailure(it.message ?: "Verification failed.") },
-                )
-            } finally {
-                _isLoading.value = false
-            }
-        }
-    }
-
     fun updateUserProfileDetails(
         name: String,
         lastInitial: String,
-        collegeName: String,
         avatarUrl: String,
-        verifiedEmail: String,
         onSuccess: () -> Unit
     ) {
         runGuarded(
             block = {
-                repository.updateUserProfileDetailsResult(name, lastInitial, collegeName, avatarUrl, verifiedEmail)
+                repository.updateUserProfileDetailsResult(name, lastInitial, avatarUrl)
             },
             fallbackMessage = "Failed to update profile.",
             onSuccess = { onSuccess() },

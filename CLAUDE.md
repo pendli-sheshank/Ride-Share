@@ -1,7 +1,7 @@
 # Split Cruiser
 
-Community rideshare app for students. Started in Google AI Studio as an Android-only Jetpack
-Compose app; being taken multiplatform.
+Rideshare app open to anyone booking a ride, not gated on any affiliation. Started in Google AI
+Studio as an Android-only Jetpack Compose app; being taken multiplatform.
 
 ## Releasing
 
@@ -97,6 +97,6 @@ not evidence. Verify against a build.
   filename.
 - The `google-services` and `secrets` Gradle plugins are inert on `:app` now that no native
   Firebase SDK consumes them.
-- Test coverage: 123 tests in `:shared` cover the codec, the REST clients, token refresh, the feed
+- Test coverage: 122 tests in `:shared` cover the codec, the REST clients, token refresh, the feed
   rules and the repository. `:app` has three (a Robolectric label check, a Roborazzi screenshot,
   and an arithmetic placeholder); the androidTest suite is still not run by any CI job.
