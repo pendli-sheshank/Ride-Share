@@ -1,6 +1,6 @@
 # Split Cruiser 🚗💨
 
-**Split Cruiser** is a modern, cost-sharing carpool and ride-sharing application designed specifically to empower students and communities to travel safely, affordably, and sustainably.
+**Split Cruiser** is a modern, cost-sharing carpool and ride-sharing application designed to empower riders and communities to travel safely, affordably, and sustainably.
 
 With a highly polished Material 3 visual interface, robust local offline support, and flexible user registration flows, Split Cruiser makes coordinating rides a seamless experience.
 
@@ -9,9 +9,8 @@ With a highly polished Material 3 visual interface, robust local offline support
 ## 🌟 Key Features
 
 ### 🔐 1. Seamless Authentication & Onboarding
-*   **Flexible Access:** Supports standard email and password authentication (with strict validation checks ensuring a clean, well-formatted email address structure).
-*   **Vouched Verification:** Allows users to link and verify alternate/official email addresses to unlock **vouched tier** benefits, elevating their trust score on the platform.
-*   **Guest Mode Support:** Seamlessly transitions unverified or guest users to standard profile privileges upon verification.
+*   **Flexible Access:** Supports standard email and password authentication (with strict validation checks ensuring a clean, well-formatted email address structure), plus Google sign-in on Android.
+*   **Simple Onboarding:** Collects a name, contact number, and home address so ride requests can prefill their own pickup — open to anyone, not gated on any affiliation.
 
 ### 🚗 2. Host a Split Cruiser (Offer a Ride)
 *   **Comprehensive Details:** Drivers can set up a ride offer by specifying pick-up points, destinations, exact date/time (with elegant native pickers), available seats, and split-cost parameters.
@@ -57,7 +56,7 @@ Split Cruiser includes built-in support for **Firebase Authentication**, **Cloud
 
 ## 📈 User Journeys & Uses
 
-### Scenario A: The Commuting Student (Host)
+### Scenario A: The Commuting Host
 1. **Sign Up / Log In** to Split Cruiser.
 2. Complete your **Profile Setup** including your vehicle's make/model and profile picture.
 3. Tap **Create Ride**, specify your starting point, destination, date/time, and select available passenger seats.

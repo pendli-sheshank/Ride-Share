@@ -106,9 +106,6 @@ class SplitCruiserRepository internal constructor(
     private val _userMatches = MutableStateFlow<List<TripMatch>>(emptyList())
     val userMatches: StateFlow<List<TripMatch>> = _userMatches.asStateFlow()
 
-    private val _allCommunities = MutableStateFlow(DEFAULT_COMMUNITIES)
-    val allCommunities: StateFlow<List<Community>> = _allCommunities.asStateFlow()
-
     private val _notifications = MutableStateFlow<List<NotificationAlert>>(emptyList())
     val notifications: StateFlow<List<NotificationAlert>> = _notifications.asStateFlow()
 
@@ -299,17 +296,6 @@ class SplitCruiserRepository internal constructor(
         refreshMatches()
         refreshNotifications()
         refreshChat()
-        refreshCommunities()
-    }
-
-    /** Anything configured in Firestore wins over the shipped defaults; the defaults fill the gaps. */
-    private suspend fun refreshCommunities() {
-        val remote = runCatching {
-            firestore.listDocuments("communities", serializer<Community>(), pageSize = 100)
-        }.getOrNull().orEmpty()
-        if (remote.isEmpty()) return
-        val merged = (DEFAULT_COMMUNITIES.associateBy { it.id } + remote.associateBy { it.id }).values
-        _allCommunities.value = merged.sortedBy { it.name }
     }
 
     private suspend fun loadMissingUsers(ids: Set<String>) {
@@ -466,21 +452,18 @@ class SplitCruiserRepository internal constructor(
     suspend fun createUserProfile(
         name: String,
         lastInitial: String,
-        communityId: String,
         homeArea: String,
         contact: ContactDetails,
         vehicle: Vehicle?,
     ) {
         val user = requireUser()
         requireValid(
-            name.trim().isNotEmpty() && lastInitial.trim().isNotEmpty() &&
-                communityId.isNotEmpty() && homeArea.isNotEmpty()
+            name.trim().isNotEmpty() && lastInitial.trim().isNotEmpty() && homeArea.isNotEmpty()
         ) { "All profile fields are required." }
 
         val updated = user.copy(
             name = name.trim(),
             lastInitial = lastInitial.trim(),
-            communityId = communityId,
             homeArea = homeArea,
             phoneNumber = contact.phoneNumber.trim(),
         )
@@ -496,53 +479,28 @@ class SplitCruiserRepository internal constructor(
     }
 
     /**
-     * The five-argument form, kept because `ViewModel.swift` calls it and Kotlin default arguments
+     * The four-argument form, kept because `ViewModel.swift` calls it and Kotlin default arguments
      * do not survive into Swift. iOS has no onboarding fields yet, so it stores none.
      */
     @Throws(Exception::class)
     suspend fun createUserProfile(
         name: String,
         lastInitial: String,
-        communityId: String,
         homeArea: String,
         vehicle: Vehicle?,
-    ) = createUserProfile(name, lastInitial, communityId, homeArea, ContactDetails(), vehicle)
+    ) = createUserProfile(name, lastInitial, homeArea, ContactDetails(), vehicle)
 
     @Throws(Exception::class)
     suspend fun updateUserProfileDetails(
         name: String,
         lastInitial: String,
-        collegeName: String,
         avatarUrl: String,
-        verifiedEmail: String,
     ) {
         val user = requireUser()
         val updated = user.copy(
             name = name,
             lastInitial = lastInitial,
-            collegeName = collegeName,
             avatarUrl = avatarUrl,
-            verifiedEmail = verifiedEmail,
-        )
-        firestore.setDocument("users", user.id, updated, serializer<User>())
-        adoptUser(updated)
-    }
-
-    @Throws(Exception::class)
-    suspend fun verifyCollegeEmail(collegeEmail: String) {
-        val trimmed = collegeEmail.trim().lowercase()
-        requireValid(trimmed.contains("@") && trimmed.contains(".")) {
-            "Please enter a valid email address."
-        }
-        val user = requireUser()
-        val domain = trimmed.substringAfter("@")
-        val guessedCollege = user.collegeName.ifEmpty {
-            domain.substringBefore(".").replaceFirstChar { it.uppercase() } + " Org"
-        }
-        val updated = user.copy(
-            verifiedTier = "vouched",
-            verifiedEmail = trimmed,
-            collegeName = guessedCollege,
         )
         firestore.setDocument("users", user.id, updated, serializer<User>())
         adoptUser(updated)
@@ -1471,9 +1429,6 @@ class SplitCruiserRepository internal constructor(
 
     fun observeUserMatches(onChange: (List<TripMatch>) -> Unit): FlowSubscription =
         userMatches.subscribeOnMain(onChange)
-
-    fun observeCommunities(onChange: (List<Community>) -> Unit): FlowSubscription =
-        allCommunities.subscribeOnMain(onChange)
 
     fun observeNotifications(onChange: (List<NotificationAlert>) -> Unit): FlowSubscription =
         notifications.subscribeOnMain(onChange)

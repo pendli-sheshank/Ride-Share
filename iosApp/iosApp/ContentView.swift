@@ -64,7 +64,7 @@ struct LoginView: View {
                 .font(.title)
                 .fontWeight(.bold)
 
-            Text("Student carpools, cost split")
+            Text("Rideshare, cost split")
                 .font(.subheadline)
                 .foregroundColor(.gray)
         }
@@ -75,7 +75,7 @@ struct LoginView: View {
         VStack(spacing: 16) {
             // Email and password, matching Android. This screen used to ask for a phone number,
             // which no backend has ever authenticated against.
-            TextField("College email", text: $email)
+            TextField("Email", text: $email)
                 .textFieldStyle(.roundedBorder)
                 .keyboardType(.emailAddress)
                 .textInputAutocapitalization(.never)
@@ -153,7 +153,6 @@ struct ProfileSetupView: View {
     @State private var name = ""
     @State private var lastInitial = ""
     @State private var homeArea = ""
-    @State private var communityId = ""
 
     var body: some View {
         NavigationView {
@@ -162,15 +161,6 @@ struct ProfileSetupView: View {
                     TextField("First name", text: $name)
                     TextField("Last initial", text: $lastInitial)
                     TextField("Home area", text: $homeArea)
-                }
-
-                Section("Campus") {
-                    Picker("Community", selection: $communityId) {
-                        Text("Select").tag("")
-                        ForEach(viewModel.communities, id: \.id) { community in
-                            Text(community.name).tag(community.id)
-                        }
-                    }
                 }
 
                 if let error = viewModel.errorMessage {
@@ -182,7 +172,6 @@ struct ProfileSetupView: View {
                         await viewModel.completeProfile(
                             name: name,
                             lastInitial: lastInitial,
-                            communityId: communityId,
                             homeArea: homeArea
                         )
                     }

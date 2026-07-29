@@ -182,16 +182,9 @@ service cloud.firestore {
       allow write: if isOwner(userId);
     }
 
-    // ============================================
-    // COLLECTION: communities
-    // ============================================
-
-    match /communities/{communityId} {
-      allow read: if true;
-      // Still client-read-only. The app ships DEFAULT_COMMUNITIES so the picker is populated even
-      // when this collection is empty.
-      allow write: if false;
-    }
+    // `communities` is deliberately absent: onboarding no longer collects a community, so nothing
+    // reads or writes that collection any more. Any documents left over in a live project from
+    // before this change are orphaned but harmless.
 
     // `invites` is deliberately absent: signup is no longer gated on a code, so the collection has
     // no client that reads or writes it and the catch-all below denies it.

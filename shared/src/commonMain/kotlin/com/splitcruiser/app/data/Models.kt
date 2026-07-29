@@ -17,14 +17,11 @@ data class User(
     val ratingAvg: Float = 0.0f,
     val ratingCount: Int = 0,
     val noShowCount: Int = 0,
-    val communityId: String = "",
     val homeArea: String = "",
     val isWomenOnlyFilterEnabled: Boolean = false,
     val fcmToken: String = "",
     val emailNotificationsEnabled: Boolean = false,
-    val pushNotificationsEnabled: Boolean = false,
-    val collegeName: String = "",
-    val verifiedEmail: String = ""
+    val pushNotificationsEnabled: Boolean = false
 ) {
     val displayName: String
         get() = if (lastInitial.isNotEmpty()) "$name $lastInitial." else name
@@ -55,13 +52,6 @@ data class LocalCredential(
     val email: String = "",
     val password: String = "",
     val userId: String = ""
-)
-
-@Serializable
-data class Community(
-    val id: String = "",
-    val name: String = "",
-    val location: String = ""
 )
 
 @Serializable
@@ -230,21 +220,4 @@ val DEFAULT_LOCATION_PLACES = listOf(
     LocationPlace("Brandeis University", "415 South St, Waltham, MA", "Campus", 42.3653, -71.2586),
     LocationPlace("Worcester Union Station", "2 Washington Square, Worcester, MA", "Transit", 42.2618, -71.7957),
     LocationPlace("Providence Station", "100 Gaspee St, Providence, RI", "Transit", 41.8291, -71.4137)
-)
-
-/**
- * The communities the app ships with.
- *
- * These used to be seeded into the local JSON store on first launch. With Firebase as the only
- * backend that no longer works: the security rules make `communities` read-only to clients, so a
- * client-side seed would be denied and the picker would be empty. Shipping them as a constant keeps
- * the profile-setup screen populated offline and on a first run, and anything present in Firestore
- * is merged on top.
- */
-val DEFAULT_COMMUNITIES = listOf(
-    Community("neu_boston", "Northeastern University", "Boston, MA"),
-    Community("asu_tempe", "Arizona State University", "Tempe, AZ"),
-    Community("utd_dallas", "University of Texas at Dallas", "Richardson, TX"),
-    Community("usc_la", "University of Southern California", "Los Angeles, CA"),
-    Community("iub_bloom", "Indiana University Bloomington", "Bloomington, IN")
 )

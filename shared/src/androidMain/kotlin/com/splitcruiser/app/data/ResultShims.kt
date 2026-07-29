@@ -23,12 +23,11 @@ suspend fun SplitCruiserRepository.signInWithGoogleResult(googleIdToken: String)
 suspend fun SplitCruiserRepository.createUserProfileResult(
     name: String,
     lastInitial: String,
-    communityId: String,
     homeArea: String,
     contact: ContactDetails,
     vehicle: Vehicle?,
 ): Result<Unit> = runCatching {
-    createUserProfile(name, lastInitial, communityId, homeArea, contact, vehicle)
+    createUserProfile(name, lastInitial, homeArea, contact, vehicle)
 }
 
 suspend fun SplitCruiserRepository.saveContactDetailsResult(details: ContactDetails): Result<Unit> =
@@ -37,15 +36,10 @@ suspend fun SplitCruiserRepository.saveContactDetailsResult(details: ContactDeta
 suspend fun SplitCruiserRepository.updateUserProfileDetailsResult(
     name: String,
     lastInitial: String,
-    collegeName: String,
     avatarUrl: String,
-    verifiedEmail: String,
 ): Result<Unit> = runCatching {
-    updateUserProfileDetails(name, lastInitial, collegeName, avatarUrl, verifiedEmail)
+    updateUserProfileDetails(name, lastInitial, avatarUrl)
 }
-
-suspend fun SplitCruiserRepository.verifyCollegeEmailResult(email: String): Result<Unit> =
-    runCatching { verifyCollegeEmail(email) }
 
 suspend fun SplitCruiserRepository.postTripOfferResult(offer: TripOffer): Result<Unit> =
     runCatching { postTripOffer(offer) }

@@ -495,7 +495,7 @@ fun EmailPasswordLoginScreen(viewModel: MainViewModel, navController: NavControl
 
         item {
             Text(
-                text = "US Desi Student Carpools. Cost-split, trust-matched.",
+                text = "US Desi Rideshare. Cost-split, trust-matched.",
                 color = SplitCruiserLightGray,
                 fontSize = 14.sp,
                 textAlign = TextAlign.Center,
@@ -736,7 +736,7 @@ fun EmailPasswordLoginScreen(viewModel: MainViewModel, navController: NavControl
 
         item {
             Text(
-                text = "Split Cruiser connects verified US college students safely. Cost-split, trust-matched.",
+                text = "Split Cruiser connects verified riders safely. Cost-split, trust-matched.",
                 color = SplitCruiserLightGray.copy(alpha = 0.5f),
                 fontSize = 11.sp,
                 textAlign = TextAlign.Center,
@@ -753,7 +753,6 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
     var name by remember { mutableStateOf("") }
     var lastInitial by remember { mutableStateOf("") }
     var homeArea by remember { mutableStateOf("") }
-    var selectedCommunityId by remember { mutableStateOf("") }
 
     // Contact and home location. The address is picked from autocomplete so it carries
     // coordinates, which is what lets a ride request fill its own pickup in later.
@@ -761,7 +760,6 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
     var homeAddress by remember { mutableStateOf("") }
     var homeLat by remember { mutableStateOf(0.0) }
     var homeLng by remember { mutableStateOf(0.0) }
-    val communities by viewModel.allCommunities.collectAsState()
 
     // Host Vehicle state (optional during setup)
     var isHostExpanded by remember { mutableStateOf(false) }
@@ -947,48 +945,6 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
                 ),
                 shape = RoundedCornerShape(12.dp)
             )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Community Pick
-            Text(
-                text = "Select Student Community",
-                color = SplitCruiserTextPrimary,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp)
-            )
-
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(SplitCruiserCardBg, RoundedCornerShape(12.dp))
-                    .border(1.dp, SplitCruiserDivider, RoundedCornerShape(12.dp))
-                    .padding(8.dp)
-            ) {
-                communities.forEach { community ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { selectedCommunityId = community.id }
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(
-                            selected = (selectedCommunityId == community.id),
-                            onClick = { selectedCommunityId = community.id },
-                            colors = RadioButtonDefaults.colors(selectedColor = SplitCruiserSaffron)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
-                            Text(community.name, color = SplitCruiserTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Text(community.location, color = SplitCruiserLightGray, fontSize = 11.sp)
-                        }
-                    }
-                }
-            }
 
             Spacer(modifier = Modifier.height(12.dp))
 
@@ -1194,7 +1150,6 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
                     val missing = when {
                         name.isBlank() -> "Please enter your first name."
                         lastInitial.isBlank() -> "Please enter your last initial."
-                        selectedCommunityId.isEmpty() -> "Please pick your student community."
                         homeArea.isBlank() -> "Please enter your home area."
                         phoneNumber.isBlank() -> "Please enter a contact number so riders can reach you."
                         else -> null
@@ -1216,7 +1171,6 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
                         viewModel.completeProfile(
                             name = name,
                             lastInitial = lastInitial,
-                            communityId = selectedCommunityId,
                             homeArea = homeArea,
                             contact = ContactDetails(
                                 phoneNumber = phoneNumber,
@@ -1255,7 +1209,6 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
     val activeOffers by viewModel.activeOffers.collectAsState()
     val activeRequests by viewModel.activeRequests.collectAsState()
     val userMatches by viewModel.userMatches.collectAsState()
-    val communities by viewModel.allCommunities.collectAsState()
     val hostedRides by viewModel.hostedRides.collectAsState()
     val joinedRides by viewModel.joinedRides.collectAsState()
     val myRideRequests by viewModel.myRideRequests.collectAsState()
@@ -1281,7 +1234,7 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
     var showSuccessDialog by remember { mutableStateOf(false) }
     var selectedOfferForDialog by remember { mutableStateOf<TripOffer?>(null) }
 
-    val userCommunity = communities.find { it.id == currentUser?.communityId }?.name ?: "Indian Student Community"
+    val dashboardSubtitle = currentUser?.homeArea?.takeIf { it.isNotBlank() } ?: "Find your next ride"
 
     Scaffold(
         topBar = {
@@ -1310,7 +1263,7 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = if (selectedTab == "trips") "My Travel Schedule" else "Namaste, ${currentUser?.name ?: "Student"}",
+                                text = if (selectedTab == "trips") "My Travel Schedule" else "Namaste, ${currentUser?.name ?: "Rider"}",
                                 color = SplitCruiserTextPrimary,
                                 fontSize = 20.sp,
                                 fontWeight = FontWeight.Black
@@ -1326,7 +1279,7 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                             }
                         }
                         Text(
-                            text = if (selectedTab == "trips") "Manage your hosted and joined rides" else userCommunity,
+                            text = if (selectedTab == "trips") "Manage your hosted and joined rides" else dashboardSubtitle,
                             color = SplitCruiserLightGray,
                             fontSize = 11.sp
                         )
@@ -1748,7 +1701,7 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                         item {
                             SplitCruiserEmptyState(
                                 title = "No Active Offers Yet",
-                                description = "Be the first to post a Ride Request so student hosts can find you!",
+                                description = "Be the first to post a Ride Request so hosts can find you!",
                                 icon = Icons.Default.DirectionsCar,
                                 actionLabel = "Post Ride Request",
                                 onActionClick = { navController.navigate("post_request") }
@@ -1783,7 +1736,7 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                         item {
                             SplitCruiserEmptyState(
                                 title = "No Open Requests",
-                                description = "Post a trip offer or wait until a local student submits a ride request.",
+                                description = "Post a trip offer or wait until someone nearby submits a ride request.",
                                 icon = Icons.Default.DirectionsCar,
                                 actionLabel = "Post Trip Offer",
                                 onActionClick = { navController.navigate("post_offer") }
@@ -1861,7 +1814,7 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                     item {
                         SplitCruiserEmptyState(
                             title = "No Joined Rides",
-                            description = "You haven't reserved seats on any student's ride yet.",
+                            description = "You haven't reserved seats on any ride yet.",
                             icon = Icons.Default.Map,
                             actionLabel = "Find a Ride",
                             onActionClick = { selectedTab = "explore" },
@@ -4670,7 +4623,7 @@ fun PostOfferScreen(viewModel: MainViewModel, navController: NavController) {
                         val vehicleLabel = if (userVehicle != null) {
                             "${userVehicle.color} ${userVehicle.make} ${userVehicle.model}"
                         } else {
-                            "Shared Student Sedan"
+                            "Shared Sedan"
                         }
 
                         val epoch = departureEpoch
@@ -5235,12 +5188,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                             Spacer(modifier = Modifier.width(16.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(offer.hostName, color = SplitCruiserTextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("Host Rating: ${String.format(Locale.US, "%.1f", offer.hostRating)} ★", color = SplitCruiserLightGray, fontSize = 12.sp)
-                                    if (hostUser?.collegeName?.isNotEmpty() == true) {
-                                        Text(" • ${hostUser.collegeName}", color = SplitCruiserSaffron, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                    }
-                                }
+                                Text("Host Rating: ${String.format(Locale.US, "%.1f", offer.hostRating)} ★", color = SplitCruiserLightGray, fontSize = 12.sp)
                             }
                             IconButton(onClick = {
                                 isHostCardExpanded = !isHostCardExpanded
@@ -5761,7 +5709,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
             ) {
                 SplitCruiserEmptyState(
                     title = "Request Unavailable",
-                    description = "This student ride request details are no longer available. It may have been matched, cancelled, or deleted by the rider.",
+                    description = "This ride request's details are no longer available. It may have been matched, cancelled, or deleted by the rider.",
                     icon = Icons.Default.Warning,
                     actionLabel = "Back to Feed",
                     onActionClick = { navController.popBackStack() }
@@ -6086,7 +6034,7 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
                 title = {
                     Column {
                         Text(
-                            text = if (currentMatch?.hostId == currentUser?.id) "Ride with ${currentMatch?.riderName ?: "Student"}" else "Ride Coordinator Chat",
+                            text = if (currentMatch?.hostId == currentUser?.id) "Ride with ${currentMatch?.riderName ?: "Rider"}" else "Ride Coordinator Chat",
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
                             color = SplitCruiserTextPrimary
@@ -6690,8 +6638,6 @@ fun EditProfileDialog(
     val currentUser by viewModel.currentUser.collectAsState()
     var name by remember { mutableStateOf(currentUser?.name ?: "") }
     var lastInitial by remember { mutableStateOf(currentUser?.lastInitial ?: "") }
-    var collegeName by remember { mutableStateOf(currentUser?.collegeName ?: "") }
-    var verifiedEmail by remember { mutableStateOf(currentUser?.verifiedEmail ?: "") }
     var avatarUrl by remember { mutableStateOf(currentUser?.avatarUrl ?: "") }
     var customUrlInput by remember { mutableStateOf(if (currentUser?.avatarUrl?.startsWith("http") == true) currentUser!!.avatarUrl else "") }
 
@@ -6826,45 +6772,6 @@ fun EditProfileDialog(
                     }
                 }
 
-                item {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = collegeName,
-                        onValueChange = { collegeName = it },
-                        label = { Text("College / University") },
-                        placeholder = { Text("e.g. Stanford University") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = SplitCruiserSaffron,
-                            unfocusedBorderColor = SplitCruiserDivider,
-                            focusedTextColor = SplitCruiserTextPrimary,
-                            unfocusedTextColor = SplitCruiserTextPrimary,
-                            focusedLabelColor = SplitCruiserSaffron,
-                            unfocusedLabelColor = SplitCruiserLightGray
-                        )
-                    )
-                }
-
-                item {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = verifiedEmail,
-                        onValueChange = { verifiedEmail = it },
-                        label = { Text("Verified Email") },
-                        placeholder = { Text("e.g. user@example.com") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = SplitCruiserSaffron,
-                            unfocusedBorderColor = SplitCruiserDivider,
-                            focusedTextColor = SplitCruiserTextPrimary,
-                            unfocusedTextColor = SplitCruiserTextPrimary,
-                            focusedLabelColor = SplitCruiserSaffron,
-                            unfocusedLabelColor = SplitCruiserLightGray
-                        )
-                    )
-                }
             }
         },
         confirmButton = {
@@ -6874,9 +6781,7 @@ fun EditProfileDialog(
                     viewModel.updateUserProfileDetails(
                         name = name,
                         lastInitial = lastInitial,
-                        collegeName = collegeName,
                         avatarUrl = finalAvatar,
-                        verifiedEmail = verifiedEmail,
                         onSuccess = onDismiss
                     )
                 },
@@ -6899,8 +6804,6 @@ fun EditProfileDialog(
 fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
     val currentUser by viewModel.currentUser.collectAsState()
     val isFirebaseEnabled = viewModel.repository.isFirebaseEnabled
-    var selectedCommunityId = currentUser?.communityId ?: ""
-    val communities by viewModel.allCommunities.collectAsState()
     val userVehicle = viewModel.getVehicleInfo(currentUser?.id ?: "")
     val userAlerts by viewModel.notifications.collectAsState()
 
@@ -6910,8 +6813,6 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
     var ratingTargetUserId by remember { mutableStateOf("") }
     var ratingValue by remember { mutableStateOf(5f) }
     var ratingComment by remember { mutableStateOf("") }
-
-    val userCommunity = communities.find { it.id == selectedCommunityId }?.name ?: "Indian Student Community"
 
     LazyColumn(
         modifier = Modifier
@@ -6947,64 +6848,17 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
                     Spacer(modifier = Modifier.height(12.dp))
 
                     Text(
-                        text = currentUser?.displayName ?: "Verified Student",
+                        text = currentUser?.displayName ?: "Rider",
                         color = Color.White,
                         fontWeight = FontWeight.Bold,
                         fontSize = 18.sp
                     )
 
-                    val college = currentUser?.collegeName ?: ""
-                    if (college.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.School,
-                                contentDescription = "College",
-                                tint = SplitCruiserSaffron,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = college,
-                                color = Color.White,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    } else {
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "No college set yet. Add yours below!",
-                            color = SplitCruiserLightGray,
-                            fontSize = 11.sp
-                        )
-                    }
-
-                    val verifiedEmail = currentUser?.verifiedEmail ?: ""
-                    if (verifiedEmail.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.Email,
-                                contentDescription = "Verified Email",
-                                tint = SplitCruiserSaffron,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = verifiedEmail,
-                                color = SplitCruiserLightGray,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Normal
-                            )
-                        }
-                    }
-
                     Spacer(modifier = Modifier.height(10.dp))
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         FirebaseStatusPill(isFirebaseEnabled = isFirebaseEnabled)
-                        if (currentUser?.verifiedTier == "vouched" || verifiedEmail.isNotEmpty()) {
+                        if (currentUser?.verifiedTier == "vouched") {
                             Spacer(modifier = Modifier.width(8.dp))
                             Box(
                                 modifier = Modifier
@@ -7020,7 +6874,7 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
                                         modifier = Modifier.size(10.dp)
                                     )
                                     Spacer(modifier = Modifier.width(2.dp))
-                                    Text("Verified Student", color = SplitCruiserEmerald, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("Verified", color = SplitCruiserEmerald, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -7077,83 +6931,6 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
                 }
             }
 
-            if (currentUser?.verifiedTier != "vouched") {
-                Spacer(modifier = Modifier.height(20.dp))
-                Text("VERIFY COLLEGE STUDENT STATUS", color = SplitCruiserSaffron, fontSize = 11.sp, fontWeight = FontWeight.Black)
-                Spacer(modifier = Modifier.height(8.dp))
-
-                var collegeEmailInput by remember { mutableStateOf("") }
-                var verifyError by remember { mutableStateOf("") }
-                var verifySuccess by remember { mutableStateOf("") }
-
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = SplitCruiserCardBg),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(
-                            text = "Verify an alternate email address to secure your account and unlock full vouched benefits!",
-                            color = SplitCruiserLightGray,
-                            fontSize = 12.sp,
-                            lineHeight = 16.sp
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        OutlinedTextField(
-                            value = collegeEmailInput,
-                            onValueChange = { 
-                                collegeEmailInput = it
-                                verifyError = ""
-                                verifySuccess = ""
-                            },
-                            label = { Text("Alternate/Official Email") },
-                            placeholder = { Text("e.g. user@example.com") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = SplitCruiserSaffron,
-                                unfocusedBorderColor = SplitCruiserDivider,
-                                focusedTextColor = SplitCruiserTextPrimary,
-                                unfocusedTextColor = SplitCruiserTextPrimary,
-                                focusedLabelColor = SplitCruiserSaffron,
-                                unfocusedLabelColor = SplitCruiserLightGray,
-                                focusedContainerColor = SplitCruiserCardBg,
-                                unfocusedContainerColor = SplitCruiserCardBg
-                            )
-                        )
-                        if (verifyError.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(verifyError, color = Color.Red, fontSize = 11.sp)
-                        }
-                        if (verifySuccess.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(verifySuccess, color = SplitCruiserEmerald, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Button(
-                            onClick = {
-                                if (collegeEmailInput.isNotEmpty()) {
-                                    viewModel.verifyCollegeEmail(
-                                        email = collegeEmailInput,
-                                        onSuccess = {
-                                            verifySuccess = "Successfully verified email!"
-                                            collegeEmailInput = ""
-                                        },
-                                        onFailure = { err ->
-                                            verifyError = err
-                                        }
-                                    )
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserSaffron),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("Verify & Update Profile", color = Color.White, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            }
-
             Spacer(modifier = Modifier.height(20.dp))
 
             // Notification Preferences Settings
@@ -7167,7 +6944,7 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "Get real-time alerts whenever another student posts a carpool trip that matches your exact active ride requests.",
+                        text = "Get real-time alerts whenever another rider posts a carpool trip that matches your exact active ride requests.",
                         color = SplitCruiserLightGray,
                         fontSize = 12.sp,
                         lineHeight = 16.sp
@@ -7339,7 +7116,7 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Block, contentDescription = "Blocked", tint = SplitCruiserLightGray)
                             Spacer(modifier = Modifier.width(12.dp))
-                            Text("Manage Blocked Students", color = Color.White, fontSize = 13.sp)
+                            Text("Manage Blocked Users", color = Color.White, fontSize = 13.sp)
                         }
                         Icon(imageVector = Icons.Default.ChevronRight, contentDescription = "Open", tint = SplitCruiserLightGray)
                     }
@@ -7449,7 +7226,7 @@ fun BlockedListScreen(viewModel: MainViewModel, navController: NavController) {
                 Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = SplitCruiserTextPrimary)
             }
             Spacer(modifier = Modifier.width(8.dp))
-            Text("Blocked Students", color = SplitCruiserTextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Black)
+            Text("Blocked Users", color = SplitCruiserTextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Black)
         }
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -7458,7 +7235,7 @@ fun BlockedListScreen(viewModel: MainViewModel, navController: NavController) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 SplitCruiserEmptyState(
                     title = "High Trust Community!",
-                    description = "You haven't blocked any student. Everyone is vouched and trusted.",
+                    description = "You haven't blocked anyone. Everyone is vouched and trusted.",
                     icon = Icons.Default.Verified
                 )
             }
@@ -7597,7 +7374,7 @@ fun DriverContactModal(
                         )
                     }
 
-                    // Vouched / Student badge
+                    // Vouched badge
                     val isVouched = verifiedTier.lowercase() == "vouched"
                     Box(
                         modifier = Modifier
@@ -7606,7 +7383,7 @@ fun DriverContactModal(
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
-                            text = if (isVouched) "VERIFIED STUDENT" else "GUEST USER",
+                            text = if (isVouched) "VERIFIED" else "UNVERIFIED",
                             color = if (isVouched) SplitCruiserEmerald else SplitCruiserLightGray,
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Bold

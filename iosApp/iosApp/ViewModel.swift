@@ -23,7 +23,6 @@ final class AppViewModel: ObservableObject {
     @Published var activeRequests: [RideRequest] = []
     @Published var myRideRequests: [RideRequest] = []
     @Published var userMatches: [TripMatch] = []
-    @Published var communities: [Community] = []
     @Published var isConnected = false
     @Published var isLoading = false
     @Published var errorMessage: String?
@@ -54,9 +53,6 @@ final class AppViewModel: ObservableObject {
         })
         subscriptions.append(repository.observeUserMatches { [weak self] matches in
             self?.userMatches = matches
-        })
-        subscriptions.append(repository.observeCommunities { [weak self] communities in
-            self?.communities = communities
         })
         subscriptions.append(repository.observeConnection { [weak self] connected in
             // A Bool in a generic position arrives as KotlinBoolean.
@@ -93,12 +89,11 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    func completeProfile(name: String, lastInitial: String, communityId: String, homeArea: String) async {
+    func completeProfile(name: String, lastInitial: String, homeArea: String) async {
         await perform {
             try await self.repository.createUserProfile(
                 name: name,
                 lastInitial: lastInitial,
-                communityId: communityId,
                 homeArea: homeArea,
                 vehicle: nil
             )

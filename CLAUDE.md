@@ -1,7 +1,7 @@
 # Split Cruiser
 
-Community rideshare app for students. Started in Google AI Studio as an Android-only Jetpack
-Compose app; being taken multiplatform.
+Rideshare app open to anyone booking a ride, not gated on any affiliation. Started in Google AI
+Studio as an Android-only Jetpack Compose app; being taken multiplatform.
 
 ## Releasing
 
