@@ -144,14 +144,11 @@ class FirestoreCodecTest {
             ratingAvg = 4.25f,
             ratingCount = 12,
             noShowCount = 1,
-            communityId = "neu",
             homeArea = "Mission Hill",
             isWomenOnlyFilterEnabled = true,
             fcmToken = "token",
             emailNotificationsEnabled = true,
-            pushNotificationsEnabled = false,
-            collegeName = "Northeastern University",
-            verifiedEmail = "ana@northeastern.edu"
+            pushNotificationsEnabled = false
         )
         val restored = roundTrip(original)
         assertEquals(original, restored)
@@ -223,10 +220,6 @@ class FirestoreCodecTest {
         assertEquals(
             ContactDetails("+16175550100", "12 Mission Hill, Boston, MA", 42.3332, -71.1054),
             roundTrip(ContactDetails("+16175550100", "12 Mission Hill, Boston, MA", 42.3332, -71.1054))
-        )
-        assertEquals(
-            Community("neu", "Northeastern University", "Boston, MA"),
-            roundTrip(Community("neu", "Northeastern University", "Boston, MA"))
         )
         assertEquals(
             Vehicle("user_a", "Honda", "Civic", "2019", "Blue", "1ABC234"),
