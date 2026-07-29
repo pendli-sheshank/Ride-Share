@@ -5,14 +5,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import com.splitcruiser.app.ui.SplitCruiserApp
-import com.splitcruiser.app.ui.theme.MyApplicationTheme
+import com.splitcruiser.app.ui.theme.SplitCruiserTheme
 
 class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     enableEdgeToEdge()
     setContent {
-      MyApplicationTheme {
+      SplitCruiserTheme {
         SplitCruiserApp()
       }
     }

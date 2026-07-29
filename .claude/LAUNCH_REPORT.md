@@ -117,7 +117,7 @@ Split Cruiser has successfully completed 19 development tasks and is ready for p
 
 ### Visual Polish
 - ✅ Material 3 components properly styled
-- ✅ Theme colors applied (Saffron #0061A4, Indigo #D1E4FF, etc.)
+- Theme colors applied (SplitCruiserPrimary #0061A4, SplitCruiserPrimaryContainer #D1E4FF, etc. — these were named Saffron and Indigo while rendering blue; see .claude/DESIGN_SYSTEM.md)
 - ✅ Typography hierarchy (24sp headings, 14sp body, 11sp captions)
 - ✅ Spacing consistency (8dp, 12dp, 16dp, 24dp increments)
 - ✅ Card-based layout with 12dp rounded corners

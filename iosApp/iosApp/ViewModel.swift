@@ -27,6 +27,10 @@ final class AppViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
 
+    /// Where the user lives, so a ride request can prefill its pickup. iOS never collected this
+    /// before, which is why its post-request form started blank while Android's arrived filled in.
+    @Published var contactDetails: ContactDetails?
+
     /// True once a profile exists; the UI routes to profile setup when it does not.
     @Published var needsProfileSetup = false
 
@@ -57,6 +61,9 @@ final class AppViewModel: ObservableObject {
         subscriptions.append(repository.observeConnection { [weak self] connected in
             // A Bool in a generic position arrives as KotlinBoolean.
             self?.isConnected = connected.boolValue
+        })
+        subscriptions.append(repository.observeContactDetails { [weak self] details in
+            self?.contactDetails = details
         })
 
         // Restores a stored session and starts the polling refreshers.
@@ -89,13 +96,33 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    func completeProfile(name: String, lastInitial: String, homeArea: String) async {
+    /// Onboarding, now collecting what Android has always collected: a contact number, a home
+    /// address, and optionally a vehicle.
+    ///
+    /// Without the phone number, an Android rider matched with an iOS-onboarded host opened the
+    /// contact card to a blank row; without the address, this app could not prefill a pickup.
+    func completeProfile(
+        name: String,
+        lastInitial: String,
+        homeArea: String,
+        phoneNumber: String,
+        homeAddress: String,
+        homeLat: Double,
+        homeLng: Double,
+        vehicle: Vehicle?
+    ) async {
         await perform {
             try await self.repository.createUserProfile(
                 name: name,
                 lastInitial: lastInitial,
                 homeArea: homeArea,
-                vehicle: nil
+                contact: ContactDetails(
+                    phoneNumber: phoneNumber,
+                    homeAddress: homeAddress,
+                    homeLat: homeLat,
+                    homeLng: homeLng
+                ),
+                vehicle: vehicle
             )
             self.needsProfileSetup = false
         }
@@ -188,6 +215,74 @@ final class AppViewModel: ObservableObject {
 
     func refresh() async {
         await perform { try await self.repository.refreshNow() }
+    }
+
+    // MARK: - Ride detail
+
+    /// The host's public profile, for the trust information the detail screen shows before
+    /// somebody commits to getting in a stranger's car. Reads the cache first; falls back to a
+    /// fetch, which also populates the cache for next time.
+    func hostProfile(userId: String) async -> User? {
+        if let cached = repository.getUserPublicProfile(userId: userId) { return cached }
+        return try? await repository.fetchUserProfile(userId: userId)
+    }
+
+    func vehicle(userId: String) async -> Vehicle? {
+        if let cached = repository.getVehicleInfo(userId: userId) { return cached }
+        return try? await repository.fetchVehicleInfo(userId: userId)
+    }
+
+    // MARK: - Chat
+
+    /// Subscribes to one conversation. The returned handle must be cancelled when the screen
+    /// goes away, and `openChat` tells the repository to poll this conversation quickly (3s)
+    /// while it is on screen.
+    func observeChat(matchId: String, onChange: @escaping ([Message]) -> Void) -> FlowSubscription {
+        repository.openChat(matchId: matchId)
+        return repository.observeChat(matchId: matchId) { messages in
+            onChange(messages)
+        }
+    }
+
+    func closeChat() {
+        repository.openChat(matchId: nil)
+    }
+
+    func sendMessage(matchId: String, text: String) async {
+        await perform { try await self.repository.sendMessage(matchId: matchId, text: text) }
+    }
+
+    /// A structured pickup proposal or confirmation — see `MessageType` in `:shared`.
+    func sendPickupMessage(matchId: String, type: String, spot: String, time: String) async {
+        let summary = type == MessageType.shared.PICKUP_CONFIRMED
+            ? "Confirmed: meet at \(spot) at \(time)"
+            : "Pickup proposal: \(spot) at \(time)"
+        await perform {
+            try await self.repository.sendMessage(
+                matchId: matchId,
+                text: summary,
+                type: type,
+                pickupSpot: spot,
+                pickupTime: time
+            )
+        }
+    }
+
+    /// The offer behind a match, so the chat screen can show what ride is being coordinated.
+    func offer(for match: TripMatch) -> TripOffer? {
+        repository.getTripOfferById(offerId: match.offerId)
+    }
+
+    // MARK: - Ratings
+
+    func submitRating(toUserId: String, rating: Float, comment: String) async -> Bool {
+        await perform {
+            try await self.repository.submitRating(
+                toUserId: toUserId,
+                ratingValue: rating,
+                comment: comment
+            )
+        }
     }
 
     // MARK: - Search

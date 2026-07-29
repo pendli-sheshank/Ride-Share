@@ -277,7 +277,7 @@ Shows actively joined ride offers:
 ### Loading States
 ```kotlin
 if (isLoading && activeOffers.isEmpty()) {
-    Split CruiserFeedLoadingSkeleton()
+    SplitCruiserFeedLoadingSkeleton()
 }
 ```
 
@@ -286,7 +286,7 @@ Shows shimmer skeleton cards while data loads.
 ### Empty States
 ```kotlin
 @Composable
-fun Split CruiserEmptyState(
+fun SplitCruiserEmptyState(
     title: String,
     description: String,
     icon: androidx.compose.material.icons.Icons,
@@ -346,7 +346,7 @@ Row(
         ) {
             Text(
                 text = if (mode == "Rider") "Rider Mode (Find Ride)" else "Host Mode (Give Ride)",
-                color = if (active) Split CruiserTextPrimary else Color(0xFF64748B),
+                color = if (active) SplitCruiserTextPrimary else Color(0xFF64748B),
                 fontWeight = FontWeight.Bold,
                 fontSize = 13.sp
             )
@@ -457,11 +457,11 @@ Icon(
 ## Theming
 
 ### Color Palette
-- **Primary:** Split CruiserSaffron (0xFF0061A4) - Blue
-- **Secondary:** Split CruiserIndigo (0xFFD1E4FF) - Light Blue
-- **Success:** Split CruiserEmerald (0xFF10B981) - Green
-- **Background:** Split CruiserDarkBg (0xFFF8F9FF) - Light Gray
-- **Card:** Split CruiserCardBg (0xFFFFFFFF) - White
+- **Primary:** SplitCruiserPrimary (0xFF0061A4) — blue
+- **Secondary:** SplitCruiserPrimaryContainer (0xFFD1E4FF) — pale blue
+- **Success:** SplitCruiserSuccess (0xFF10B981) — green
+- **Background:** SplitCruiserSurface (0xFFF8F9FF) — near-white, the app background
+- **Card:** SplitCruiserSurfaceCard (0xFFFFFFFF) — white
 
 ### Typography
 - **Headline:** 20sp, Black weight

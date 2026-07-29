@@ -3,7 +3,7 @@ package com.splitcruiser.app
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
 import com.splitcruiser.app.ui.SplitCruiserApp
-import com.splitcruiser.app.ui.theme.MyApplicationTheme
+import com.splitcruiser.app.ui.theme.SplitCruiserTheme
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
 import com.github.takahirom.roborazzi.captureRoboImage
 import org.junit.Rule
@@ -22,7 +22,7 @@ class GreetingScreenshotTest {
 
   @Test
   fun greeting_screenshot() {
-    composeTestRule.setContent { MyApplicationTheme { SplitCruiserApp() } }
+    composeTestRule.setContent { SplitCruiserTheme { SplitCruiserApp() } }
 
     composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/greeting.png")
   }

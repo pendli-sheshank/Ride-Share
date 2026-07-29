@@ -1,113 +1,170 @@
 package com.splitcruiser.app.ui
 
-import androidx.compose.ui.test.*
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import org.junit.Before
+import com.splitcruiser.app.data.RideRequest
+import com.splitcruiser.app.data.TripOffer
+import com.splitcruiser.app.ui.theme.SplitCruiserTheme
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
+/**
+ * Compose UI tests for the components a screen is assembled from.
+ *
+ * What was here before asserted against local variables and never rendered anything: `testLoginFlow`
+ * checked that a hardcoded `"+1-555-0100".isNotEmpty()`, `testNavigationTabsExist` checked that
+ * `4 >= 4`, and `setup()` called `setContent {}` with an empty body. Every test passed without
+ * touching a single composable, while the docs cited the suite as evidence the login screen was
+ * tested.
+ *
+ * These render real composables and assert on what appears. They cover the shared pieces rather
+ * than whole screens, because every screen takes a `MainViewModel`, which constructs a
+ * `SplitCruiserRepository` and starts polling Firebase — that needs a fake, which does not exist
+ * yet, and a test that silently talks to the network is worse than no test.
+ */
 @RunWith(AndroidJUnit4::class)
 class SplitCruiserAppUITest {
 
     @get:Rule
     val composeTestRule = createComposeRule()
 
-    @Before
-    fun setup() {
-        composeTestRule.setContent {
-            // Will be replaced with actual app content when UI integration is complete
-            // For now, this is a placeholder for UI testing infrastructure
+    private fun setContent(content: @androidx.compose.runtime.Composable () -> Unit) {
+        composeTestRule.setContent { SplitCruiserTheme { content() } }
+    }
+
+    @Test
+    fun routeIndicator_showsBothEndsOfTheJourney() {
+        setContent {
+            RouteIndicator(origin = "Snell Library", destination = "Logan Airport")
         }
+
+        composeTestRule.onNodeWithText("Snell Library").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Logan Airport").assertIsDisplayed()
     }
 
     @Test
-    fun testAppLaunches() {
-        // Verify the app can be launched without crashing
-        composeTestRule.waitUntil(timeoutMillis = 5000) {
-            composeTestRule.onRoot().isDisplayed()
+    fun statusBadge_upperCasesTheStatus() {
+        setContent { StatusBadge(status = "active") }
+
+        composeTestRule.onNodeWithText("ACTIVE").assertIsDisplayed()
+    }
+
+    @Test
+    fun statusColor_isSharedAcrossEveryCard() {
+        // The regression this guards: each card used to re-implement its own
+        // `when (status) { ... }`, so a status handled by one fell through to the `else` of
+        // another. One function now means they cannot disagree.
+        assert(statusColor("active") == statusColor("ACTIVE"))
+        assert(statusColor("cancelled") != statusColor("active"))
+        assert(statusColor("something-new") == statusColor("unknown"))
+    }
+
+    @Test
+    fun emptyState_rendersItsCallToActionAndInvokesIt() {
+        var clicked = false
+        setContent {
+            SplitCruiserEmptyState(
+                title = "No Hosted Rides",
+                description = "You haven't posted any trip offers yet.",
+                actionLabel = "Post a ride offer",
+                onActionClick = { clicked = true }
+            )
         }
+
+        composeTestRule.onNodeWithText("No Hosted Rides").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Post a ride offer").performClick()
+        assert(clicked) { "The empty state's action did not fire." }
     }
 
     @Test
-    fun testNavigationTabsExist() {
-        // This test will verify navigation tabs once UI is integrated
-        // Expected tabs: Home, My Rides, Messages, Profile
-        val expectedTabCount = 4
+    fun hostedRideCard_showsRouteStatusAndSeatCount() {
+        val offer = TripOffer(
+            id = "offer_1",
+            hostName = "Alex",
+            origin = "Ruggles Station",
+            destination = "South Station",
+            departureTime = 1_800_000_000_000,
+            totalSeats = 4,
+            seatsLeft = 2,
+            status = "active",
+        )
 
-        // Placeholder for tab verification
-        assert(expectedTabCount >= 4)
+        setContent {
+            HostedRideScheduleCard(offer = offer, onCardClick = {}, onStatusChange = {})
+        }
+
+        composeTestRule.onNodeWithText("Ruggles Station").assertIsDisplayed()
+        composeTestRule.onNodeWithText("South Station").assertIsDisplayed()
+        composeTestRule.onNodeWithText("ACTIVE").assertIsDisplayed()
+        composeTestRule.onNodeWithText("2 / 4").assertIsDisplayed()
     }
 
     @Test
-    fun testRideOfferListDisplay() {
-        // Test that ride offers can be displayed in a list
-        // This will verify TripOffer model rendering once UI is complete
+    fun myRideRequestCard_offersCancelOnlyWhileActive() {
+        var cancelled = false
+        val request = RideRequest(
+            id = "req_1",
+            origin = "Mission Hill",
+            destination = "Harvard Square",
+            departureTime = 1_800_000_000_000,
+            seatsNeeded = 1,
+            status = "active",
+        )
 
-        val testOfferCount = 5
-        assert(testOfferCount >= 1)
+        setContent {
+            MyRideRequestCard(request = request, onCancelClick = { cancelled = true })
+        }
+
+        composeTestRule.onNodeWithText("Cancel request").performClick()
+        assert(cancelled) { "Cancelling an active ride request did nothing." }
     }
 
     @Test
-    fun testRideDetailView() {
-        // Test detailed ride information display
-        val rideTitle = "Boston to NYC"
-        assert(rideTitle.isNotEmpty())
+    fun cancelledRideRequest_hasNoCancelButton() {
+        val request = RideRequest(
+            id = "req_2",
+            origin = "Mission Hill",
+            destination = "Harvard Square",
+            status = "cancelled",
+        )
+
+        setContent { MyRideRequestCard(request = request, onCancelClick = {}) }
+
+        composeTestRule.onNodeWithText("Cancel request").assertDoesNotExist()
     }
 
     @Test
-    fun testUserProfileDisplay() {
-        // Test user profile information rendering
-        val userName = "Test User"
-        val rating = 4.5f
+    fun formSection_groupsItsFieldsUnderAHeading() {
+        setContent {
+            FormSection(title = "Route") {
+                androidx.compose.material3.Text("Pickup")
+            }
+        }
 
-        assert(userName.isNotEmpty())
-        assert(rating in 0f..5f)
+        composeTestRule.onNodeWithText("ROUTE").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Pickup").assertIsDisplayed()
     }
 
     @Test
-    fun testLoginFlow() {
-        // Test login UI elements
-        val phoneNumber = "+1-555-0100"
-        val password = "test_password"
+    fun proposePickupDialog_returnsWhatWasTyped() {
+        var proposed: Pair<String, String>? = null
+        setContent {
+            ProposePickupDialog(
+                onDismiss = {},
+                onPropose = { location, time -> proposed = location to time }
+            )
+        }
 
-        assert(phoneNumber.isNotEmpty())
-        assert(password.isNotEmpty())
-    }
+        composeTestRule.onNodeWithTag("propose_location_input").performTextInput("Main entrance")
+        composeTestRule.onNodeWithTag("propose_time_input").performTextInput("8:15 am")
+        composeTestRule.onNodeWithText("Send Proposal").performClick()
 
-    @Test
-    fun testErrorMessageDisplay() {
-        // Test error handling UI
-        val errorMessage = "Network error occurred"
-        assert(errorMessage.isNotEmpty())
-    }
-
-    @Test
-    fun testLoadingIndicator() {
-        // Test loading state display
-        val isLoading = true
-        assert(isLoading)
-    }
-
-    @Test
-    fun testEmptyStateDisplay() {
-        // Test empty list display
-        val emptyList: List<String> = emptyList()
-        assert(emptyList.isEmpty())
-    }
-
-    @Test
-    fun testMessageListDisplay() {
-        // Test message list rendering
-        val messageCount = 3
-        assert(messageCount >= 0)
-    }
-
-    @Test
-    fun testNotificationAlert() {
-        // Test notification display
-        val notificationTitle = "Ride Matched"
-        assert(notificationTitle.isNotEmpty())
+        assert(proposed == "Main entrance" to "8:15 am") { "Got $proposed" }
     }
 }

@@ -4,6 +4,11 @@ import Shared
 // Views are kept deliberately small and split into computed sub-views. Swift's type checker gives
 // up on large ViewBuilder bodies ("unable to type-check this expression in reasonable time"), and
 // that has already cost this project a macOS CI round trip once.
+//
+// Colours, spacing and the shared building blocks (`BrandCard`, `StatusBadge`, `RouteIndicator`,
+// `BrandEmptyState`) live in Theme.swift and come from the same tokens Android reads. This file
+// used to paint everything in system defaults — `.blue`, `.gray`, `systemGray6` — so the app had
+// no visual identity on iOS at all.
 
 struct ContentView: View {
     @StateObject private var viewModel = AppViewModel()
@@ -18,6 +23,7 @@ struct ContentView: View {
                 MainTabView(viewModel: viewModel)
             }
         }
+        .tint(Brand.primary)
     }
 }
 
@@ -52,27 +58,30 @@ struct LoginView: View {
     @ObservedObject var viewModel: AppViewModel
     @State private var email = ""
     @State private var password = ""
+    @State private var confirmPassword = ""
     @State private var isSigningUp = false
+    @State private var validationError: String?
 
     private var header: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: BrandScale.spaceMd) {
             Image(systemName: "car.fill")
                 .font(.system(size: 48))
-                .foregroundColor(.blue)
+                .foregroundColor(Brand.primary)
 
             Text("Split Cruiser")
                 .font(.title)
                 .fontWeight(.bold)
+                .foregroundColor(Brand.textPrimary)
 
             Text("Rideshare, cost split")
                 .font(.subheadline)
-                .foregroundColor(.gray)
+                .foregroundColor(Brand.textSecondary)
         }
         .padding(.top, 40)
     }
 
     private var form: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: BrandScale.spaceLg) {
             // Email and password, matching Android. This screen used to ask for a phone number,
             // which no backend has ever authenticated against.
             TextField("Email", text: $email)
@@ -84,63 +93,86 @@ struct LoginView: View {
             SecureField("Password", text: $password)
                 .textFieldStyle(.roundedBorder)
 
+            if isSigningUp {
+                SecureField("Confirm password", text: $confirmPassword)
+                    .textFieldStyle(.roundedBorder)
+
+                // The same guidance Android shows inline. Firebase rejects anything shorter, and
+                // finding that out from a server error after tapping is a worse way to learn it.
+                Text("At least 6 characters.")
+                    .font(.caption)
+                    .foregroundColor(Brand.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             if !viewModel.isBackendConfigured {
                 Text("This build has no Firebase configuration, so sign-in is unavailable.")
                     .font(.caption)
-                    .foregroundColor(.orange)
+                    .foregroundColor(Brand.warning)
                     .multilineTextAlignment(.center)
             }
 
-            if let error = viewModel.errorMessage {
+            if let error = validationError ?? viewModel.errorMessage {
                 Text(error)
                     .font(.caption)
-                    .foregroundColor(.red)
+                    .foregroundColor(Brand.danger)
                     .multilineTextAlignment(.center)
             }
 
             Button(action: submit) {
                 if viewModel.isLoading {
-                    ProgressView()
-                        .frame(maxWidth: .infinity)
-                        .padding()
+                    ProgressView().frame(maxWidth: .infinity).padding()
                 } else {
                     Text(isSigningUp ? "Create account" : "Log in")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.blue)
-                        .foregroundColor(.white)
-                        .cornerRadius(8)
                 }
             }
+            .buttonStyle(BrandButtonStyle(isEnabled: viewModel.isBackendConfigured))
             .disabled(viewModel.isLoading || !viewModel.isBackendConfigured)
 
             Button(isSigningUp ? "Already have an account? Log in"
                                : "New here? Create an account") {
                 isSigningUp.toggle()
+                validationError = nil
                 viewModel.clearError()
             }
             .font(.callout)
+            .foregroundColor(Brand.primary)
         }
         .padding()
     }
 
     var body: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: BrandScale.spaceXl) {
             header
             Spacer()
             form
             Spacer()
         }
         .padding()
+        .background(Brand.surface.ignoresSafeArea())
     }
 
     private func submit() {
+        validationError = nil
+        let trimmedEmail = email.trimmingCharacters(in: .whitespaces)
+        let trimmedPassword = password.trimmingCharacters(in: .whitespaces)
+
+        if isSigningUp {
+            guard trimmedPassword.count >= 6 else {
+                validationError = "Passwords need at least 6 characters."
+                return
+            }
+            guard trimmedPassword == confirmPassword.trimmingCharacters(in: .whitespaces) else {
+                validationError = "Those passwords don't match."
+                return
+            }
+        }
+
         Task {
             if isSigningUp {
-                await viewModel.signUp(email: email, password: password)
+                await viewModel.signUp(email: trimmedEmail, password: trimmedPassword)
             } else {
-                await viewModel.logIn(email: email, password: password)
+                await viewModel.logIn(email: trimmedEmail, password: trimmedPassword)
             }
         }
     }
@@ -148,11 +180,32 @@ struct LoginView: View {
 
 // MARK: - Profile setup
 
+/// Onboarding, collecting the same fields Android does.
+///
+/// It used to ask for a name and a home area only. Everything downstream that depends on the rest
+/// degraded silently: an Android rider matched with an iOS-onboarded host opened the contact card
+/// to a blank phone row, and this app could not prefill a pickup because it had no address.
 struct ProfileSetupView: View {
     @ObservedObject var viewModel: AppViewModel
     @State private var name = ""
     @State private var lastInitial = ""
     @State private var homeArea = ""
+    @State private var phoneNumber = ""
+    @State private var homeAddress = PlaceSelection()
+    @State private var addsVehicle = false
+    @State private var vehicleMake = ""
+    @State private var vehicleModel = ""
+    @State private var vehicleYear = ""
+    @State private var vehicleColor = ""
+    @State private var licensePlate = ""
+    @State private var validationError: String?
+
+    private var canSubmit: Bool {
+        !name.trimmingCharacters(in: .whitespaces).isEmpty
+            && !lastInitial.trimmingCharacters(in: .whitespaces).isEmpty
+            && !homeArea.trimmingCharacters(in: .whitespaces).isEmpty
+            && !viewModel.isLoading
+    }
 
     var body: some View {
         NavigationView {
@@ -163,22 +216,78 @@ struct ProfileSetupView: View {
                     TextField("Home area", text: $homeArea)
                 }
 
-                if let error = viewModel.errorMessage {
-                    Text(error).font(.caption).foregroundColor(.red)
+                Section {
+                    TextField("Contact number", text: $phoneNumber)
+                        .keyboardType(.phonePad)
+                } header: {
+                    Text("How riders reach you")
+                } footer: {
+                    // Say why the field is required, not just that it is — the pattern Android's
+                    // onboarding already uses.
+                    Text("Shared only with people you've matched with, so they can find you at pickup.")
                 }
 
-                Button("Continue") {
-                    Task {
-                        await viewModel.completeProfile(
-                            name: name,
-                            lastInitial: lastInitial,
-                            homeArea: homeArea
-                        )
+                Section {
+                    PlaceField(title: "Home address", selection: $homeAddress, viewModel: viewModel)
+                } header: {
+                    Text("Where you usually start")
+                } footer: {
+                    Text("Used to prefill the pickup on a ride request. Never shown to other riders.")
+                }
+
+                Section("Your vehicle (optional)") {
+                    Toggle("I drive", isOn: $addsVehicle)
+
+                    if addsVehicle {
+                        TextField("Make", text: $vehicleMake)
+                        TextField("Model", text: $vehicleModel)
+                        TextField("Year", text: $vehicleYear).keyboardType(.numberPad)
+                        TextField("Colour", text: $vehicleColor)
+                        TextField("Licence plate", text: $licensePlate)
                     }
                 }
-                .disabled(viewModel.isLoading)
+
+                if let error = validationError ?? viewModel.errorMessage {
+                    Text(error).font(.caption).foregroundColor(Brand.danger)
+                }
+
+                Button("Finish setup") { submit() }
+                    .disabled(!canSubmit)
             }
             .navigationTitle("Set up your profile")
+        }
+    }
+
+    private func submit() {
+        validationError = nil
+        let trimmedPhone = phoneNumber.trimmingCharacters(in: .whitespaces)
+        guard !trimmedPhone.isEmpty else {
+            validationError = "Please enter a contact number so riders can reach you."
+            return
+        }
+
+        let vehicle: Vehicle? = addsVehicle
+            ? Vehicle(
+                ownerId: "",
+                make: vehicleMake,
+                model: vehicleModel,
+                year: vehicleYear,
+                color: vehicleColor,
+                licensePlate: licensePlate
+            )
+            : nil
+
+        Task {
+            await viewModel.completeProfile(
+                name: name,
+                lastInitial: lastInitial,
+                homeArea: homeArea,
+                phoneNumber: trimmedPhone,
+                homeAddress: homeAddress.name,
+                homeLat: homeAddress.lat,
+                homeLng: homeAddress.lon,
+                vehicle: vehicle
+            )
         }
     }
 }
@@ -190,17 +299,13 @@ struct HomeTabView: View {
     @State private var showPostOffer = false
 
     private var emptyState: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "car.front.waves.up")
-                .font(.system(size: 48))
-                .foregroundColor(.gray)
-            Text("No rides available").font(.headline)
-            Text("Check back soon, or post one yourself")
-                .font(.caption)
-                .foregroundColor(.gray)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        BrandEmptyState(
+            icon: "car.front.waves.up",
+            title: "No rides available",
+            description: "Check back soon, or post one yourself.",
+            actionLabel: "Offer a ride",
+            action: { showPostOffer = true }
+        )
     }
 
     var body: some View {
@@ -266,10 +371,10 @@ struct PostOfferView: View {
                 }
 
                 if let error = viewModel.errorMessage {
-                    Text(error).font(.caption).foregroundColor(.red)
+                    Text(error).font(.caption).foregroundColor(Brand.danger)
                 }
 
-                Button("Post ride") { submit() }
+                Button("Post ride offer") { submit() }
                     .disabled(!canSubmit)
             }
             .navigationTitle("Offer a ride")
@@ -278,7 +383,14 @@ struct PostOfferView: View {
                     Button("Cancel") { presentationMode.wrappedValue.dismiss() }
                 }
             }
+            .onAppear(perform: prefillFromHome)
         }
+    }
+
+    /// A host's ride usually starts from home too, so prefill it the way Android does.
+    private func prefillFromHome() {
+        guard !origin.isResolved, let home = viewModel.contactDetails, home.hasHomeLocation else { return }
+        origin = PlaceSelection(name: home.homeAddress, lat: home.homeLat, lon: home.homeLng)
     }
 
     private func submit() {
@@ -334,10 +446,10 @@ struct PostRequestView: View {
                 }
 
                 if let error = viewModel.errorMessage {
-                    Text(error).font(.caption).foregroundColor(.red)
+                    Text(error).font(.caption).foregroundColor(Brand.danger)
                 }
 
-                Button("Post request") { submit() }
+                Button("Post ride request") { submit() }
                     .disabled(!canSubmit)
             }
             .navigationTitle("Request a ride")
@@ -346,7 +458,15 @@ struct PostRequestView: View {
                     Button("Cancel") { presentationMode.wrappedValue.dismiss() }
                 }
             }
+            .onAppear(perform: prefillFromHome)
         }
+    }
+
+    /// The point of collecting a home address in onboarding: the rider does not retype where they
+    /// live. Android has done this since the address field existed; iOS could not until now.
+    private func prefillFromHome() {
+        guard !origin.isResolved, let home = viewModel.contactDetails, home.hasHomeLocation else { return }
+        origin = PlaceSelection(name: home.homeAddress, lat: home.homeLat, lon: home.homeLng)
     }
 
     private func submit() {
@@ -389,7 +509,7 @@ struct PlaceField: View {
     @State private var results: [PhotonPlaceResult] = []
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: BrandScale.spaceXs) {
             TextField(title, text: $query)
                 .onChange(of: query) { newValue in
                     selection = PlaceSelection()
@@ -399,7 +519,7 @@ struct PlaceField: View {
             if selection.isResolved {
                 Text(selection.name)
                     .font(.caption)
-                    .foregroundColor(.green)
+                    .foregroundColor(Brand.success)
             }
 
             ForEach(results.prefix(4), id: \.formattedAddress) { place in
@@ -409,51 +529,93 @@ struct PlaceField: View {
                     results = []
                 } label: {
                     VStack(alignment: .leading) {
-                        Text(place.name).font(.callout)
-                        Text(place.formattedAddress).font(.caption2).foregroundColor(.gray)
+                        Text(place.name).font(.callout).foregroundColor(Brand.textPrimary)
+                        Text(place.formattedAddress).font(.caption2).foregroundColor(Brand.textSecondary)
                     }
                 }
             }
+        }
+        .onAppear {
+            // A prefilled selection needs the field to show it, or the address looks lost.
+            if query.isEmpty && selection.isResolved { query = selection.name }
         }
     }
 }
 
 // MARK: - My rides
 
+/// The same four sections Android's Trips tab has, in the same order, so the two apps can be
+/// talked about in the same words. Sections with no history stay hidden.
 struct MyRidesTabView: View {
     @ObservedObject var viewModel: AppViewModel
     @State private var showPostRequest = false
 
+    private var hostedOffers: [TripOffer] {
+        guard let me = viewModel.currentUser?.id else { return [] }
+        return viewModel.activeOffers.filter { $0.hostId == me }
+    }
+
+    private var joinedOffers: [TripOffer] {
+        guard let me = viewModel.currentUser?.id else { return [] }
+        return viewModel.activeOffers.filter { $0.passengers.contains(me) }
+    }
+
+    private var isEmpty: Bool {
+        hostedOffers.isEmpty && joinedOffers.isEmpty && viewModel.myRideRequests.isEmpty
+    }
+
     private var emptyState: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "rectangle.and.pencil.and.ellipsis")
-                .font(.system(size: 48))
-                .foregroundColor(.gray)
-            Text("No rides yet").font(.headline)
-            Text("Post a ride offer or request to get started")
-                .font(.caption)
-                .foregroundColor(.gray)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        BrandEmptyState(
+            icon: "rectangle.and.pencil.and.ellipsis",
+            title: "Nothing on your schedule yet",
+            description: "Post a ride offer if you're driving, or a request if you need a seat.",
+            actionLabel: "Request a ride",
+            action: { showPostRequest = true }
+        )
     }
 
     private var ridesList: some View {
         List {
-            Section("Ride requests you posted") {
-                ForEach(viewModel.myRideRequests, id: \.id) { request in
-                    VStack(alignment: .leading) {
-                        Text("\(request.origin) → \(request.destination)")
-                        Text(request.status).font(.caption).foregroundColor(.gray)
+            if !hostedOffers.isEmpty {
+                Section("Rides you're hosting") {
+                    ForEach(hostedOffers, id: \.id) { offer in
+                        NavigationLink(destination: RideDetailView(viewModel: viewModel, offer: offer)) {
+                            RideOfferRow(offer: offer)
+                        }
+                    }
+                }
+            }
+
+            if !joinedOffers.isEmpty {
+                Section("Rides you've joined") {
+                    ForEach(joinedOffers, id: \.id) { offer in
+                        NavigationLink(destination: RideDetailView(viewModel: viewModel, offer: offer)) {
+                            RideOfferRow(offer: offer)
+                        }
+                    }
+                }
+            }
+
+            if !viewModel.myRideRequests.isEmpty {
+                Section("Your ride requests") {
+                    ForEach(viewModel.myRideRequests, id: \.id) { request in
+                        VStack(alignment: .leading, spacing: BrandScale.spaceXs) {
+                            Text("\(request.origin) → \(request.destination)")
+                                .font(.callout)
+                                .foregroundColor(Brand.textPrimary)
+                            StatusBadge(status: request.status)
+                        }
                     }
                 }
             }
         }
+        .refreshable { await viewModel.refresh() }
     }
 
     var body: some View {
         NavigationView {
             Group {
-                if viewModel.myRideRequests.isEmpty {
+                if isEmpty {
                     emptyState
                 } else {
                     ridesList
@@ -481,13 +643,11 @@ struct MatchesTabView: View {
         NavigationView {
             Group {
                 if viewModel.userMatches.isEmpty {
-                    VStack(spacing: 16) {
-                        Image(systemName: "person.2")
-                            .font(.system(size: 48))
-                            .foregroundColor(.gray)
-                        Text("No matches yet").font(.headline)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    BrandEmptyState(
+                        icon: "person.2",
+                        title: "No matches yet",
+                        description: "Reserve a seat or accept a request, and the conversation starts here."
+                    )
                 } else {
                     List(viewModel.userMatches, id: \.id) { match in
                         MatchRow(viewModel: viewModel, match: match)
@@ -506,9 +666,14 @@ struct MatchRow: View {
     private var isHost: Bool { viewModel.currentUser?.id == match.hostId }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(match.riderName).font(.headline)
-            Text("Status: \(match.status)").font(.caption).foregroundColor(.gray)
+        VStack(alignment: .leading, spacing: BrandScale.spaceSm) {
+            HStack {
+                Text(isHost ? match.riderName : "Your host")
+                    .font(.headline)
+                    .foregroundColor(Brand.textPrimary)
+                Spacer()
+                StatusBadge(status: match.status)
+            }
 
             if isHost && match.status == "pending" {
                 HStack {
@@ -523,8 +688,18 @@ struct MatchRow: View {
                     .buttonStyle(.bordered)
                 }
             }
+
+            // Once a match is accepted there was nowhere on iOS to actually agree on a pickup —
+            // Android has had a chat screen the whole time, and this is its entry point.
+            if match.status == "accepted" || match.status == "completed" {
+                NavigationLink(destination: ChatView(viewModel: viewModel, match: match)) {
+                    Label("Open chat", systemImage: "bubble.left.and.bubble.right.fill")
+                        .font(.callout)
+                        .foregroundColor(Brand.primary)
+                }
+            }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, BrandScale.spaceXs)
     }
 }
 
@@ -535,55 +710,57 @@ struct ProfileTabView: View {
 
     var body: some View {
         NavigationView {
-            VStack {
+            ScrollView {
                 if let user = viewModel.currentUser {
-                    VStack(spacing: 16) {
-                        Image(systemName: "person.crop.circle.fill")
-                            .font(.system(size: 64))
-                            .foregroundColor(.blue)
+                    VStack(spacing: BrandScale.spaceLg) {
+                        // The user's own picture, matching Android's `StudentAvatar`. This was a
+                        // generic SF Symbol even though `User` has always carried an avatarUrl.
+                        BrandAvatar(avatarUrl: user.avatarUrl, name: user.name, size: 88)
 
-                        Text(user.displayName).font(.title2).fontWeight(.bold)
-                        Text(user.email).font(.callout).foregroundColor(.gray)
+                        Text(user.displayName)
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(Brand.textPrimary)
 
-                        VStack(spacing: 12) {
-                            HStack {
-                                Text("Rating")
-                                Spacer()
-                                Text("⭐ \(String(format: "%.1f", user.ratingAvg))")
-                            }
+                        Text(user.email)
+                            .font(.callout)
+                            .foregroundColor(Brand.textSecondary)
+
+                        BrandCard(title: "Your record") {
+                            DetailRow(
+                                label: "Rating",
+                                value: user.ratingCount > 0
+                                    ? String(format: "⭐ %.1f", user.ratingAvg)
+                                    : "No ratings yet"
+                            )
                             Divider()
-                            HStack {
-                                Text("Ratings received")
-                                Spacer()
-                                Text("\(user.ratingCount)")
-                            }
-                            Divider()
-                            HStack {
-                                Text("Backend")
-                                Spacer()
-                                Text(viewModel.isConnected ? "Connected" : "Offline")
-                                    .foregroundColor(viewModel.isConnected ? .green : .orange)
-                            }
-                        }
-                        .padding()
-                        .background(Color(.systemGray6))
-                        .cornerRadius(8)
+                            DetailRow(label: "Ratings received", value: "\(user.ratingCount)")
 
-                        Button(action: { viewModel.logOut() }) {
-                            Text("Log out")
-                                .font(.headline)
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(Color.red)
-                                .foregroundColor(.white)
-                                .cornerRadius(8)
+                            if !user.phoneNumber.isEmpty {
+                                Divider()
+                                DetailRow(label: "Contact number", value: user.phoneNumber)
+                            }
+
+                            // Backend connectivity is developer instrumentation, not something a
+                            // rider needs next to their rating. Debug builds only, matching
+                            // Android's `FirebaseStatusPill`.
+                            #if DEBUG
+                            Divider()
+                            DetailRow(
+                                label: "Backend (debug)",
+                                value: viewModel.isConnected ? "Connected" : "Offline",
+                                valueColor: viewModel.isConnected ? Brand.success : Brand.warning
+                            )
+                            #endif
                         }
+
+                        Button("Log out") { viewModel.logOut() }
+                            .buttonStyle(BrandButtonStyle(background: Brand.danger))
                     }
                     .padding()
                 }
-
-                Spacer()
             }
+            .background(Brand.surface.ignoresSafeArea())
             .navigationTitle("Profile")
         }
     }
@@ -595,104 +772,44 @@ struct RideOfferRow: View {
     let offer: TripOffer
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: BrandScale.spaceSm) {
             HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(offer.origin).font(.headline)
-                    Text("Departure: \(formatTime(offer.departureTime))")
+                VStack(alignment: .leading, spacing: BrandScale.spaceXs) {
+                    Text(offer.origin)
+                        .font(.headline)
+                        .foregroundColor(Brand.textPrimary)
+                    Text("Departure: \(RideDetailView.formatTime(offer.departureTime))")
                         .font(.caption)
-                        .foregroundColor(.gray)
+                        .foregroundColor(Brand.textSecondary)
                 }
 
                 Spacer()
 
-                VStack(alignment: .trailing, spacing: 4) {
+                VStack(alignment: .trailing, spacing: BrandScale.spaceXs) {
                     Text("$\(String(format: "%.0f", offer.costPerRider))")
                         .font(.headline)
-                        .foregroundColor(.green)
+                        .foregroundColor(Brand.primary)
                     Text("\(offer.seatsLeft) seats left")
                         .font(.caption)
-                        .foregroundColor(.gray)
+                        .foregroundColor(Brand.textSecondary)
                 }
             }
 
             Divider()
 
             HStack {
-                Text(offer.destination).font(.subheadline)
+                Text(offer.destination)
+                    .font(.subheadline)
+                    .foregroundColor(Brand.textPrimary)
                 Spacer()
                 if !offer.vehicleInfo.isEmpty {
-                    Text("🚗 \(offer.vehicleInfo)").font(.caption).foregroundColor(.gray)
+                    Text("🚗 \(offer.vehicleInfo)")
+                        .font(.caption)
+                        .foregroundColor(Brand.textSecondary)
                 }
             }
         }
-        .padding(.vertical, 4)
-    }
-
-    private func formatTime(_ timestamp: Int64) -> String {
-        guard timestamp > 0 else { return "Time TBD" }
-        let formatter = DateFormatter()
-        formatter.dateStyle = .short
-        formatter.timeStyle = .short
-        return formatter.string(from: Date(epochMillis: timestamp))
-    }
-}
-
-struct RideDetailView: View {
-    @ObservedObject var viewModel: AppViewModel
-    let offer: TripOffer
-    @Environment(\.presentationMode) private var presentationMode
-
-    private var details: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Ride details").font(.title2).fontWeight(.bold)
-
-            HStack { Text("From:"); Spacer(); Text(offer.origin) }
-            HStack { Text("To:"); Spacer(); Text(offer.destination) }
-            HStack {
-                Text("Cost:")
-                Spacer()
-                Text("$\(String(format: "%.0f", offer.costPerRider))")
-            }
-            HStack { Text("Seats available:"); Spacer(); Text("\(offer.seatsLeft)") }
-            HStack { Text("Host:"); Spacer(); Text(offer.hostName) }
-        }
-        .padding()
-        .background(Color(.systemGray6))
-        .cornerRadius(8)
-    }
-
-    var body: some View {
-        VStack(spacing: 20) {
-            details
-
-            if let error = viewModel.errorMessage {
-                Text(error).font(.caption).foregroundColor(.red)
-            }
-
-            Button {
-                Task {
-                    // Reserves a seat, exactly as the Android "Join ride" button does.
-                    if await viewModel.joinRide(offerId: offer.id) {
-                        presentationMode.wrappedValue.dismiss()
-                    }
-                }
-            } label: {
-                Text(offer.seatsLeft > 0 ? "Reserve a seat" : "Full")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(offer.seatsLeft > 0 ? Color.blue : Color.gray)
-                    .foregroundColor(.white)
-                    .cornerRadius(8)
-            }
-            .disabled(offer.seatsLeft <= 0 || viewModel.isLoading)
-
-            Spacer()
-        }
-        .padding()
-        .navigationTitle("Ride details")
-        .navigationBarTitleDisplayMode(.inline)
+        .padding(.vertical, BrandScale.spaceXs)
     }
 }
 

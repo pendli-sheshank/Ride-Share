@@ -130,6 +130,25 @@ data class TripMatch(
     val participants: List<String> = emptyList()
 )
 
+/**
+ * What kind of chat message this is.
+ *
+ * A plain string constant rather than an enum, because the field is serialised straight into
+ * Firestore and an unknown value from a newer client must not fail to decode — [Message.kind]
+ * falls back to [MessageType.TEXT].
+ */
+object MessageType {
+    const val TEXT = "text"
+
+    /** One side suggesting a pickup spot and time; carries [Message.pickupSpot]/[Message.pickupTime]. */
+    const val PICKUP_PROPOSAL = "pickup_proposal"
+
+    /** The other side agreeing to a [PICKUP_PROPOSAL]. */
+    const val PICKUP_CONFIRMED = "pickup_confirmed"
+
+    val ALL = setOf(TEXT, PICKUP_PROPOSAL, PICKUP_CONFIRMED)
+}
+
 @Serializable
 data class Message(
     val id: String = "",
@@ -148,8 +167,66 @@ data class Message(
      * Firestore rule requires `senderId == request.auth.uid` on create, and no user is ever
      * authenticated as `"system"`.
      */
-    val isSystem: Boolean = false
-)
+    val isSystem: Boolean = false,
+    /**
+     * One of [MessageType]. The chat screen used to infer this from the text — `text.startsWith
+     * ("[PROPOSAL]")` — which meant anything a user happened to type starting with that literal
+     * rendered as a system proposal card instead of their own message, and the spot and time had
+     * to be recovered with `substringAfter`.
+     *
+     * Read through [kind], never directly: messages written before this field existed have `""`.
+     */
+    val type: String = MessageType.TEXT,
+    /** Set on a [MessageType.PICKUP_PROPOSAL] or [MessageType.PICKUP_CONFIRMED]. */
+    val pickupSpot: String = "",
+    /** Set on a [MessageType.PICKUP_PROPOSAL] or [MessageType.PICKUP_CONFIRMED]. */
+    val pickupTime: String = "",
+) {
+    /**
+     * The message's type, tolerating both a missing value and one this build does not know.
+     *
+     * Messages stored before the field existed carry their type in a `[PROPOSAL] Location: … |
+     * Time: …` prefix, so those are still recognised — a conversation that predates this change
+     * keeps rendering its proposal cards rather than turning into raw bracket text.
+     */
+    val kind: String
+        get() = when {
+            type in MessageType.ALL -> type
+            text.startsWith(LEGACY_PROPOSAL_PREFIX) -> MessageType.PICKUP_PROPOSAL
+            text.startsWith(LEGACY_CONFIRMED_PREFIX) -> MessageType.PICKUP_CONFIRMED
+            else -> MessageType.TEXT
+        }
+
+    /** The pickup spot, falling back to parsing a legacy prefixed message. */
+    val spot: String
+        get() = pickupSpot.ifEmpty {
+            when (kind) {
+                MessageType.PICKUP_PROPOSAL ->
+                    text.substringAfter("Location: ", "").substringBefore(" | Time:")
+                MessageType.PICKUP_CONFIRMED ->
+                    text.removePrefix(LEGACY_CONFIRMED_PREFIX).substringAfter("Meet at ", "").substringBefore(" at ")
+                else -> ""
+            }
+        }
+
+    /** The pickup time, falling back to parsing a legacy prefixed message. */
+    val time: String
+        get() = pickupTime.ifEmpty {
+            when (kind) {
+                MessageType.PICKUP_PROPOSAL -> text.substringAfter("| Time: ", "")
+                MessageType.PICKUP_CONFIRMED -> text.substringAfterLast(" at ", "")
+                else -> ""
+            }
+        }
+
+}
+
+// File-private, not a companion object on Message: kotlinx.serialization puts the generated
+// `serializer()` on the companion, and declaring that companion `private` makes it inaccessible
+// from outside the file. The symptom is an IllegalAccessError at the first `serializer<Message>()`
+// call, not a compile error.
+private const val LEGACY_PROPOSAL_PREFIX = "[PROPOSAL]"
+private const val LEGACY_CONFIRMED_PREFIX = "[CONFIRMED]"
 
 @Serializable
 data class Rating(

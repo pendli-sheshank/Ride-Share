@@ -327,11 +327,11 @@ COMPLETED  NO_SHOW
 ## Material 3 Design
 
 ### Colors
-- **Primary Action:** Split CruiserSaffron (Blue)
-- **Success:** Split CruiserEmerald (Green)
+- **Primary Action:** SplitCruiserPrimary (blue)
+- **Success:** SplitCruiserSuccess (Green)
 - **Warning:** Color(0xFFEF4444) (Red)
-- **Text:** Split CruiserTextPrimary (Dark)
-- **Secondary Text:** Split CruiserLightGray
+- **Text:** SplitCruiserTextPrimary (Dark)
+- **Secondary Text:** SplitCruiserTextSecondary
 
 ### Components
 - **Cards:** RoundedCornerShape(12-16dp), subtle borders

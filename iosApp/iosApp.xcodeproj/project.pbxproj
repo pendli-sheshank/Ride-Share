@@ -7,7 +7,10 @@
 	objects = {
 /* Begin PBXBuildFile section */
 		ADDBC3DFFBF25EEFB82A1B3D /* iOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C635C5E2CDDD511A937B1BE4 /* iOSApp.swift */; };
+		1CFC2AA8149752C5BF6F58F4 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 409940227D65583E855B95E9 /* Theme.swift */; };
 		00117EF9E3F752CC92FFC020 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3213C9ECB6B259AEA2B8D1BB /* ContentView.swift */; };
+		34EEAABF6EDA527EA28C82F8 /* RideDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6600575985875FD2B70BF20A /* RideDetailView.swift */; };
+		C2BF4953E2C15B7D873F29AF /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99E0516B807E58B8AC220614 /* ChatView.swift */; };
 		136897E3F6FD5E1CA21CB28A /* ViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D3D2A92B3975171BBB525B1 /* ViewModel.swift */; };
 		41842331DC585BB2A741E495 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3D8261F990D35581B391804F /* Assets.xcassets */; };
 		C184793FE5BA565897EAA63B /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = F65FD96E2BE4530ABB6CC5CC /* LaunchScreen.storyboard */; };
@@ -17,7 +20,10 @@
 /* Begin PBXFileReference section */
 		6C71546D770452B782C55EC1 /* iosApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = iosApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C635C5E2CDDD511A937B1BE4 /* iOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp.swift; sourceTree = "<group>"; };
+		409940227D65583E855B95E9 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		3213C9ECB6B259AEA2B8D1BB /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		6600575985875FD2B70BF20A /* RideDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RideDetailView.swift; sourceTree = "<group>"; };
+		99E0516B807E58B8AC220614 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 		3D3D2A92B3975171BBB525B1 /* ViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewModel.swift; sourceTree = "<group>"; };
 		FD81299CF3F35F7D9D3BE2F2 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		3D8261F990D35581B391804F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -58,7 +64,10 @@
 			isa = PBXGroup;
 			children = (
 				C635C5E2CDDD511A937B1BE4 /* iOSApp.swift */,
+				409940227D65583E855B95E9 /* Theme.swift */,
 				3213C9ECB6B259AEA2B8D1BB /* ContentView.swift */,
+				6600575985875FD2B70BF20A /* RideDetailView.swift */,
+				99E0516B807E58B8AC220614 /* ChatView.swift */,
 				3D3D2A92B3975171BBB525B1 /* ViewModel.swift */,
 				FA323A44D82D57B182964EE0 /* Resources */,
 			);
@@ -155,7 +164,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				ADDBC3DFFBF25EEFB82A1B3D /* iOSApp.swift in Sources */,
+				1CFC2AA8149752C5BF6F58F4 /* Theme.swift in Sources */,
 				00117EF9E3F752CC92FFC020 /* ContentView.swift in Sources */,
+				34EEAABF6EDA527EA28C82F8 /* RideDetailView.swift in Sources */,
+				C2BF4953E2C15B7D873F29AF /* ChatView.swift in Sources */,
 				136897E3F6FD5E1CA21CB28A /* ViewModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

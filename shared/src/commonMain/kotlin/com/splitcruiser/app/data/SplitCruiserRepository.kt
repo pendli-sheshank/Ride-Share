@@ -912,7 +912,7 @@ class SplitCruiserRepository internal constructor(
         applyAcceptedMatch(
             match,
             notifyRider = true,
-            systemMessageText = "Trip request accepted by the host. You can now chat and coordinate the cash split in person.",
+            systemMessageText = "You're in! Chat here to sort out the pickup spot. Cash is settled in person.",
         )
     }
 
@@ -1100,7 +1100,25 @@ class SplitCruiserRepository internal constructor(
             .distinctUntilChanged()
 
     @Throws(Exception::class)
-    suspend fun sendMessage(matchId: String, text: String) {
+    suspend fun sendMessage(matchId: String, text: String) =
+        sendMessage(matchId, text, MessageType.TEXT, "", "")
+
+    /**
+     * Sends a message of a given [MessageType].
+     *
+     * The pickup spot and time are their own fields rather than being encoded into [text] behind
+     * a `[PROPOSAL]` prefix, which is how the chat screen used to tell a proposal apart from an
+     * ordinary message. [text] is still filled in with a readable summary, so a proposal degrades
+     * to a sensible sentence in a notification or an older client.
+     */
+    @Throws(Exception::class)
+    suspend fun sendMessage(
+        matchId: String,
+        text: String,
+        type: String,
+        pickupSpot: String,
+        pickupTime: String,
+    ) {
         val user = requireUser()
         val match = matches.value[matchId]
         val participants = match?.participants?.takeIf { it.isNotEmpty() }
@@ -1114,6 +1132,9 @@ class SplitCruiserRepository internal constructor(
             text = text,
             timestamp = nowMs(),
             participants = participants,
+            type = type,
+            pickupSpot = pickupSpot,
+            pickupTime = pickupTime,
         )
         firestore.setDocument("messages", message.id, message, serializer<Message>())
         messages.value = messages.value + (message.id to message)
@@ -1438,6 +1459,10 @@ class SplitCruiserRepository internal constructor(
 
     fun observeChat(matchId: String, onChange: (List<Message>) -> Unit): FlowSubscription =
         getChatMessages(matchId).subscribeOnMain(onChange)
+
+    /** What onboarding stored, so an iOS ride request can prefill its pickup the way Android's does. */
+    fun observeContactDetails(onChange: (ContactDetails?) -> Unit): FlowSubscription =
+        contactDetails.subscribeOnMain(onChange)
 
     // --- Internals --------------------------------------------------------------------------
 
