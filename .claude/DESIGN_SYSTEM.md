@@ -1,0 +1,168 @@
+# Split Cruiser design system
+
+Three things live here: the tokens both apps read, the voice their copy is written in, and the
+parity checklist that stops the two platforms drifting apart. All three came out of the
+2026-07 UI/UX audit.
+
+Unlike most of `.claude/`, this file describes the code as it currently is. If it disagrees with
+the code, the code is right and this file is a bug.
+
+---
+
+## 1. Tokens
+
+**`shared/src/commonMain/.../ui/theme/Color.kt` is the only place a colour is written down.**
+It is plain `0xAARRGGBB` longs, so both platforms can read it:
+
+- Android wraps them in `app/.../ui/theme/Color.kt` (`SplitCruiserPrimary = Color(Tokens.Primary)`)
+  and builds a real `ColorScheme` from them in `Theme.kt`.
+- iOS wraps them in `iosApp/iosApp/Theme.swift` (`Brand.primary`).
+
+Adding a colour means adding it there, not inline at the call site.
+
+| Token | Value | What it's for |
+|---|---|---|
+| `Surface` | `#F8F9FF` | App background |
+| `SurfaceCard` | `#FFFFFF` | Cards, sheets, dialogs |
+| `SurfaceMuted` | `#EEF1FF` | Inset rows, tinted chips |
+| `SurfaceTrack` | `#E1E2EC` | The track behind a segmented control |
+| `Primary` | `#0061A4` | Buttons, active tabs, links |
+| `PrimaryContainer` | `#D1E4FF` | The tonal container paired with `Primary` |
+| `OnPrimary` / `OnPrimaryContainer` | `#FFFFFF` / `#001D36` | Text drawn on each of those |
+| `Success` | `#10B981` | Active rides, confirmations |
+| `Danger` | `#EF4444` | Cancel, decline, log out |
+| `Info` | `#3B82F6` | Completed / matched |
+| `Warning` | `#EAB308` | Star ratings, soft warnings |
+| `Accent` | `#E91E63` | The women-only safety filter |
+| `TextPrimary` / `TextSecondary` | `#0F172A` / `#64748B` | Body and supporting text |
+| `Outline` | `#E2E8F0` | Hairlines, card borders, dividers |
+
+### The names used to lie
+
+Until 2026-07 these were called `SplitCruiserSaffron` (a blue), `SplitCruiserIndigo` (a pale
+near-white blue) and `SplitCruiserDarkBg` (a near-white). A Material Theme Builder blue palette had
+been pasted into variable names left over from an earlier brand.
+
+That is not a cosmetic problem. `ProfileScreen` set its identity card to `SplitCruiserCardBg` —
+white — and then drew the display name in `Color.White`. Invisible text, on the one screen every
+user visits. Eleven other `Color.White` calls on the same screen had the same problem, as did the
+Explore search field, and three leftover dark-theme surfaces (`#252D3C`, `#202634`, `#1E2430`)
+were being drawn under near-black text.
+
+**If you add a token, name it for what it renders as.** If the brand ever genuinely moves to
+saffron and indigo, change the hex values — do not reintroduce a name that argues with its pixel.
+
+### Scale
+
+`SplitCruiserScale` in the same shared file, wrapped as `SplitCruiserSpacing` / `SplitCruiserRadius`
+/ `SplitCruiserTextSize` on Android and `BrandScale` on iOS.
+
+- **Spacing**: a 4-point grid — 4, 8, 12, 16, 24, 32.
+- **Radius**: one per family of control. Chips and badges `8`, buttons *and* text fields `12`,
+  cards and sheets `16`, pills/FABs/avatars fully rounded. Text fields used to be 14 while the
+  button beneath them was 12, for no reason anyone could name.
+- **Type**: eyebrow 11, caption 12, body 14, title 16, headline 20.
+
+New code uses the scale. Existing magic numbers get replaced as screens are touched, not in a
+separate sweep.
+
+### Shared components
+
+Extract before you copy. These already exist:
+
+| Android | iOS | Was duplicated in |
+|---|---|---|
+| `RouteIndicator` | `RouteIndicator` | 7 places, each with its own dot size and rail height |
+| `StatusBadge` / `statusColor` | `StatusBadge` | 5 places, each with its own `when (status)` |
+| `CardEyebrow`, `CardStat` | `DetailRow` | every ride card |
+| `SplitCruiserEmptyState` | `BrandEmptyState` | — (already good) |
+| `FormSection` | SwiftUI `Section` | — |
+
+`statusColor` matters more than it looks: with five independent `when (status)` blocks, a status
+one card handled fell through another's `else`. One function means they cannot disagree.
+
+---
+
+## 2. Voice
+
+**Plain, warm, specific.** Say what the button does. Assume the reader is busy and slightly
+anxious about getting into a stranger's car.
+
+Three adjectives: **direct**, **warm**, **concrete**.
+
+| Do | Don't |
+|---|---|
+| "Post ride offer" | "Broadcast Ride Offer" |
+| "Finish setup" | "Launch Split Cruiser" |
+| "Past rides" | "Past Rides & Reference History" |
+| "You're in! Chat here to sort out the pickup spot." | "Trip request accepted by the host. You can now chat and coordinate the cash split in person." |
+| "Please enter a contact number so riders can reach you" | "This field is required" |
+| "Hidden from your feed and can't message you" | "User ID: aQ3xR9…" |
+
+Three rules that cover most of it:
+
+1. **Say why, not just what.** A required field explains what it unlocks. The cost card on the
+   trip detail screen is the model: how much, why that number, and how it's actually paid.
+2. **Never show an internal identifier.** Firebase uids are for the backend. The rating form used
+   to ask a user to *type one in*; it now picks from their own match history.
+3. **Match the register across platforms.** The same action gets the same words on Android and
+   iOS. "Post ride offer" both places, not "Broadcast" on one.
+
+**Loading messages name their action.** The global overlay is parameterised
+(`MainViewModel.loadingMessage`); "Securing your ride…" is for reserving a seat, not for logging
+in or blocking someone. The neutral default is "Just a moment…".
+
+### Is it a fare or a cost split?
+
+It's a cost split. The host's total is "Chipped in", not "Revenue"; a rider's share is a
+"suggested contribution", paid in cash in person. Keep that framing everywhere the number appears.
+
+---
+
+## 3. Cross-platform parity checklist
+
+**Nothing keeps the two apps in sync automatically.** The backend is shared; every screen exists
+twice. `.claude/ui-migration-strategy.md` scoped Compose Multiplatform and deliberately deferred
+it, so until that changes this checklist is the mechanism.
+
+**Run through this at PR time whenever a PR touches user-facing behaviour.**
+
+### Screens that must exist on both platforms
+
+| Screen | Android | iOS |
+|---|---|---|
+| Login / sign up | `EmailPasswordLoginScreen` | `LoginView` |
+| Onboarding | `ProfileSetupScreen` | `ProfileSetupView` |
+| Browse rides | `DashboardScreen` (Explore) | `HomeTabView` |
+| Ride detail | `TripDetailScreen` | `RideDetailView` |
+| Post offer / request | `PostOfferScreen` / `PostRequestScreen` | `PostOfferView` / `PostRequestView` |
+| My rides | `DashboardScreen` (Trips) | `MyRidesTabView` |
+| Matches | Explore's "Active Trip Coordination" | `MatchesTabView` |
+| Chat | `ChatScreen` | `ChatView` |
+| Profile | `ProfileScreen` | `ProfileTabView` |
+
+### Questions to answer before merging
+
+- [ ] Does this change a screen in the table above? Then it changes **both** files, or the PR says
+      in one sentence why not.
+- [ ] Does it add or remove a field collected at onboarding? Every field Android collects must be
+      collected on iOS, or something downstream degrades silently. (This is exactly how an Android
+      rider ended up looking at a blank phone row for an iOS-onboarded host.)
+- [ ] Does it add user-visible copy? Same words on both platforms — see §2.
+- [ ] Does it add a colour, spacing value or radius? It goes in the shared tokens, so both
+      platforms get it.
+- [ ] Does it add developer instrumentation to a user-facing screen? Gate it: `BuildConfig.DEBUG`
+      on Android, `#if DEBUG` on iOS.
+
+### Known, accepted gaps
+
+Not everything is at parity, and that is fine as long as it is deliberate:
+
+- **Google sign-in is Android-only.** The token exchange is shared, but only Android acquires a
+  Google ID token (Credential Manager). iOS would need `ASWebAuthenticationSession` and a URL
+  scheme in the generated Xcode project.
+- **Host analytics (`HostDashboard`) is Android-only.** Whether iOS hosts need it is an open
+  product question, not an oversight.
+- **Blocked-user management is Android-only.**
+- **Profile editing and picture upload are Android-only.** `uploadProfilePicture` is in `:shared`
+  and takes bytes precisely so iOS can hand it a UIImage's JPEG data when someone builds the UI.

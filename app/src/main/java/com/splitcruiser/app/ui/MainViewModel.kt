@@ -12,6 +12,7 @@ import com.splitcruiser.app.auth.requestGoogleIdToken
 import com.splitcruiser.app.data.ContactDetails
 import com.splitcruiser.app.data.FirebaseConfig
 import com.splitcruiser.app.data.Message
+import com.splitcruiser.app.data.MessageType
 import com.splitcruiser.app.data.NotificationAlert
 import com.splitcruiser.app.data.ProfileImages
 import com.splitcruiser.app.data.RideRequest
@@ -97,23 +98,48 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshMyTrips() {
         viewModelScope.launch {
-            _isLoading.value = true
+            beginLoading("Refreshing your trips…")
             try {
-                val result = repository.fetchMyTripsFromFirestore()
-                if (result.isSuccess) {
-                    val pair = result.getOrNull()
-                    if (pair != null) {
-                        _hostedRides.value = pair.first
-                        _joinedRides.value = pair.second
-                    }
-                } else {
-                    _uiError.value = result.exceptionOrNull()?.message ?: "Failed to load travel schedule."
-                }
-            } catch (e: Exception) {
-                _uiError.value = e.message ?: "Error retrieving trips."
+                loadMyTrips()
             } finally {
-                _isLoading.value = false
+                endLoading()
             }
+        }
+    }
+
+    /**
+     * The pull-to-refresh gesture, matching iOS's `.refreshable`.
+     *
+     * Deliberately not routed through [beginLoading]: the gesture draws its own indicator, and
+     * raising the full-screen overlay on top of it would hide the list the user just pulled.
+     */
+    fun refreshFeeds() {
+        viewModelScope.launch {
+            _isRefreshing.value = true
+            try {
+                runCatching { repository.refreshNow() }
+                    .onFailure { _uiError.value = it.message ?: "Could not refresh." }
+                loadMyTrips()
+            } finally {
+                _isRefreshing.value = false
+            }
+        }
+    }
+
+    private suspend fun loadMyTrips() {
+        try {
+            val result = repository.fetchMyTripsFromFirestore()
+            if (result.isSuccess) {
+                val pair = result.getOrNull()
+                if (pair != null) {
+                    _hostedRides.value = pair.first
+                    _joinedRides.value = pair.second
+                }
+            } else {
+                _uiError.value = result.exceptionOrNull()?.message ?: "Failed to load travel schedule."
+            }
+        } catch (e: Exception) {
+            _uiError.value = e.message ?: "Error retrieving trips."
         }
     }
 
@@ -123,6 +149,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
+    /**
+     * What the full-screen loader should say. Every action sets its own; the overlay used to be
+     * hardcoded to "Securing your ride…" no matter what was actually in flight.
+     */
+    private val _loadingMessage = MutableStateFlow(DEFAULT_LOADING_MESSAGE)
+    val loadingMessage: StateFlow<String> = _loadingMessage.asStateFlow()
+
+    /** Separate from [isLoading]: the pull-to-refresh gesture draws its own indicator. */
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
 
     private val _uiError = MutableStateFlow<String?>(null)
     val uiError: StateFlow<String?> = _uiError.asStateFlow()
@@ -144,7 +181,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // --- Auth ---
     fun loginWithEmail(email: String, password: String, onFinished: (isNewUser: Boolean) -> Unit) {
         viewModelScope.launch {
-            _isLoading.value = true
+            beginLoading("Logging you in…")
             try {
                 val result = repository.logInWithEmailResult(email, password)
                 result.fold(
@@ -152,14 +189,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     onFailure = { _uiError.value = it.message ?: "Failed to log in." },
                 )
             } finally {
-                _isLoading.value = false
+                endLoading()
             }
         }
     }
 
     fun signUpWithEmail(email: String, password: String, onFinished: (isNewUser: Boolean) -> Unit) {
         viewModelScope.launch {
-            _isLoading.value = true
+            beginLoading("Creating your account…")
             try {
                 val result = repository.signUpWithEmailResult(email, password)
                 result.fold(
@@ -167,7 +204,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     onFailure = { _uiError.value = it.message ?: "Failed to sign up." },
                 )
             } finally {
-                _isLoading.value = false
+                endLoading()
             }
         }
     }
@@ -180,7 +217,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun signInWithGoogle(activityContext: Context, onFinished: (isNewUser: Boolean) -> Unit) {
         viewModelScope.launch {
-            _isLoading.value = true
+            beginLoading("Signing you in with Google…")
             try {
                 val idToken = requestGoogleIdToken(activityContext, repository.googleWebClientId)
                 repository.signInWithGoogleResult(idToken).fold(
@@ -192,7 +229,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: Exception) {
                 _uiError.value = e.message ?: "Failed to sign in with Google."
             } finally {
-                _isLoading.value = false
+                endLoading()
             }
         }
     }
@@ -210,6 +247,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 repository.createUserProfileResult(name, lastInitial, homeArea, contact, vehicle)
             },
             fallbackMessage = "Failed to setup profile.",
+            loadingMessage = "Setting up your profile…",
             onSuccess = { onSuccess() },
         )
     }
@@ -225,6 +263,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 repository.updateUserProfileDetailsResult(name, lastInitial, avatarUrl)
             },
             fallbackMessage = "Failed to update profile.",
+            loadingMessage = "Saving your profile…",
             onSuccess = { onSuccess() },
         )
     }
@@ -235,6 +274,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         runGuarded(
             block = { repository.postTripOfferResult(offer) },
             fallbackMessage = "Failed to post offer.",
+            loadingMessage = "Posting your ride offer…",
             onSuccess = {
                 refreshMyTrips()
                 onSuccess()
@@ -246,6 +286,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         runGuarded(
             block = { repository.postRideRequestResult(request) },
             fallbackMessage = "Failed to post request.",
+            loadingMessage = "Posting your ride request…",
             onSuccess = { onSuccess() },
         )
     }
@@ -254,6 +295,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         runGuarded(
             block = { repository.updateRideRequestStatusResult(requestId, "cancelled") },
             fallbackMessage = "Failed to cancel ride request.",
+            loadingMessage = "Cancelling your request…",
             onSuccess = { onSuccess() },
         )
     }
@@ -267,6 +309,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         runGuarded(
             block = { repository.requestSeatOnOfferResult(offerId, contribution) },
             fallbackMessage = "Failed to request a seat.",
+            loadingMessage = "Securing your ride…",
             onSuccess = { onSuccess() },
         )
     }
@@ -276,6 +319,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         runGuarded(
             block = { repository.offerSeatForRequestResult(requestId, offerId, contribution) },
             fallbackMessage = "Failed to offer the ride.",
+            loadingMessage = "Offering the seat…",
             onSuccess = { match ->
                 refreshMyTrips()
                 onSuccess(match)
@@ -287,6 +331,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         runGuarded(
             block = { repository.validateAndCreateMatchResult(offerId, requestId, contribution) },
             fallbackMessage = "Failed to join ride.",
+            loadingMessage = "Securing your ride…",
             onSuccess = { onSuccess() },
         )
     }
@@ -295,6 +340,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         runGuarded(
             block = { repository.joinTripOfferDirectResult(offerId) },
             fallbackMessage = "Failed to join the ride.",
+            loadingMessage = "Securing your ride…",
             onSuccess = { match -> onSuccess(match) },
         )
     }
@@ -303,6 +349,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         runGuarded(
             block = { repository.updateTripOfferStatusResult(offerId, newStatus) },
             fallbackMessage = "Failed to update the ride status.",
+            loadingMessage = "Updating the ride…",
             onSuccess = { onSuccess() },
         )
     }
@@ -348,12 +395,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** A structured pickup proposal or confirmation — see [MessageType]. */
+    fun sendPickupMessage(matchId: String, type: String, spot: String, time: String) {
+        val summary = when (type) {
+            MessageType.PICKUP_CONFIRMED -> "Confirmed: meet at $spot at $time"
+            else -> "Pickup proposal: $spot at $time"
+        }
+        viewModelScope.launch {
+            repository.sendMessageResult(matchId, summary, type, spot, time)
+                .onFailure { _uiError.value = it.message ?: "Message failed to send." }
+        }
+    }
+
     // --- Ratings, blocks and safety ---
 
     fun submitRating(toUserId: String, rating: Float, comment: String, onSuccess: () -> Unit) {
         runGuarded(
             block = { repository.submitRatingResult(toUserId, rating, comment) },
             fallbackMessage = "Failed to submit rating.",
+            loadingMessage = "Submitting your rating…",
             onSuccess = { onSuccess() },
         )
     }
@@ -380,6 +440,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         runGuarded(
             block = { repository.blockUserResult(blockedUserId) },
             fallbackMessage = "Failed to block user.",
+            loadingMessage = "Blocking this rider…",
             onSuccess = { onSuccess() },
         )
     }
@@ -448,18 +509,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun <T> runGuarded(
         block: suspend () -> Result<T>,
         fallbackMessage: String,
+        loadingMessage: String = DEFAULT_LOADING_MESSAGE,
         onSuccess: (T) -> Unit,
     ) {
         viewModelScope.launch {
-            _isLoading.value = true
+            beginLoading(loadingMessage)
             try {
                 block().fold(
                     onSuccess = { onSuccess(it) },
                     onFailure = { _uiError.value = it.message ?: fallbackMessage },
                 )
             } finally {
-                _isLoading.value = false
+                endLoading()
             }
         }
+    }
+
+    private fun beginLoading(message: String) {
+        _loadingMessage.value = message
+        _isLoading.value = true
+    }
+
+    private fun endLoading() {
+        _isLoading.value = false
+        _loadingMessage.value = DEFAULT_LOADING_MESSAGE
+    }
+
+    companion object {
+        /** Neutral, so it reads sensibly for any action that does not set its own. */
+        const val DEFAULT_LOADING_MESSAGE = "Just a moment…"
     }
 }

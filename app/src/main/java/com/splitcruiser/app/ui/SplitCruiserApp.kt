@@ -29,6 +29,7 @@ import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,23 +65,31 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.compose.ui.window.Dialog
+import com.splitcruiser.app.BuildConfig
 import com.splitcruiser.app.R
 import com.splitcruiser.app.data.*
+import com.splitcruiser.app.ui.theme.SplitCruiserAccent
+import com.splitcruiser.app.ui.theme.SplitCruiserDanger
+import com.splitcruiser.app.ui.theme.SplitCruiserInfo
+import com.splitcruiser.app.ui.theme.SplitCruiserOnPrimary
+import com.splitcruiser.app.ui.theme.SplitCruiserOnPrimaryContainer
+import com.splitcruiser.app.ui.theme.SplitCruiserOutline
+import com.splitcruiser.app.ui.theme.SplitCruiserPrimary
+import com.splitcruiser.app.ui.theme.SplitCruiserPrimaryContainer
+import com.splitcruiser.app.ui.theme.SplitCruiserRadius
+import com.splitcruiser.app.ui.theme.SplitCruiserSpacing
+import com.splitcruiser.app.ui.theme.SplitCruiserSuccess
+import com.splitcruiser.app.ui.theme.SplitCruiserSurface
+import com.splitcruiser.app.ui.theme.SplitCruiserSurfaceCard
+import com.splitcruiser.app.ui.theme.SplitCruiserSurfaceMuted
+import com.splitcruiser.app.ui.theme.SplitCruiserSurfaceTrack
+import com.splitcruiser.app.ui.theme.SplitCruiserTextPrimary
+import com.splitcruiser.app.ui.theme.SplitCruiserTextSecondary
+import com.splitcruiser.app.ui.theme.SplitCruiserTextSize
+import com.splitcruiser.app.ui.theme.SplitCruiserWarning
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
-
-// --- Custom Theme Colors for Split Cruiser (Vibrant Palette Theme) ---
-val SplitCruiserDarkBg = Color(0xFFF8F9FF)
-val SplitCruiserCardBg = Color(0xFFFFFFFF)
-val SplitCruiserSaffron = Color(0xFF0061A4)
-val SplitCruiserIndigo = Color(0xFFD1E4FF)
-val SplitCruiserEmerald = Color(0xFF10B981)
-val SplitCruiserLightGray = Color(0xFF64748B)
-val SplitCruiserDivider = Color(0xFFE2E8F0)
-
-val SplitCruiserTextPrimary = Color(0xFF0F172A)
-val SplitCruiserTextSecondary = Color(0xFF64748B)
 
 // --- Material 3 Animation Utilities ---
 
@@ -129,7 +138,7 @@ fun SplitCruiserLoadingSpinner(
     ) {
         CircularProgressIndicator(
             modifier = Modifier.fillMaxSize(),
-            color = SplitCruiserSaffron,
+            color = SplitCruiserPrimary,
             strokeWidth = 4.dp
         )
     }
@@ -155,7 +164,7 @@ fun ShimmerSkeleton(
             .fillMaxWidth()
             .height(12.dp)
             .clip(RoundedCornerShape(6.dp))
-            .background(SplitCruiserDivider.copy(alpha = alpha))
+            .background(SplitCruiserOutline.copy(alpha = alpha))
     )
 }
 
@@ -257,6 +266,7 @@ fun SplitCruiserApp(viewModel: MainViewModel = viewModel()) {
     val currentUser by viewModel.currentUser.collectAsState()
     val uiError by viewModel.uiError.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val loadingMessage by viewModel.loadingMessage.collectAsState()
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -279,7 +289,7 @@ fun SplitCruiserApp(viewModel: MainViewModel = viewModel()) {
 
     Surface(
         modifier = Modifier.fillMaxSize(),
-        color = SplitCruiserDarkBg
+        color = SplitCruiserSurface
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             NavHost(
@@ -366,9 +376,11 @@ fun SplitCruiserApp(viewModel: MainViewModel = viewModel()) {
                 }
             }
 
-            // Global Loader
+            // Global loader. The message follows whatever action set `isLoading`; it used to be
+            // hardcoded to "Securing your ride...", which is what a user saw while blocking
+            // somebody, logging in, or submitting a rating.
             if (isLoading) {
-                SplitCruiserLoadingState(isFullScreen = true, message = "Securing your ride...")
+                SplitCruiserLoadingState(isFullScreen = true, message = loadingMessage)
             }
 
             // Error Snackbar/Dialog Display
@@ -378,14 +390,14 @@ fun SplitCruiserApp(viewModel: MainViewModel = viewModel()) {
                     confirmButton = {
                         TextButton(
                             onClick = { viewModel.clearError() },
-                            colors = ButtonDefaults.textButtonColors(contentColor = SplitCruiserSaffron)
+                            colors = ButtonDefaults.textButtonColors(contentColor = SplitCruiserPrimary)
                         ) {
                             Text("Got it")
                         }
                     },
                     title = { Text("Information", color = SplitCruiserTextPrimary, fontWeight = FontWeight.Bold) },
                     text = { Text(error, color = SplitCruiserTextPrimary.copy(alpha = 0.85f)) },
-                    containerColor = SplitCruiserCardBg,
+                    containerColor = SplitCruiserSurfaceCard,
                     shape = RoundedCornerShape(16.dp)
                 )
             }
@@ -395,15 +407,333 @@ fun SplitCruiserApp(viewModel: MainViewModel = viewModel()) {
 
 // --- Common UI Components ---
 
+/** How prominent a [RouteIndicator] should be. */
+enum class RouteScale {
+    /** Inside a dense card — the join-success dialog. */
+    Compact,
+
+    /** The default for every feed and schedule card. */
+    Card,
+
+    /** The route header on a trip detail screen, with `PICKUP` / `DROPOFF` labels. */
+    Detail,
+}
+
+/**
+ * The origin → line → destination rail, plus the two place names beside it.
+ *
+ * Seven places used to draw this by hand — `TripOfferCard` (twice, once per breakpoint),
+ * `HostedRideScheduleCard`, `JoinedRideScheduleCard`, `MyRideRequestCard`, `PastRideCard`,
+ * `RideRequestCard`, `JoinSuccessDialog` and both halves of `TripDetailScreen` — each with its own
+ * dot size, rail height and text size, none of which agreed.
+ *
+ * [pins] picks the marker style: filled dots (schedule cards) or start/place icons (feed and
+ * detail screens). [muted] fades and shrinks it for the past-rides card.
+ */
+@Composable
+fun RouteIndicator(
+    origin: String,
+    destination: String,
+    modifier: Modifier = Modifier,
+    scale: RouteScale = RouteScale.Card,
+    pins: Boolean = false,
+    muted: Boolean = false,
+    originLabel: String? = null,
+    destinationLabel: String? = null,
+) {
+    val markerSize = when {
+        muted -> 6.dp
+        scale == RouteScale.Compact -> 12.dp
+        scale == RouteScale.Detail -> SplitCruiserSpacing.Lg
+        else -> if (pins) 14.dp else SplitCruiserSpacing.Sm
+    }
+    val railWidth = if (muted || scale == RouteScale.Compact) 1.5.dp else 2.dp
+    val railHeight = when {
+        muted -> 18.dp
+        scale == RouteScale.Compact -> 14.dp
+        scale == RouteScale.Detail -> 40.dp
+        else -> SplitCruiserSpacing.Xl
+    }
+    val gap = when {
+        muted -> 6.dp
+        scale == RouteScale.Compact -> 10.dp
+        scale == RouteScale.Detail -> 22.dp
+        else -> SplitCruiserSpacing.Md
+    }
+    val alpha = if (muted) 0.5f else 1f
+    val textColor = if (muted) SplitCruiserTextPrimary.copy(alpha = 0.85f) else SplitCruiserTextPrimary
+    val textSize = when {
+        muted -> 13.sp
+        scale == RouteScale.Compact -> SplitCruiserTextSize.Caption
+        scale == RouteScale.Detail -> 15.sp
+        else -> SplitCruiserTextSize.Body
+    }
+    val weight = if (muted || pins) FontWeight.SemiBold else FontWeight.Bold
+
+    Row(
+        modifier = modifier,
+        verticalAlignment = if (pins) Alignment.CenterVertically else Alignment.Top
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(
+                top = if (pins) 0.dp else if (muted) 3.dp else SplitCruiserSpacing.Xs,
+                end = when {
+                    muted -> 10.dp
+                    scale == RouteScale.Detail -> SplitCruiserSpacing.Lg
+                    else -> SplitCruiserSpacing.Md
+                },
+            )
+        ) {
+            if (pins) {
+                Icon(
+                    imageVector = Icons.Default.RadioButtonChecked,
+                    contentDescription = null,
+                    tint = SplitCruiserPrimary.copy(alpha = alpha),
+                    modifier = Modifier.size(markerSize)
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(markerSize)
+                        .clip(CircleShape)
+                        .background(SplitCruiserPrimaryContainer.copy(alpha = alpha))
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .width(railWidth)
+                    .height(railHeight)
+                    .background(SplitCruiserOutline.copy(alpha = alpha))
+            )
+
+            if (pins) {
+                Icon(
+                    imageVector = Icons.Default.Place,
+                    contentDescription = null,
+                    tint = SplitCruiserPrimary.copy(alpha = alpha),
+                    modifier = Modifier.size(markerSize)
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(markerSize)
+                        .clip(CircleShape)
+                        .background(SplitCruiserPrimary.copy(alpha = alpha))
+                )
+            }
+        }
+
+        Column {
+            if (originLabel != null) {
+                Text(
+                    text = originLabel,
+                    color = SplitCruiserTextSecondary,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Text(
+                text = origin,
+                color = textColor,
+                fontSize = textSize,
+                fontWeight = weight,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(gap))
+            if (destinationLabel != null) {
+                Text(
+                    text = destinationLabel,
+                    color = SplitCruiserTextSecondary,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Text(
+                text = destination,
+                color = textColor,
+                fontSize = textSize,
+                fontWeight = weight,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+/**
+ * The colour a ride or request status is drawn in.
+ *
+ * One `when` rather than the five near-identical ones that used to be inlined in each card, so a
+ * new status value cannot be handled by some cards and fall through to the `else` on others.
+ */
+fun statusColor(status: String): Color = when (status.lowercase(Locale.US)) {
+    "active" -> SplitCruiserSuccess
+    "completed" -> SplitCruiserInfo
+    "matched" -> SplitCruiserInfo
+    "cancelled", "declined" -> SplitCruiserDanger
+    "pending" -> SplitCruiserWarning
+    else -> SplitCruiserPrimary
+}
+
+/** The tinted status pill every ride card shows in its top-right corner. */
+@Composable
+fun StatusBadge(
+    status: String,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false,
+) {
+    val color = statusColor(status)
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(if (compact) 6.dp else SplitCruiserRadius.Sm))
+            .background(color.copy(alpha = if (compact) 0.1f else 0.15f))
+            .padding(
+                horizontal = if (compact) 6.dp else SplitCruiserSpacing.Sm,
+                vertical = if (compact) 2.dp else SplitCruiserSpacing.Xs,
+            )
+    ) {
+        Text(
+            text = status.uppercase(Locale.US),
+            color = color,
+            fontSize = if (compact) 9.sp else 10.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+/** The `ICON + ALL-CAPS LABEL` eyebrow every ride card leads with. */
+@Composable
+fun CardEyebrow(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    tint: Color,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false,
+) {
+    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = tint,
+            modifier = Modifier.size(if (compact) 14.dp else SplitCruiserSpacing.Lg)
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = label,
+            color = tint,
+            fontSize = if (compact) 10.sp else SplitCruiserTextSize.Eyebrow,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = if (compact) 0.8.sp else 1.sp
+        )
+    }
+}
+
+/**
+ * Somebody the signed-in user has actually shared a ride with, and may therefore rate.
+ *
+ * The rating form used to ask for a raw Firebase uid in a text field. This is what replaces it:
+ * the uid stays internal, and the user picks a name.
+ */
+data class RatingCompanion(
+    val userId: String,
+    val displayName: String,
+    /** True when they were driving, so the chip can show a car rather than a person. */
+    val wasHost: Boolean,
+)
+
+/**
+ * A titled group of form fields, the Compose equivalent of SwiftUI's `Section` inside a `Form`.
+ *
+ * The post-offer and post-request screens were one continuous `Column`, so "where you're going"
+ * and "when and how much" ran together, while the iOS versions of the same two screens got that
+ * separation for free from `Form`/`Section`.
+ */
+@Composable
+fun FormSection(
+    title: String,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Text(
+            text = title.uppercase(Locale.US),
+            color = SplitCruiserTextSecondary,
+            fontSize = SplitCruiserTextSize.Eyebrow,
+            fontWeight = FontWeight.Black,
+            letterSpacing = 1.sp,
+            modifier = Modifier.padding(start = SplitCruiserSpacing.Xs, bottom = SplitCruiserSpacing.Sm)
+        )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(SplitCruiserRadius.Lg))
+                .background(SplitCruiserSurfaceCard)
+                .border(1.dp, SplitCruiserOutline, RoundedCornerShape(SplitCruiserRadius.Lg))
+                .padding(SplitCruiserSpacing.Md),
+            verticalArrangement = Arrangement.spacedBy(SplitCruiserSpacing.Md),
+            content = content,
+        )
+    }
+}
+
+/** The heading above each section of the Trips tab. */
+@Composable
+fun TripsSectionHeader(title: String, topSpacing: Dp = SplitCruiserSpacing.Xl) {
+    Spacer(modifier = Modifier.height(topSpacing))
+    Text(
+        text = title,
+        color = SplitCruiserTextPrimary,
+        fontSize = SplitCruiserTextSize.Title,
+        fontWeight = FontWeight.Black,
+        modifier = Modifier.padding(bottom = SplitCruiserSpacing.Sm)
+    )
+}
+
+/** A `LABEL` / `value` pair, the unit every ride card's footer row is built from. */
+@Composable
+fun CardStat(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    alignment: Alignment.Horizontal = Alignment.Start,
+    valueColor: Color = SplitCruiserTextPrimary,
+) {
+    Column(modifier = modifier, horizontalAlignment = alignment) {
+        Text(
+            text = label,
+            color = SplitCruiserTextSecondary,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            text = value,
+            color = valueColor,
+            fontSize = SplitCruiserTextSize.Caption,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+/**
+ * Backend connectivity, for whoever is developing the app — not for riders.
+ *
+ * It used to sit on the Profile screen at the same visual weight as the "Verified" trust badge,
+ * next to the user's own name, in release builds. It renders nothing outside a debug build now.
+ */
 @Composable
 fun FirebaseStatusPill(isFirebaseEnabled: Boolean) {
+    if (!BuildConfig.DEBUG) return
+
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(24.dp))
-            .background(if (isFirebaseEnabled) SplitCruiserEmerald.copy(alpha = 0.15f) else SplitCruiserSaffron.copy(alpha = 0.15f))
+            .background(if (isFirebaseEnabled) SplitCruiserSuccess.copy(alpha = 0.15f) else SplitCruiserPrimary.copy(alpha = 0.15f))
             .border(
                 1.dp,
-                if (isFirebaseEnabled) SplitCruiserEmerald.copy(alpha = 0.5f) else SplitCruiserSaffron.copy(alpha = 0.5f),
+                if (isFirebaseEnabled) SplitCruiserSuccess.copy(alpha = 0.5f) else SplitCruiserPrimary.copy(alpha = 0.5f),
                 RoundedCornerShape(24.dp)
             )
             .padding(horizontal = 12.dp, vertical = 6.dp),
@@ -413,13 +743,13 @@ fun FirebaseStatusPill(isFirebaseEnabled: Boolean) {
         Icon(
             imageVector = if (isFirebaseEnabled) Icons.Default.CloudQueue else Icons.Default.CloudOff,
             contentDescription = "Status",
-            tint = if (isFirebaseEnabled) SplitCruiserEmerald else SplitCruiserSaffron,
+            tint = if (isFirebaseEnabled) SplitCruiserSuccess else SplitCruiserPrimary,
             modifier = Modifier.size(14.dp)
         )
         Spacer(modifier = Modifier.width(6.dp))
         Text(
             text = if (isFirebaseEnabled) "Firebase Live" else "Sandbox Mode",
-            color = if (isFirebaseEnabled) SplitCruiserEmerald else SplitCruiserSaffron,
+            color = if (isFirebaseEnabled) SplitCruiserSuccess else SplitCruiserPrimary,
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold
         )
@@ -456,7 +786,7 @@ fun EmailPasswordLoginScreen(viewModel: MainViewModel, navController: NavControl
                     .fillMaxWidth()
                     .height(180.dp),
                 shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = SplitCruiserCardBg),
+                colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
             ) {
                 Image(
@@ -480,7 +810,7 @@ fun EmailPasswordLoginScreen(viewModel: MainViewModel, navController: NavControl
                     modifier = Modifier
                         .size(48.dp)
                         .clip(CircleShape)
-                        .border(1.5.dp, SplitCruiserIndigo, CircleShape),
+                        .border(1.5.dp, SplitCruiserPrimaryContainer, CircleShape),
                     contentScale = ContentScale.Crop
                 )
                 Spacer(modifier = Modifier.width(12.dp))
@@ -496,7 +826,7 @@ fun EmailPasswordLoginScreen(viewModel: MainViewModel, navController: NavControl
         item {
             Text(
                 text = "US Desi Rideshare. Cost-split, trust-matched.",
-                color = SplitCruiserLightGray,
+                color = SplitCruiserTextSecondary,
                 fontSize = 14.sp,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(horizontal = 8.dp)
@@ -528,18 +858,18 @@ fun EmailPasswordLoginScreen(viewModel: MainViewModel, navController: NavControl
                         .fillMaxWidth()
                         .testTag("email_input"),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = SplitCruiserSaffron,
-                        unfocusedBorderColor = SplitCruiserDivider,
-                        focusedLabelColor = SplitCruiserSaffron,
-                        unfocusedLabelColor = SplitCruiserLightGray,
+                        focusedBorderColor = SplitCruiserPrimary,
+                        unfocusedBorderColor = SplitCruiserOutline,
+                        focusedLabelColor = SplitCruiserPrimary,
+                        unfocusedLabelColor = SplitCruiserTextSecondary,
                         focusedTextColor = SplitCruiserTextPrimary,
                         unfocusedTextColor = SplitCruiserTextPrimary,
-                        focusedContainerColor = SplitCruiserCardBg,
-                        unfocusedContainerColor = SplitCruiserCardBg
+                        focusedContainerColor = SplitCruiserSurfaceCard,
+                        unfocusedContainerColor = SplitCruiserSurfaceCard
                     ),
                     shape = RoundedCornerShape(12.dp),
                     leadingIcon = {
-                        Icon(imageVector = Icons.Default.Email, contentDescription = "Email", tint = SplitCruiserLightGray)
+                        Icon(imageVector = Icons.Default.Email, contentDescription = "Email", tint = SplitCruiserTextSecondary)
                     }
                 )
 
@@ -555,24 +885,24 @@ fun EmailPasswordLoginScreen(viewModel: MainViewModel, navController: NavControl
                         .fillMaxWidth()
                         .testTag("password_input"),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = SplitCruiserSaffron,
-                        unfocusedBorderColor = SplitCruiserDivider,
-                        focusedLabelColor = SplitCruiserSaffron,
-                        unfocusedLabelColor = SplitCruiserLightGray,
+                        focusedBorderColor = SplitCruiserPrimary,
+                        unfocusedBorderColor = SplitCruiserOutline,
+                        focusedLabelColor = SplitCruiserPrimary,
+                        unfocusedLabelColor = SplitCruiserTextSecondary,
                         focusedTextColor = SplitCruiserTextPrimary,
                         unfocusedTextColor = SplitCruiserTextPrimary,
-                        focusedContainerColor = SplitCruiserCardBg,
-                        unfocusedContainerColor = SplitCruiserCardBg
+                        focusedContainerColor = SplitCruiserSurfaceCard,
+                        unfocusedContainerColor = SplitCruiserSurfaceCard
                     ),
                     shape = RoundedCornerShape(12.dp),
                     leadingIcon = {
-                        Icon(imageVector = Icons.Default.Lock, contentDescription = "Lock", tint = SplitCruiserLightGray)
+                        Icon(imageVector = Icons.Default.Lock, contentDescription = "Lock", tint = SplitCruiserTextSecondary)
                     },
                     trailingIcon = {
                         val image = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff
                         val description = if (passwordVisible) "Hide password" else "Show password"
                         IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                            Icon(imageVector = image, contentDescription = description, tint = SplitCruiserLightGray)
+                            Icon(imageVector = image, contentDescription = description, tint = SplitCruiserTextSecondary)
                         }
                     }
                 )
@@ -590,24 +920,24 @@ fun EmailPasswordLoginScreen(viewModel: MainViewModel, navController: NavControl
                             .fillMaxWidth()
                             .testTag("confirm_password_input"),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = SplitCruiserSaffron,
-                            unfocusedBorderColor = SplitCruiserDivider,
-                            focusedLabelColor = SplitCruiserSaffron,
-                            unfocusedLabelColor = SplitCruiserLightGray,
+                            focusedBorderColor = SplitCruiserPrimary,
+                            unfocusedBorderColor = SplitCruiserOutline,
+                            focusedLabelColor = SplitCruiserPrimary,
+                            unfocusedLabelColor = SplitCruiserTextSecondary,
                             focusedTextColor = SplitCruiserTextPrimary,
                             unfocusedTextColor = SplitCruiserTextPrimary,
-                            focusedContainerColor = SplitCruiserCardBg,
-                            unfocusedContainerColor = SplitCruiserCardBg
+                            focusedContainerColor = SplitCruiserSurfaceCard,
+                            unfocusedContainerColor = SplitCruiserSurfaceCard
                         ),
                         shape = RoundedCornerShape(12.dp),
                         leadingIcon = {
-                            Icon(imageVector = Icons.Default.Lock, contentDescription = "Lock", tint = SplitCruiserLightGray)
+                            Icon(imageVector = Icons.Default.Lock, contentDescription = "Lock", tint = SplitCruiserTextSecondary)
                         },
                         trailingIcon = {
                             val image = if (confirmPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff
                             val description = if (confirmPasswordVisible) "Hide password" else "Show password"
                             IconButton(onClick = { confirmPasswordVisible = !confirmPasswordVisible }) {
-                                Icon(imageVector = image, contentDescription = description, tint = SplitCruiserLightGray)
+                                Icon(imageVector = image, contentDescription = description, tint = SplitCruiserTextSecondary)
                             }
                         }
                     )
@@ -663,7 +993,7 @@ fun EmailPasswordLoginScreen(viewModel: MainViewModel, navController: NavControl
                         .height(54.dp)
                         .testTag("auth_submit_button")
                         .withButtonScale(authScale),
-                    colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserSaffron),
+                    colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserPrimary),
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Text(
@@ -682,14 +1012,14 @@ fun EmailPasswordLoginScreen(viewModel: MainViewModel, navController: NavControl
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
                     ) {
-                        HorizontalDivider(modifier = Modifier.weight(1f), color = SplitCruiserDivider)
+                        HorizontalDivider(modifier = Modifier.weight(1f), color = SplitCruiserOutline)
                         Text(
                             text = "or",
-                            color = SplitCruiserLightGray,
+                            color = SplitCruiserTextSecondary,
                             fontSize = 12.sp,
                             modifier = Modifier.padding(horizontal = 12.dp)
                         )
-                        HorizontalDivider(modifier = Modifier.weight(1f), color = SplitCruiserDivider)
+                        HorizontalDivider(modifier = Modifier.weight(1f), color = SplitCruiserOutline)
                     }
 
                     OutlinedButton(
@@ -705,12 +1035,12 @@ fun EmailPasswordLoginScreen(viewModel: MainViewModel, navController: NavControl
                             .height(54.dp)
                             .testTag("google_sign_in_button"),
                         shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.dp, SplitCruiserDivider),
-                        colors = ButtonDefaults.outlinedButtonColors(containerColor = SplitCruiserCardBg)
+                        border = BorderStroke(1.dp, SplitCruiserOutline),
+                        colors = ButtonDefaults.outlinedButtonColors(containerColor = SplitCruiserSurfaceCard)
                     ) {
                         Text(
                             text = "G",
-                            color = SplitCruiserSaffron,
+                            color = SplitCruiserPrimary,
                             fontWeight = FontWeight.Bold,
                             fontSize = 18.sp
                         )
@@ -726,7 +1056,7 @@ fun EmailPasswordLoginScreen(viewModel: MainViewModel, navController: NavControl
 
                 TextButton(
                     onClick = { isSignUpMode = !isSignUpMode },
-                    colors = ButtonDefaults.textButtonColors(contentColor = SplitCruiserSaffron),
+                    colors = ButtonDefaults.textButtonColors(contentColor = SplitCruiserPrimary),
                     modifier = Modifier.align(Alignment.CenterHorizontally)
                 ) {
                     Text(text = if (isSignUpMode) "Already have an account? Log In" else "Don't have an account? Sign Up")
@@ -737,7 +1067,7 @@ fun EmailPasswordLoginScreen(viewModel: MainViewModel, navController: NavControl
         item {
             Text(
                 text = "Split Cruiser connects verified riders safely. Cost-split, trust-matched.",
-                color = SplitCruiserLightGray.copy(alpha = 0.5f),
+                color = SplitCruiserTextSecondary.copy(alpha = 0.5f),
                 fontSize = 11.sp,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
@@ -819,7 +1149,7 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
                 modifier = Modifier
                     .size(72.dp)
                     .clip(CircleShape)
-                    .border(2.dp, SplitCruiserIndigo, CircleShape),
+                    .border(2.dp, SplitCruiserPrimaryContainer, CircleShape),
                 contentScale = ContentScale.Crop
             )
 
@@ -834,14 +1164,14 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
 
             Text(
                 text = "Add your details so matches can coordinate.",
-                color = SplitCruiserLightGray,
+                color = SplitCruiserTextSecondary,
                 fontSize = 13.sp,
                 modifier = Modifier.padding(top = 4.dp, bottom = 24.dp)
             )
 
             // Profile Picture Upload Section
             Card(
-                colors = CardDefaults.cardColors(containerColor = SplitCruiserIndigo.copy(alpha = 0.15f)),
+                colors = CardDefaults.cardColors(containerColor = SplitCruiserPrimaryContainer.copy(alpha = 0.15f)),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -867,11 +1197,11 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
                     if (uploadingProfilePicture) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(40.dp),
-                            color = SplitCruiserSaffron,
+                            color = SplitCruiserPrimary,
                             strokeWidth = 3.dp
                         )
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text("Uploading...", color = SplitCruiserSaffron, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("Uploading...", color = SplitCruiserPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     } else if (selectedAvatarUrl.isNotEmpty()) {
                         StudentAvatar(
                             avatarUrl = selectedAvatarUrl,
@@ -880,22 +1210,22 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
                             fontSize = 32.sp
                         )
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text("✓ Image selected", color = SplitCruiserEmerald, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("✓ Image selected", color = SplitCruiserSuccess, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     } else {
                         Icon(
                             imageVector = Icons.Default.Image,
                             contentDescription = "Add photo",
-                            tint = SplitCruiserSaffron,
+                            tint = SplitCruiserPrimary,
                             modifier = Modifier.size(40.dp)
                         )
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text("Choose a profile photo", color = SplitCruiserLightGray, fontSize = 12.sp)
+                        Text("Choose a profile photo", color = SplitCruiserTextSecondary, fontSize = 12.sp)
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         text = "(Optional - can be added later)",
-                        color = SplitCruiserLightGray,
+                        color = SplitCruiserTextSecondary,
                         fontSize = 10.sp,
                         fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
                     )
@@ -913,12 +1243,12 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
                     .fillMaxWidth()
                     .testTag("name_input"),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = SplitCruiserSaffron,
-                    unfocusedBorderColor = SplitCruiserDivider,
+                    focusedBorderColor = SplitCruiserPrimary,
+                    unfocusedBorderColor = SplitCruiserOutline,
                     focusedTextColor = SplitCruiserTextPrimary,
                     unfocusedTextColor = SplitCruiserTextPrimary,
-                    focusedContainerColor = SplitCruiserCardBg,
-                    unfocusedContainerColor = SplitCruiserCardBg
+                    focusedContainerColor = SplitCruiserSurfaceCard,
+                    unfocusedContainerColor = SplitCruiserSurfaceCard
                 ),
                 shape = RoundedCornerShape(12.dp)
             )
@@ -936,12 +1266,12 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
                     .fillMaxWidth()
                     .testTag("initial_input"),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = SplitCruiserSaffron,
-                    unfocusedBorderColor = SplitCruiserDivider,
+                    focusedBorderColor = SplitCruiserPrimary,
+                    unfocusedBorderColor = SplitCruiserOutline,
                     focusedTextColor = SplitCruiserTextPrimary,
                     unfocusedTextColor = SplitCruiserTextPrimary,
-                    focusedContainerColor = SplitCruiserCardBg,
-                    unfocusedContainerColor = SplitCruiserCardBg
+                    focusedContainerColor = SplitCruiserSurfaceCard,
+                    unfocusedContainerColor = SplitCruiserSurfaceCard
                 ),
                 shape = RoundedCornerShape(12.dp)
             )
@@ -959,12 +1289,12 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
                     .fillMaxWidth()
                     .testTag("home_area_input"),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = SplitCruiserSaffron,
-                    unfocusedBorderColor = SplitCruiserDivider,
+                    focusedBorderColor = SplitCruiserPrimary,
+                    unfocusedBorderColor = SplitCruiserOutline,
                     focusedTextColor = SplitCruiserTextPrimary,
                     unfocusedTextColor = SplitCruiserTextPrimary,
-                    focusedContainerColor = SplitCruiserCardBg,
-                    unfocusedContainerColor = SplitCruiserCardBg
+                    focusedContainerColor = SplitCruiserSurfaceCard,
+                    unfocusedContainerColor = SplitCruiserSurfaceCard
                 ),
                 shape = RoundedCornerShape(12.dp)
             )
@@ -984,16 +1314,16 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
                     .fillMaxWidth()
                     .testTag("phone_input"),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = SplitCruiserSaffron,
-                    unfocusedBorderColor = SplitCruiserDivider,
+                    focusedBorderColor = SplitCruiserPrimary,
+                    unfocusedBorderColor = SplitCruiserOutline,
                     focusedTextColor = SplitCruiserTextPrimary,
                     unfocusedTextColor = SplitCruiserTextPrimary,
-                    focusedContainerColor = SplitCruiserCardBg,
-                    unfocusedContainerColor = SplitCruiserCardBg
+                    focusedContainerColor = SplitCruiserSurfaceCard,
+                    unfocusedContainerColor = SplitCruiserSurfaceCard
                 ),
                 shape = RoundedCornerShape(12.dp),
                 leadingIcon = {
-                    Icon(Icons.Default.Phone, contentDescription = "Phone", tint = SplitCruiserLightGray)
+                    Icon(Icons.Default.Phone, contentDescription = "Phone", tint = SplitCruiserTextSecondary)
                 }
             )
 
@@ -1011,13 +1341,13 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
                 placeholder = "Where should pickups start from?",
                 testTag = "home_address_input",
                 leadingIcon = {
-                    Icon(Icons.Default.Home, contentDescription = "Home", tint = SplitCruiserEmerald)
+                    Icon(Icons.Default.Home, contentDescription = "Home", tint = SplitCruiserSuccess)
                 }
             )
 
             Text(
                 text = "Private to you. Ride requests start from here so you don't retype it.",
-                color = SplitCruiserLightGray,
+                color = SplitCruiserTextSecondary,
                 fontSize = 11.sp,
                 modifier = Modifier.padding(top = 6.dp)
             )
@@ -1029,24 +1359,24 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable { isHostExpanded = !isHostExpanded }
-                    .background(SplitCruiserCardBg, RoundedCornerShape(12.dp))
-                    .border(1.dp, SplitCruiserDivider, RoundedCornerShape(12.dp))
+                    .background(SplitCruiserSurfaceCard, RoundedCornerShape(12.dp))
+                    .border(1.dp, SplitCruiserOutline, RoundedCornerShape(12.dp))
                     .padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(imageVector = Icons.Default.DirectionsCar, contentDescription = "Car", tint = SplitCruiserSaffron)
+                    Icon(imageVector = Icons.Default.DirectionsCar, contentDescription = "Car", tint = SplitCruiserPrimary)
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
                         Text("Are you offering rides?", color = SplitCruiserTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Text("Add your vehicle details now (Optional)", color = SplitCruiserLightGray, fontSize = 11.sp)
+                        Text("Add your vehicle details now (Optional)", color = SplitCruiserTextSecondary, fontSize = 11.sp)
                     }
                 }
                 Icon(
                     imageVector = if (isHostExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                     contentDescription = "Expand",
-                    tint = SplitCruiserLightGray
+                    tint = SplitCruiserTextSecondary
                 )
             }
 
@@ -1055,8 +1385,8 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(SplitCruiserCardBg, RoundedCornerShape(12.dp))
-                        .border(1.dp, SplitCruiserDivider, RoundedCornerShape(12.dp))
+                        .background(SplitCruiserSurfaceCard, RoundedCornerShape(12.dp))
+                        .border(1.dp, SplitCruiserOutline, RoundedCornerShape(12.dp))
                         .padding(16.dp)
                 ) {
                     OutlinedTextField(
@@ -1066,12 +1396,12 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
                         placeholder = { Text("Toyota") },
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = SplitCruiserSaffron,
-                            unfocusedBorderColor = SplitCruiserDivider,
+                            focusedBorderColor = SplitCruiserPrimary,
+                            unfocusedBorderColor = SplitCruiserOutline,
                             focusedTextColor = SplitCruiserTextPrimary,
                             unfocusedTextColor = SplitCruiserTextPrimary,
-                            focusedContainerColor = SplitCruiserCardBg,
-                            unfocusedContainerColor = SplitCruiserCardBg
+                            focusedContainerColor = SplitCruiserSurfaceCard,
+                            unfocusedContainerColor = SplitCruiserSurfaceCard
                         )
                     )
                     Spacer(modifier = Modifier.height(8.dp))
@@ -1082,12 +1412,12 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
                         placeholder = { Text("Camry") },
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = SplitCruiserSaffron,
-                            unfocusedBorderColor = SplitCruiserDivider,
+                            focusedBorderColor = SplitCruiserPrimary,
+                            unfocusedBorderColor = SplitCruiserOutline,
                             focusedTextColor = SplitCruiserTextPrimary,
                             unfocusedTextColor = SplitCruiserTextPrimary,
-                            focusedContainerColor = SplitCruiserCardBg,
-                            unfocusedContainerColor = SplitCruiserCardBg
+                            focusedContainerColor = SplitCruiserSurfaceCard,
+                            unfocusedContainerColor = SplitCruiserSurfaceCard
                         )
                     )
                     Spacer(modifier = Modifier.height(8.dp))
@@ -1098,12 +1428,12 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
                         placeholder = { Text("2021") },
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = SplitCruiserSaffron,
-                            unfocusedBorderColor = SplitCruiserDivider,
+                            focusedBorderColor = SplitCruiserPrimary,
+                            unfocusedBorderColor = SplitCruiserOutline,
                             focusedTextColor = SplitCruiserTextPrimary,
                             unfocusedTextColor = SplitCruiserTextPrimary,
-                            focusedContainerColor = SplitCruiserCardBg,
-                            unfocusedContainerColor = SplitCruiserCardBg
+                            focusedContainerColor = SplitCruiserSurfaceCard,
+                            unfocusedContainerColor = SplitCruiserSurfaceCard
                         )
                     )
                     Spacer(modifier = Modifier.height(8.dp))
@@ -1114,12 +1444,12 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
                         placeholder = { Text("Silver") },
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = SplitCruiserSaffron,
-                            unfocusedBorderColor = SplitCruiserDivider,
+                            focusedBorderColor = SplitCruiserPrimary,
+                            unfocusedBorderColor = SplitCruiserOutline,
                             focusedTextColor = SplitCruiserTextPrimary,
                             unfocusedTextColor = SplitCruiserTextPrimary,
-                            focusedContainerColor = SplitCruiserCardBg,
-                            unfocusedContainerColor = SplitCruiserCardBg
+                            focusedContainerColor = SplitCruiserSurfaceCard,
+                            unfocusedContainerColor = SplitCruiserSurfaceCard
                         )
                     )
                     Spacer(modifier = Modifier.height(8.dp))
@@ -1130,12 +1460,12 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
                         placeholder = { Text("7XYZ99") },
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = SplitCruiserSaffron,
-                            unfocusedBorderColor = SplitCruiserDivider,
+                            focusedBorderColor = SplitCruiserPrimary,
+                            unfocusedBorderColor = SplitCruiserOutline,
                             focusedTextColor = SplitCruiserTextPrimary,
                             unfocusedTextColor = SplitCruiserTextPrimary,
-                            focusedContainerColor = SplitCruiserCardBg,
-                            unfocusedContainerColor = SplitCruiserCardBg
+                            focusedContainerColor = SplitCruiserSurfaceCard,
+                            unfocusedContainerColor = SplitCruiserSurfaceCard
                         )
                     )
                 }
@@ -1188,10 +1518,10 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
                     .fillMaxWidth()
                     .height(54.dp)
                     .testTag("submit_profile_button"),
-                colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserSaffron),
+                colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserPrimary),
                 shape = RoundedCornerShape(12.dp)
             ) {
-                Text("Launch Split Cruiser", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text("Finish setup", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -1214,6 +1544,7 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
     val myRideRequests by viewModel.myRideRequests.collectAsState()
     val activeMode = viewModel.currentMode
     val isLoading by viewModel.isLoading.collectAsState()
+    val isRefreshing by viewModel.isRefreshing.collectAsState()
     val currentUserId = currentUser?.id ?: ""
 
     val activeHosted = remember(hostedRides) {
@@ -1240,7 +1571,7 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
         topBar = {
             Column(
                 modifier = Modifier
-                    .background(SplitCruiserDarkBg)
+                    .background(SplitCruiserSurface)
                     .statusBarsPadding()
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
@@ -1258,7 +1589,7 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                                 modifier = Modifier
                                     .size(24.dp)
                                     .clip(CircleShape)
-                                    .border(1.dp, SplitCruiserIndigo, CircleShape),
+                                    .border(1.dp, SplitCruiserPrimaryContainer, CircleShape),
                                 contentScale = ContentScale.Crop
                             )
                             Spacer(modifier = Modifier.width(8.dp))
@@ -1273,14 +1604,14 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                                 Icon(
                                     imageVector = Icons.Default.Verified,
                                     contentDescription = "Vouched",
-                                    tint = SplitCruiserSaffron,
+                                    tint = SplitCruiserPrimary,
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
                         }
                         Text(
                             text = if (selectedTab == "trips") "Manage your hosted and joined rides" else dashboardSubtitle,
-                            color = SplitCruiserLightGray,
+                            color = SplitCruiserTextSecondary,
                             fontSize = 11.sp
                         )
                     }
@@ -1291,13 +1622,13 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                                 onClick = { viewModel.refreshMyTrips() },
                                 modifier = Modifier
                                     .clip(CircleShape)
-                                    .background(SplitCruiserIndigo.copy(alpha = 0.2f))
+                                    .background(SplitCruiserPrimaryContainer.copy(alpha = 0.2f))
                                     .size(40.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Refresh,
                                     contentDescription = "Refresh",
-                                    tint = SplitCruiserSaffron,
+                                    tint = SplitCruiserPrimary,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
@@ -1307,11 +1638,11 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                                 Row(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(12.dp))
-                                        .background(Color(0xFFEEF1FF))
+                                        .background(SplitCruiserSurfaceMuted)
                                         .padding(horizontal = 8.dp, vertical = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(Icons.Default.Star, contentDescription = "Rating", tint = Color(0xFFEAB308), modifier = Modifier.size(14.dp))
+                                    Icon(Icons.Default.Star, contentDescription = "Rating", tint = SplitCruiserWarning, modifier = Modifier.size(14.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(
                                         String.format(Locale.US, "%.1f", currentUser!!.ratingAvg),
@@ -1328,11 +1659,11 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                                 modifier = Modifier
                                     .size(40.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFFD1E4FF))
+                                    .background(SplitCruiserPrimaryContainer)
                                     .clickable { navController.navigate("profile") },
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(imageVector = Icons.Default.Person, contentDescription = "Profile", tint = Color(0xFF001D36))
+                                Icon(imageVector = Icons.Default.Person, contentDescription = "Profile", tint = SplitCruiserOnPrimaryContainer)
                             }
                         }
                     }
@@ -1346,7 +1677,7 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(16.dp))
-                            .background(Color(0xFFE1E2EC))
+                            .background(SplitCruiserSurfaceTrack)
                             .padding(4.dp)
                     ) {
                         listOf("Rider", "Host").forEach { mode ->
@@ -1361,8 +1692,8 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = if (mode == "Rider") "Rider Mode (Find Ride)" else "Host Mode (Give Ride)",
-                                    color = if (active) SplitCruiserTextPrimary else Color(0xFF64748B),
+                                    text = if (mode == "Rider") "Find a ride" else "Give a ride",
+                                    color = if (active) SplitCruiserTextPrimary else SplitCruiserTextSecondary,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 13.sp
                                 )
@@ -1373,160 +1704,66 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
             }
         },
         bottomBar = {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color.White)
-                    .border(1.dp, Color(0xFFF1F5F9))
-                    .navigationBarsPadding()
-                    .height(80.dp)
-                    .padding(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.SpaceAround,
-                verticalAlignment = Alignment.CenterVertically
+            // Material 3's NavigationBar rather than a hand-built Row of clickable Columns. The
+            // hand-built version looked the same but announced nothing to a screen reader: no
+            // tab role, no selected state, no "1 of 4". The pill behind the selected icon is
+            // reproduced with a custom `indicatorColor`.
+            NavigationBar(
+                containerColor = SplitCruiserSurfaceCard,
+                contentColor = SplitCruiserTextSecondary,
+                tonalElevation = 0.dp,
             ) {
-                // Explore (Active)
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(16.dp))
-                        .clickable { selectedTab = "explore" }
-                        .padding(vertical = 6.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(if (selectedTab == "explore") SplitCruiserIndigo else Color.Transparent)
-                            .padding(horizontal = 20.dp, vertical = 6.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.DirectionsCar,
-                            contentDescription = "Explore",
-                            tint = if (selectedTab == "explore") SplitCruiserSaffron else SplitCruiserLightGray,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Explore",
-                        color = if (selectedTab == "explore") SplitCruiserSaffron else SplitCruiserLightGray,
-                        fontWeight = if (selectedTab == "explore") FontWeight.Bold else FontWeight.Medium,
-                        fontSize = 11.sp
-                    )
-                }
+                val itemColors = NavigationBarItemDefaults.colors(
+                    selectedIconColor = SplitCruiserPrimary,
+                    selectedTextColor = SplitCruiserPrimary,
+                    unselectedIconColor = SplitCruiserTextSecondary,
+                    unselectedTextColor = SplitCruiserTextSecondary,
+                    indicatorColor = SplitCruiserPrimaryContainer,
+                )
 
-                // My Trips
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(16.dp))
-                        .clickable { selectedTab = "trips" }
-                        .padding(vertical = 6.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(if (selectedTab == "trips") SplitCruiserIndigo else Color.Transparent)
-                            .padding(horizontal = 20.dp, vertical = 6.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Map,
-                            contentDescription = "My Trips",
-                            tint = if (selectedTab == "trips") SplitCruiserSaffron else SplitCruiserLightGray,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "My Trips",
-                        color = if (selectedTab == "trips") SplitCruiserSaffron else SplitCruiserLightGray,
-                        fontWeight = if (selectedTab == "trips") FontWeight.Bold else FontWeight.Medium,
-                        fontSize = 11.sp
-                    )
-                }
+                NavigationBarItem(
+                    selected = selectedTab == "explore",
+                    onClick = { selectedTab = "explore" },
+                    icon = { Icon(Icons.Default.DirectionsCar, contentDescription = null) },
+                    label = { Text("Explore", fontSize = SplitCruiserTextSize.Eyebrow) },
+                    colors = itemColors,
+                )
 
-                // Chats
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(16.dp))
-                        .clickable {
-                            val latestMatch = userMatches.firstOrNull()
-                            if (latestMatch != null) {
-                                navController.navigate("chat/${latestMatch.id}")
-                            }
-                        }
-                        .padding(vertical = 6.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(Color.Transparent)
-                            .padding(horizontal = 20.dp, vertical = 6.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Box {
-                            Icon(
-                                imageVector = Icons.Default.ChatBubbleOutline,
-                                contentDescription = "Chats",
-                                tint = SplitCruiserLightGray,
-                                modifier = Modifier.size(24.dp)
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .clip(CircleShape)
-                                    .background(Color.Red)
-                                    .align(Alignment.TopEnd)
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Chats",
-                        color = SplitCruiserLightGray,
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 11.sp
-                    )
-                }
+                NavigationBarItem(
+                    selected = selectedTab == "trips",
+                    onClick = { selectedTab = "trips" },
+                    icon = { Icon(Icons.Default.Map, contentDescription = null) },
+                    label = { Text("My trips", fontSize = SplitCruiserTextSize.Eyebrow) },
+                    colors = itemColors,
+                )
 
-                // Profile
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(16.dp))
-                        .clickable {
-                            navController.navigate("profile")
+                NavigationBarItem(
+                    selected = false,
+                    enabled = userMatches.isNotEmpty(),
+                    onClick = {
+                        userMatches.firstOrNull()?.let { navController.navigate("chat/${it.id}") }
+                    },
+                    icon = {
+                        // The dot only shows when there is actually a conversation to open. It
+                        // used to be drawn unconditionally, so a user with no matches saw an
+                        // unread badge on a tab that did nothing when tapped.
+                        BadgedBox(
+                            badge = { if (userMatches.isNotEmpty()) Badge(containerColor = SplitCruiserDanger) }
+                        ) {
+                            Icon(Icons.Default.ChatBubbleOutline, contentDescription = null)
                         }
-                        .padding(vertical = 6.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(Color.Transparent)
-                            .padding(horizontal = 20.dp, vertical = 6.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PersonOutline,
-                            contentDescription = "Profile",
-                            tint = SplitCruiserLightGray,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Profile",
-                        color = SplitCruiserLightGray,
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 11.sp
-                    )
-                }
+                    },
+                    label = { Text("Chats", fontSize = SplitCruiserTextSize.Eyebrow) },
+                    colors = itemColors,
+                )
+
+                NavigationBarItem(
+                    selected = false,
+                    onClick = { navController.navigate("profile") },
+                    icon = { Icon(Icons.Default.PersonOutline, contentDescription = null) },
+                    label = { Text("Profile", fontSize = SplitCruiserTextSize.Eyebrow) },
+                    colors = itemColors,
+                )
             }
         },
         floatingActionButton = {
@@ -1539,7 +1776,7 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                             navController.navigate("post_offer")
                         }
                     },
-                    containerColor = SplitCruiserSaffron,
+                    containerColor = SplitCruiserPrimary,
                     contentColor = Color.White,
                     icon = { Icon(Icons.Default.Add, contentDescription = "Post") },
                     text = { Text(if (activeMode == "Rider") "Post Request" else "Post Offer", fontWeight = FontWeight.Bold) },
@@ -1548,21 +1785,30 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                 )
             }
         },
-        containerColor = SplitCruiserDarkBg
+        containerColor = SplitCruiserSurface
     ) { innerPadding ->
+        // Pull-to-refresh on the lists themselves, matching iOS's `.refreshable`. The Trips tab's
+        // toolbar refresh button stays: this app polls rather than streaming, so a manual sync
+        // affordance is worth having twice.
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = { viewModel.refreshFeeds() },
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding),
+        ) {
         if (selectedTab == "explore") {
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(innerPadding)
-                    .padding(horizontal = 16.dp)
+                    .padding(horizontal = SplitCruiserSpacing.Lg)
             ) {
                 // Hero Illustration Banner card
                 item {
                     Spacer(modifier = Modifier.height(12.dp))
                     Card(
                         shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = SplitCruiserCardBg),
+                        colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(140.dp)
@@ -1626,7 +1872,7 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                                 .fillMaxWidth()
                                 .padding(bottom = 12.dp)
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(SplitCruiserCardBg)
+                                .background(SplitCruiserSurfaceCard)
                                 .clickable {
                                     // Navigate to appropriate details or Chat directly
                                     if (match.status == "accepted") {
@@ -1644,13 +1890,13 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                                     modifier = Modifier
                                         .size(40.dp)
                                         .clip(CircleShape)
-                                        .background(if (match.status == "accepted") SplitCruiserEmerald.copy(alpha = 0.15f) else SplitCruiserSaffron.copy(alpha = 0.15f)),
+                                        .background(if (match.status == "accepted") SplitCruiserSuccess.copy(alpha = 0.15f) else SplitCruiserPrimary.copy(alpha = 0.15f)),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
                                         imageVector = if (match.status == "accepted") Icons.AutoMirrored.Filled.Chat else Icons.Default.HourglassEmpty,
                                         contentDescription = "Match",
-                                        tint = if (match.status == "accepted") SplitCruiserEmerald else SplitCruiserSaffron
+                                        tint = if (match.status == "accepted") SplitCruiserSuccess else SplitCruiserPrimary
                                     )
                                 }
                                 Spacer(modifier = Modifier.width(12.dp))
@@ -1663,12 +1909,12 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                                     )
                                     Text(
                                         text = "Status: ${match.status.replaceFirstChar { it.uppercase() }} • Contribution: $${match.contribution}",
-                                        color = SplitCruiserLightGray,
+                                        color = SplitCruiserTextSecondary,
                                         fontSize = 11.sp
                                     )
                                 }
                             }
-                            Icon(imageVector = Icons.Default.ChevronRight, contentDescription = "Open", tint = SplitCruiserLightGray)
+                            Icon(imageVector = Icons.Default.ChevronRight, contentDescription = "Open", tint = SplitCruiserTextSecondary)
                         }
                     }
                 }
@@ -1756,136 +2002,125 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                 }
             }
         } else {
+            // A rider who has never hosted should not have to scroll past a "Rides you're
+            // hosting" heading and its empty state to reach the rides they actually joined.
+            // Sections appear once there is history of that kind; when *nothing* has happened
+            // yet, one empty state stands in for all four.
+            val hasHostedEver = hostedRides.isNotEmpty()
+            val hasJoinedEver = joinedRides.isNotEmpty()
+            val hasRequestedEver = myRideRequests.isNotEmpty()
+            val hasAnyHistory = hasHostedEver || hasJoinedEver || hasRequestedEver
+
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(innerPadding)
-                    .padding(horizontal = 16.dp)
+                    .padding(horizontal = SplitCruiserSpacing.Lg)
             ) {
-                item {
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "Hosted Rides (Driver Mode)",
-                        color = SplitCruiserTextPrimary,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Black,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-                }
-
-                if (activeHosted.isEmpty()) {
+                if (!hasAnyHistory) {
                     item {
+                        Spacer(modifier = Modifier.height(SplitCruiserSpacing.Xxl))
                         SplitCruiserEmptyState(
-                            title = "No Hosted Rides",
-                            description = "You haven't posted any trip offers as a host yet.",
-                            icon = Icons.Default.DirectionsCar,
-                            actionLabel = "Post Trip Offer",
-                            onActionClick = { navController.navigate("post_offer") },
-                            illustrationType = "hosted"
-                        )
-                    }
-                } else {
-                    items(activeHosted) { offer ->
-                        HostedRideScheduleCard(
-                            offer = offer,
-                            onCardClick = { navController.navigate("trip_detail/${offer.id}/offer") },
-                            onStatusChange = { newStatus ->
-                                viewModel.updateTripOfferStatus(offer.id, newStatus) {
-                                    Toast.makeText(context, "Ride status updated!", Toast.LENGTH_SHORT).show()
-                                    viewModel.refreshMyTrips()
-                                }
-                            }
-                        )
-                    }
-                }
-
-                item {
-                    Spacer(modifier = Modifier.height(24.dp))
-                    Text(
-                        text = "Joined Rides (Passenger Mode)",
-                        color = SplitCruiserTextPrimary,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Black,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-                }
-
-                if (activeJoined.isEmpty()) {
-                    item {
-                        SplitCruiserEmptyState(
-                            title = "No Joined Rides",
-                            description = "You haven't reserved seats on any ride yet.",
+                            title = "Nothing on your schedule yet",
+                            description = "Post a ride offer if you're driving, or a request if you need a seat. Both show up here.",
                             icon = Icons.Default.Map,
-                            actionLabel = "Find a Ride",
-                            onActionClick = { selectedTab = "explore" },
+                            actionLabel = if (activeMode == "Rider") "Post a ride request" else "Post a ride offer",
+                            onActionClick = {
+                                navController.navigate(if (activeMode == "Rider") "post_request" else "post_offer")
+                            },
                             illustrationType = "joined"
                         )
                     }
-                } else {
-                    items(activeJoined) { offer ->
-                        JoinedRideScheduleCard(
-                            offer = offer,
-                            onCardClick = { navController.navigate("trip_detail/${offer.id}/offer") }
-                        )
-                    }
                 }
 
-                item {
-                    Spacer(modifier = Modifier.height(24.dp))
-                    Text(
-                        text = "My Ride Requests (Rider Mode)",
-                        color = SplitCruiserTextPrimary,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Black,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-                }
-
-                if (activeMyRequests.isEmpty()) {
+                if (hasHostedEver) {
                     item {
-                        SplitCruiserEmptyState(
-                            title = "No Posted Ride Requests",
-                            description = "You haven't requested any rides as a passenger yet.",
-                            icon = Icons.Default.DirectionsCar,
-                            actionLabel = "Post Ride Request",
-                            onActionClick = { navController.navigate("post_request") },
-                            illustrationType = "joined"
-                        )
+                        TripsSectionHeader("Rides you're hosting", topSpacing = SplitCruiserSpacing.Lg)
                     }
-                } else {
-                    items(activeMyRequests) { request ->
-                        MyRideRequestCard(
-                            request = request,
-                            onCancelClick = {
-                                viewModel.cancelRideRequest(request.id) {
-                                    Toast.makeText(context, "Ride request cancelled!", Toast.LENGTH_SHORT).show()
+
+                    if (activeHosted.isEmpty()) {
+                        item {
+                            SplitCruiserEmptyState(
+                                title = "Nothing scheduled",
+                                description = "You've hosted before — post another offer when you're next driving.",
+                                icon = Icons.Default.DirectionsCar,
+                                actionLabel = "Post a ride offer",
+                                onActionClick = { navController.navigate("post_offer") },
+                                illustrationType = "hosted"
+                            )
+                        }
+                    } else {
+                        items(activeHosted) { offer ->
+                            HostedRideScheduleCard(
+                                offer = offer,
+                                onCardClick = { navController.navigate("trip_detail/${offer.id}/offer") },
+                                onStatusChange = { newStatus ->
+                                    viewModel.updateTripOfferStatus(offer.id, newStatus) {
+                                        Toast.makeText(context, "Ride status updated", Toast.LENGTH_SHORT).show()
+                                        viewModel.refreshMyTrips()
+                                    }
                                 }
-                            }
-                        )
+                            )
+                        }
                     }
                 }
 
-                item {
-                    Spacer(modifier = Modifier.height(24.dp))
-                    Text(
-                        text = "Past Rides & Reference History",
-                        color = SplitCruiserTextPrimary,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Black,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
+                if (hasJoinedEver) {
+                    item { TripsSectionHeader("Rides you've joined") }
+
+                    if (activeJoined.isEmpty()) {
+                        item {
+                            SplitCruiserEmptyState(
+                                title = "No upcoming seats",
+                                description = "Nothing booked right now. Have a look at what's going your way.",
+                                icon = Icons.Default.Map,
+                                actionLabel = "Find a ride",
+                                onActionClick = { selectedTab = "explore" },
+                                illustrationType = "joined"
+                            )
+                        }
+                    } else {
+                        items(activeJoined) { offer ->
+                            JoinedRideScheduleCard(
+                                offer = offer,
+                                onCardClick = { navController.navigate("trip_detail/${offer.id}/offer") }
+                            )
+                        }
+                    }
                 }
 
-                if (pastRides.isEmpty()) {
-                    item {
-                        SplitCruiserEmptyState(
-                            title = "No Past Rides",
-                            description = "Your completed and cancelled rides will show up here for future reference.",
-                            icon = Icons.Default.History,
-                            illustrationType = "past"
-                        )
+                if (hasRequestedEver) {
+                    item { TripsSectionHeader("Your ride requests") }
+
+                    if (activeMyRequests.isEmpty()) {
+                        item {
+                            SplitCruiserEmptyState(
+                                title = "No open requests",
+                                description = "Post one and hosts heading your way will see it.",
+                                icon = Icons.Default.DirectionsCar,
+                                actionLabel = "Post a ride request",
+                                onActionClick = { navController.navigate("post_request") },
+                                illustrationType = "joined"
+                            )
+                        }
+                    } else {
+                        items(activeMyRequests) { request ->
+                            MyRideRequestCard(
+                                request = request,
+                                onCancelClick = {
+                                    viewModel.cancelRideRequest(request.id) {
+                                        Toast.makeText(context, "Ride request cancelled", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            )
+                        }
                     }
-                } else {
+                }
+
+                // Past rides only exist once something has finished, so there is never an empty
+                // state to show here — the section is simply absent until there is history.
+                if (pastRides.isNotEmpty()) {
+                    item { TripsSectionHeader("Past rides") }
+
                     items(pastRides) { offer ->
                         PastRideCard(
                             offer = offer,
@@ -1899,6 +2134,7 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                     Spacer(modifier = Modifier.height(100.dp))
                 }
             }
+        }
         }
     }
 
@@ -1932,13 +2168,15 @@ fun HostDashboard(viewModel: MainViewModel, navController: NavController) {
 
     val activeRides = remember(hostedRides) { hostedRides.filter { it.status == "active" } }
     val totalPassengers = remember(hostedRides) { hostedRides.sumOf { it.passengers.size } }
-    val totalRevenue = remember(hostedRides) { hostedRides.sumOf { it.costPerRider * (it.totalSeats - it.seatsLeft) } }
+    // Named for what it is: what passengers have chipped in toward this host's costs. Calling it
+    // "Revenue" here while the rest of the app calls the product a cost split told two stories.
+    val totalContributions = remember(hostedRides) { hostedRides.sumOf { it.costPerRider * (it.totalSeats - it.seatsLeft) } }
 
     Scaffold(
         topBar = {
             Column(
                 modifier = Modifier
-                    .background(SplitCruiserDarkBg)
+                    .background(SplitCruiserSurface)
                     .statusBarsPadding()
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
@@ -1956,7 +2194,7 @@ fun HostDashboard(viewModel: MainViewModel, navController: NavController) {
                         )
                         Text(
                             text = "Manage your hosted rides",
-                            color = SplitCruiserLightGray,
+                            color = SplitCruiserTextSecondary,
                             fontSize = 11.sp
                         )
                     }
@@ -1964,13 +2202,13 @@ fun HostDashboard(viewModel: MainViewModel, navController: NavController) {
                         onClick = { navController.popBackStack() },
                         modifier = Modifier
                             .clip(CircleShape)
-                            .background(SplitCruiserIndigo.copy(alpha = 0.2f))
+                            .background(SplitCruiserPrimaryContainer.copy(alpha = 0.2f))
                             .size(40.dp)
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
-                            tint = SplitCruiserSaffron,
+                            tint = SplitCruiserPrimary,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -2006,8 +2244,8 @@ fun HostDashboard(viewModel: MainViewModel, navController: NavController) {
                         modifier = Modifier.weight(1f)
                     )
                     HostStatCard(
-                        label = "Revenue",
-                        value = "$${String.format("%.2f", totalRevenue)}",
+                        label = "Chipped in",
+                        value = "$${String.format(Locale.US, "%.2f", totalContributions)}",
                         icon = Icons.Default.AttachMoney,
                         modifier = Modifier.weight(1f)
                     )
@@ -2076,9 +2314,9 @@ fun HostStatCard(
 ) {
     Card(
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = SplitCruiserCardBg),
+        colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
         modifier = modifier
-            .border(1.dp, SplitCruiserDivider, RoundedCornerShape(12.dp))
+            .border(1.dp, SplitCruiserOutline, RoundedCornerShape(12.dp))
     ) {
         Column(
             modifier = Modifier
@@ -2089,7 +2327,7 @@ fun HostStatCard(
             Icon(
                 imageVector = icon,
                 contentDescription = label,
-                tint = SplitCruiserSaffron,
+                tint = SplitCruiserPrimary,
                 modifier = Modifier.size(24.dp)
             )
             Spacer(modifier = Modifier.height(6.dp))
@@ -2103,7 +2341,7 @@ fun HostStatCard(
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = label,
-                color = SplitCruiserLightGray,
+                color = SplitCruiserTextSecondary,
                 fontSize = 10.sp,
                 textAlign = TextAlign.Center
             )
@@ -2123,10 +2361,10 @@ fun PassengerManagementCard(
 ) {
     Card(
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = SplitCruiserCardBg),
+        colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, SplitCruiserDivider, RoundedCornerShape(12.dp))
+            .border(1.dp, SplitCruiserOutline, RoundedCornerShape(12.dp))
             .padding(vertical = 8.dp)
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
@@ -2143,7 +2381,7 @@ fun PassengerManagementCard(
                         modifier = Modifier
                             .size(40.dp)
                             .clip(CircleShape)
-                            .background(SplitCruiserIndigo),
+                            .background(SplitCruiserPrimaryContainer),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
@@ -2165,7 +2403,7 @@ fun PassengerManagementCard(
                             Icon(
                                 imageVector = Icons.Default.Star,
                                 contentDescription = "Rating",
-                                tint = Color(0xFFEAB308),
+                                tint = SplitCruiserWarning,
                                 modifier = Modifier.size(12.dp)
                             )
                             Spacer(modifier = Modifier.width(4.dp))
@@ -2182,13 +2420,13 @@ fun PassengerManagementCard(
                     Icon(
                         imageVector = Icons.Default.ChevronRight,
                         contentDescription = "View profile",
-                        tint = SplitCruiserLightGray
+                        tint = SplitCruiserTextSecondary
                     )
                 }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
-            HorizontalDivider(color = SplitCruiserDivider, thickness = 1.dp)
+            HorizontalDivider(color = SplitCruiserOutline, thickness = 1.dp)
             Spacer(modifier = Modifier.height(12.dp))
 
             Row(
@@ -2217,8 +2455,8 @@ fun PassengerManagementCard(
                         .weight(1f)
                         .height(36.dp),
                     shape = RoundedCornerShape(8.dp),
-                    border = BorderStroke(1.dp, Color(0xFFEF4444)),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF4444))
+                    border = BorderStroke(1.dp, SplitCruiserDanger),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = SplitCruiserDanger)
                 ) {
                     Icon(
                         imageVector = Icons.Default.WarningAmber,
@@ -2243,124 +2481,53 @@ fun HostedRideScheduleCard(
     val dateStr = formatter.format(Date(offer.departureTime))
 
     Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = SplitCruiserCardBg),
+        shape = RoundedCornerShape(SplitCruiserRadius.Lg),
+        colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp)
+            .padding(vertical = SplitCruiserSpacing.Sm)
             .clickable { onCardClick() }
-            .border(1.dp, SplitCruiserDivider, RoundedCornerShape(16.dp))
+            .border(1.dp, SplitCruiserOutline, RoundedCornerShape(SplitCruiserRadius.Lg))
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(SplitCruiserSpacing.Lg)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.DirectionsCar,
-                        contentDescription = "Hosted Ride",
-                        tint = SplitCruiserSaffron,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "HOSTED RIDE",
-                        color = SplitCruiserSaffron,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp
-                    )
-                }
-
-                val badgeColor = when (offer.status) {
-                    "active" -> SplitCruiserEmerald
-                    "completed" -> Color(0xFF3B82F6)
-                    "cancelled" -> Color(0xFFEF4444)
-                    else -> SplitCruiserSaffron
-                }
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(badgeColor.copy(alpha = 0.15f))
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = offer.status.uppercase(),
-                        color = badgeColor,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
+                CardEyebrow("HOSTED RIDE", Icons.Default.DirectionsCar, SplitCruiserPrimary)
+                StatusBadge(offer.status)
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(SplitCruiserSpacing.Md))
 
-            Row(verticalAlignment = Alignment.Top) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.padding(top = 4.dp, end = 12.dp)
-                ) {
-                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(SplitCruiserIndigo))
-                    Box(modifier = Modifier.width(2.dp).height(24.dp).background(SplitCruiserDivider))
-                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(SplitCruiserSaffron))
-                }
+            RouteIndicator(origin = offer.origin, destination = offer.destination)
 
-                Column {
-                    Text(
-                        text = offer.origin,
-                        color = SplitCruiserTextPrimary,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = offer.destination,
-                        color = SplitCruiserTextPrimary,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-            HorizontalDivider(color = SplitCruiserDivider, thickness = 1.dp)
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(SplitCruiserSpacing.Lg))
+            HorizontalDivider(color = SplitCruiserOutline, thickness = 1.dp)
+            Spacer(modifier = Modifier.height(SplitCruiserSpacing.Md))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
-                    Text(text = "DEPARTURE", color = SplitCruiserLightGray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    Text(text = dateStr, color = SplitCruiserTextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(text = "SEATS OCCUPIED", color = SplitCruiserLightGray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    Text(
-                        text = "${offer.totalSeats - offer.seatsLeft} / ${offer.totalSeats}",
-                        color = SplitCruiserTextPrimary,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
+                CardStat("DEPARTURE", dateStr)
+                CardStat(
+                    label = "SEATS OCCUPIED",
+                    value = "${offer.totalSeats - offer.seatsLeft} / ${offer.totalSeats}",
+                    alignment = Alignment.End
+                )
             }
 
             if (offer.passengerNames.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(12.dp))
-                HorizontalDivider(color = SplitCruiserDivider, thickness = 1.dp)
-                Spacer(modifier = Modifier.height(12.dp))
-                
+                Spacer(modifier = Modifier.height(SplitCruiserSpacing.Md))
+                HorizontalDivider(color = SplitCruiserOutline, thickness = 1.dp)
+                Spacer(modifier = Modifier.height(SplitCruiserSpacing.Md))
+
                 Text(
-                    text = "PASSENGERS:",
-                    color = SplitCruiserLightGray,
+                    text = "PASSENGERS",
+                    color = SplitCruiserTextSecondary,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.padding(bottom = 6.dp)
@@ -2368,45 +2535,59 @@ fun HostedRideScheduleCard(
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(SplitCruiserSpacing.Sm)
                 ) {
                     offer.passengerNames.forEach { name ->
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(SplitCruiserIndigo.copy(alpha = 0.2f))
-                                .border(1.dp, SplitCruiserIndigo.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                .clip(RoundedCornerShape(SplitCruiserRadius.Md))
+                                .background(SplitCruiserPrimaryContainer.copy(alpha = 0.2f))
+                                .border(
+                                    1.dp,
+                                    SplitCruiserPrimaryContainer.copy(alpha = 0.4f),
+                                    RoundedCornerShape(SplitCruiserRadius.Md)
+                                )
+                                .padding(horizontal = SplitCruiserSpacing.Sm, vertical = SplitCruiserSpacing.Xs)
                         ) {
-                            Text(text = name, color = SplitCruiserTextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                text = name,
+                                color = SplitCruiserTextPrimary,
+                                fontSize = SplitCruiserTextSize.Eyebrow,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                 }
             }
 
             if (offer.status == "active") {
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(SplitCruiserSpacing.Lg))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(SplitCruiserSpacing.Sm)
                 ) {
                     OutlinedButton(
                         onClick = { onStatusChange("cancelled") },
                         modifier = Modifier.weight(1f),
-                        border = BorderStroke(1.dp, Color(0xFFEF4444)),
-                        shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF4444))
+                        border = BorderStroke(1.dp, SplitCruiserDanger),
+                        shape = RoundedCornerShape(SplitCruiserRadius.Md),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = SplitCruiserDanger)
                     ) {
-                        Text("Cancel Ride", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Cancel ride", fontSize = SplitCruiserTextSize.Caption, fontWeight = FontWeight.Bold)
                     }
 
                     Button(
                         onClick = { onStatusChange("completed") },
                         modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserEmerald)
+                        shape = RoundedCornerShape(SplitCruiserRadius.Md),
+                        colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserSuccess)
                     ) {
-                        Text("Complete Ride", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            "Complete ride",
+                            color = SplitCruiserOnPrimary,
+                            fontSize = SplitCruiserTextSize.Caption,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             }
@@ -2423,114 +2604,45 @@ fun JoinedRideScheduleCard(
     val dateStr = formatter.format(Date(offer.departureTime))
 
     Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = SplitCruiserCardBg),
+        shape = RoundedCornerShape(SplitCruiserRadius.Lg),
+        colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp)
+            .padding(vertical = SplitCruiserSpacing.Sm)
             .clickable { onCardClick() }
-            .border(1.dp, SplitCruiserDivider, RoundedCornerShape(16.dp))
+            .border(1.dp, SplitCruiserOutline, RoundedCornerShape(SplitCruiserRadius.Lg))
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(SplitCruiserSpacing.Lg)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.DirectionsCar,
-                        contentDescription = "Joined Ride",
-                        tint = SplitCruiserSaffron,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "JOINED RIDE",
-                        color = SplitCruiserSaffron,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp
-                    )
-                }
-
-                val badgeColor = when (offer.status) {
-                    "active" -> SplitCruiserEmerald
-                    "completed" -> Color(0xFF3B82F6)
-                    "cancelled" -> Color(0xFFEF4444)
-                    else -> SplitCruiserSaffron
-                }
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(badgeColor.copy(alpha = 0.15f))
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = offer.status.uppercase(),
-                        color = badgeColor,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
+                CardEyebrow("JOINED RIDE", Icons.Default.DirectionsCar, SplitCruiserPrimary)
+                StatusBadge(offer.status)
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(SplitCruiserSpacing.Md))
 
-            Row(verticalAlignment = Alignment.Top) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.padding(top = 4.dp, end = 12.dp)
-                ) {
-                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(SplitCruiserIndigo))
-                    Box(modifier = Modifier.width(2.dp).height(24.dp).background(SplitCruiserDivider))
-                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(SplitCruiserSaffron))
-                }
+            RouteIndicator(origin = offer.origin, destination = offer.destination)
 
-                Column {
-                    Text(
-                        text = offer.origin,
-                        color = SplitCruiserTextPrimary,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = offer.destination,
-                        color = SplitCruiserTextPrimary,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-            HorizontalDivider(color = SplitCruiserDivider, thickness = 1.dp)
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(SplitCruiserSpacing.Lg))
+            HorizontalDivider(color = SplitCruiserOutline, thickness = 1.dp)
+            Spacer(modifier = Modifier.height(SplitCruiserSpacing.Md))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
-                    Text(text = "HOST", color = SplitCruiserLightGray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    Text(text = offer.hostName, color = SplitCruiserTextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                }
-
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(text = "DEPARTURE", color = SplitCruiserLightGray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    Text(text = dateStr, color = SplitCruiserTextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(text = "CONTRIBUTION", color = SplitCruiserLightGray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    Text(text = "$${offer.costPerRider}", color = SplitCruiserSaffron, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                }
+                CardStat("HOST", offer.hostName)
+                CardStat("DEPARTURE", dateStr, alignment = Alignment.CenterHorizontally)
+                CardStat(
+                    label = "CONTRIBUTION",
+                    value = "$${offer.costPerRider}",
+                    alignment = Alignment.End,
+                    valueColor = SplitCruiserPrimary
+                )
             }
         }
     }
@@ -2547,13 +2659,13 @@ fun PastRideCard(
     val isHost = offer.hostId == currentUserId
 
     Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = SplitCruiserCardBg.copy(alpha = 0.6f)),
+        shape = RoundedCornerShape(SplitCruiserRadius.Lg),
+        colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard.copy(alpha = 0.6f)),
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 6.dp)
             .clickable { onCardClick() }
-            .border(1.dp, SplitCruiserDivider.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
+            .border(1.dp, SplitCruiserOutline.copy(alpha = 0.5f), RoundedCornerShape(SplitCruiserRadius.Lg))
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Row(
@@ -2561,99 +2673,35 @@ fun PastRideCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = if (isHost) Icons.Default.DirectionsCar else Icons.Default.History,
-                        contentDescription = "Past Ride",
-                        tint = SplitCruiserLightGray,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = if (isHost) "PAST HOSTED" else "PAST JOINED",
-                        color = SplitCruiserLightGray,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.8.sp
-                    )
-                }
-
-                val badgeColor = when (offer.status) {
-                    "completed" -> SplitCruiserEmerald
-                    "cancelled" -> Color(0xFFEF4444)
-                    else -> SplitCruiserLightGray
-                }
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(badgeColor.copy(alpha = 0.1f))
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                ) {
-                    Text(
-                        text = offer.status.uppercase(),
-                        color = badgeColor,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
+                CardEyebrow(
+                    label = if (isHost) "PAST HOSTED" else "PAST JOINED",
+                    icon = if (isHost) Icons.Default.DirectionsCar else Icons.Default.History,
+                    tint = SplitCruiserTextSecondary,
+                    compact = true
+                )
+                StatusBadge(offer.status, compact = true)
             }
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            Row(verticalAlignment = Alignment.Top) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.padding(top = 3.dp, end = 10.dp)
-                ) {
-                    Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(SplitCruiserIndigo.copy(alpha = 0.5f)))
-                    Box(modifier = Modifier.width(1.5.dp).height(18.dp).background(SplitCruiserDivider.copy(alpha = 0.5f)))
-                    Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(SplitCruiserSaffron.copy(alpha = 0.5f)))
-                }
+            RouteIndicator(origin = offer.origin, destination = offer.destination, muted = true)
 
-                Column {
-                    Text(
-                        text = offer.origin,
-                        color = SplitCruiserTextPrimary.copy(alpha = 0.85f),
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = offer.destination,
-                        color = SplitCruiserTextPrimary.copy(alpha = 0.85f),
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-            HorizontalDivider(color = SplitCruiserDivider.copy(alpha = 0.3f), thickness = 1.dp)
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(SplitCruiserSpacing.Md))
+            HorizontalDivider(color = SplitCruiserOutline.copy(alpha = 0.3f), thickness = 1.dp)
+            Spacer(modifier = Modifier.height(SplitCruiserSpacing.Sm))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
-                    Text(text = "DATE & TIME", color = SplitCruiserLightGray, fontSize = 9.sp, fontWeight = FontWeight.Medium)
-                    Text(text = dateStr, color = SplitCruiserTextPrimary.copy(alpha = 0.7f), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                }
-
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(text = "ROLE / DETAIL", color = SplitCruiserLightGray, fontSize = 9.sp, fontWeight = FontWeight.Medium)
-                    Text(
-                        text = if (isHost) "Driver" else "Passenger (with ${offer.hostName})",
-                        color = SplitCruiserSaffron.copy(alpha = 0.8f),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
+                CardStat("DATE & TIME", dateStr, valueColor = SplitCruiserTextPrimary.copy(alpha = 0.7f))
+                CardStat(
+                    label = "YOUR ROLE",
+                    value = if (isHost) "Driver" else "Passenger (with ${offer.hostName})",
+                    alignment = Alignment.End,
+                    valueColor = SplitCruiserPrimary.copy(alpha = 0.8f)
+                )
             }
         }
     }
@@ -2668,133 +2716,67 @@ fun MyRideRequestCard(
     val dateStr = formatter.format(Date(request.departureTime))
 
     Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = SplitCruiserCardBg),
+        shape = RoundedCornerShape(SplitCruiserRadius.Lg),
+        colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp)
-            .border(1.dp, SplitCruiserDivider, RoundedCornerShape(16.dp))
+            .padding(vertical = SplitCruiserSpacing.Sm)
+            .border(1.dp, SplitCruiserOutline, RoundedCornerShape(SplitCruiserRadius.Lg))
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(SplitCruiserSpacing.Lg)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.DirectionsCar,
-                        contentDescription = "My Ride Request",
-                        tint = SplitCruiserEmerald,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "MY RIDE REQUEST",
-                        color = SplitCruiserEmerald,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp
-                    )
-                }
-
-                val badgeColor = when (request.status) {
-                    "active" -> SplitCruiserEmerald
-                    "matched" -> Color(0xFF3B82F6)
-                    "cancelled" -> Color(0xFFEF4444)
-                    else -> SplitCruiserSaffron
-                }
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(badgeColor.copy(alpha = 0.15f))
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = request.status.uppercase(),
-                        color = badgeColor,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
+                CardEyebrow("MY RIDE REQUEST", Icons.Default.DirectionsCar, SplitCruiserSuccess)
+                StatusBadge(request.status)
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(SplitCruiserSpacing.Md))
 
-            Row(verticalAlignment = Alignment.Top) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.padding(top = 4.dp, end = 12.dp)
-                ) {
-                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(SplitCruiserIndigo))
-                    Box(modifier = Modifier.width(2.dp).height(24.dp).background(SplitCruiserDivider))
-                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(SplitCruiserSaffron))
-                }
+            RouteIndicator(origin = request.origin, destination = request.destination)
 
-                Column {
-                    Text(
-                        text = request.origin,
-                        color = SplitCruiserTextPrimary,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = request.destination,
-                        color = SplitCruiserTextPrimary,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-            HorizontalDivider(color = SplitCruiserDivider, thickness = 1.dp)
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(SplitCruiserSpacing.Lg))
+            HorizontalDivider(color = SplitCruiserOutline, thickness = 1.dp)
+            Spacer(modifier = Modifier.height(SplitCruiserSpacing.Md))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
-                    Text(text = "PREFERRED DEPARTURE", color = SplitCruiserLightGray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    Text(text = dateStr, color = SplitCruiserTextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(text = "SEATS NEEDED", color = SplitCruiserLightGray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    Text(
-                        text = "${request.seatsNeeded}",
-                        color = SplitCruiserTextPrimary,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
+                CardStat("PREFERRED DEPARTURE", dateStr)
+                CardStat("SEATS NEEDED", "${request.seatsNeeded}", alignment = Alignment.End)
             }
 
             if (request.notes.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(12.dp))
-                HorizontalDivider(color = SplitCruiserDivider, thickness = 1.dp)
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(text = "NOTES", color = SplitCruiserLightGray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                Text(text = request.notes, color = SplitCruiserTextPrimary, fontSize = 12.sp)
+                Spacer(modifier = Modifier.height(SplitCruiserSpacing.Md))
+                HorizontalDivider(color = SplitCruiserOutline, thickness = 1.dp)
+                Spacer(modifier = Modifier.height(SplitCruiserSpacing.Md))
+                Text(
+                    text = "NOTES",
+                    color = SplitCruiserTextSecondary,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = request.notes,
+                    color = SplitCruiserTextPrimary,
+                    fontSize = SplitCruiserTextSize.Caption
+                )
             }
 
             if (request.status == "active") {
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(SplitCruiserSpacing.Lg))
                 OutlinedButton(
                     onClick = onCancelClick,
                     modifier = Modifier.fillMaxWidth(),
-                    border = BorderStroke(1.dp, Color(0xFFEF4444)),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF4444))
+                    border = BorderStroke(1.dp, SplitCruiserDanger),
+                    shape = RoundedCornerShape(SplitCruiserRadius.Md),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = SplitCruiserDanger)
                 ) {
-                    Text("Cancel Request", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("Cancel request", fontSize = SplitCruiserTextSize.Caption, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -2811,285 +2793,75 @@ fun SplitCruiserEmptyState(
     onActionClick: (() -> Unit)? = null,
     illustrationType: String = "generic"
 ) {
+    // One backdrop for every empty state, not four hand-drawn Canvas illustrations running three
+    // concurrent infinite animations each. `illustrationType` now only picks the accent colour,
+    // so existing call sites keep working and nothing spins forever behind a list nobody is
+    // looking at. A single slow pulse is enough to stop the screen feeling dead.
     val infiniteTransition = rememberInfiniteTransition(label = "split_cruiser_empty_state_anim")
-    
-    val floatOffset by infiniteTransition.animateFloat(
-        initialValue = -6f,
-        targetValue = 6f,
+    val pulse by infiniteTransition.animateFloat(
+        initialValue = 0.94f,
+        targetValue = 1.06f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1400, easing = EaseInOutSine),
+            animation = tween(2400, easing = EaseInOutSine),
             repeatMode = RepeatMode.Reverse
         ),
-        label = "float_offset"
+        label = "pulse"
     )
 
-    val glowPulse by infiniteTransition.animateFloat(
-        initialValue = 0.9f,
-        targetValue = 1.15f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2000, easing = EaseInOutSine),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "glow_pulse"
-    )
-
-    val flowOffset by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 120f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1800, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "flow_offset"
-    )
+    val accent = when (illustrationType) {
+        "hosted" -> SplitCruiserPrimary
+        "joined" -> SplitCruiserSuccess
+        "past" -> SplitCruiserTextSecondary
+        else -> SplitCruiserPrimary
+    }
 
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(vertical = 36.dp, horizontal = 24.dp),
+            .padding(vertical = SplitCruiserSpacing.Xxl, horizontal = SplitCruiserSpacing.Xl),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Box(
-            modifier = Modifier
-                .size(width = 220.dp, height = 130.dp),
+            modifier = Modifier.size(140.dp),
             contentAlignment = Alignment.Center
         ) {
-            when (illustrationType) {
-                "hosted" -> {
-                    Canvas(
-                        modifier = Modifier.fillMaxSize()
-                    ) {
-                        val w = size.width
-                        val h = size.height
-                        
-                        drawCircle(
-                            brush = Brush.radialGradient(
-                                colors = listOf(SplitCruiserIndigo.copy(alpha = 0.25f), Color.Transparent),
-                                center = androidx.compose.ui.geometry.Offset(w / 2, h / 2),
-                                radius = h * 0.7f
-                            )
-                        )
-
-                        val roadPath = Path().apply {
-                            moveTo(w * 0.45f, h * 0.25f)
-                            lineTo(w * 0.55f, h * 0.25f)
-                            lineTo(w * 0.85f, h * 0.95f)
-                            lineTo(w * 0.15f, h * 0.95f)
-                            close()
-                        }
-                        drawPath(
-                            path = roadPath,
-                            brush = Brush.verticalGradient(
-                                colors = listOf(SplitCruiserIndigo.copy(alpha = 0.1f), SplitCruiserIndigo.copy(alpha = 0.45f)),
-                                startY = h * 0.25f,
-                                endY = h * 0.95f
-                            )
-                        )
-
-                        drawLine(
-                            color = SplitCruiserSaffron.copy(alpha = 0.4f),
-                            start = androidx.compose.ui.geometry.Offset(w * 0.45f, h * 0.25f),
-                            end = androidx.compose.ui.geometry.Offset(w * 0.15f, h * 0.95f),
-                            strokeWidth = 3f
-                        )
-                        drawLine(
-                            color = SplitCruiserSaffron.copy(alpha = 0.4f),
-                            start = androidx.compose.ui.geometry.Offset(w * 0.55f, h * 0.25f),
-                            end = androidx.compose.ui.geometry.Offset(w * 0.85f, h * 0.95f),
-                            strokeWidth = 3f
-                        )
-
-                        val centerLinePath = Path().apply {
-                            moveTo(w * 0.5f, h * 0.25f)
-                            lineTo(w * 0.5f, h * 0.95f)
-                        }
-                        drawPath(
-                            path = centerLinePath,
-                            color = SplitCruiserSaffron.copy(alpha = 0.7f),
-                            style = Stroke(
-                                width = 4f,
-                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 20f), flowOffset)
-                            )
-                        )
-
-                        drawCircle(
-                            color = SplitCruiserSaffron.copy(alpha = 0.3f),
-                            radius = 4f,
-                            center = androidx.compose.ui.geometry.Offset(w * 0.25f, h * 0.35f)
-                        )
-                        drawCircle(
-                            color = SplitCruiserSaffron.copy(alpha = 0.5f),
-                            radius = 3f,
-                            center = androidx.compose.ui.geometry.Offset(w * 0.78f, h * 0.45f)
-                        )
-                        drawCircle(
-                            color = SplitCruiserEmerald.copy(alpha = 0.4f),
-                            radius = 5f,
-                            center = androidx.compose.ui.geometry.Offset(w * 0.12f, h * 0.65f)
-                        )
-                    }
-                }
-                "joined" -> {
-                    Canvas(
-                        modifier = Modifier.fillMaxSize()
-                    ) {
-                        val w = size.width
-                        val h = size.height
-                        
-                        drawCircle(
-                            brush = Brush.radialGradient(
-                                colors = listOf(SplitCruiserSaffron.copy(alpha = 0.08f), Color.Transparent),
-                                center = androidx.compose.ui.geometry.Offset(w / 2, h / 2),
-                                radius = h * 0.8f
-                            )
-                        )
-
-                        drawCircle(
-                            color = SplitCruiserIndigo.copy(alpha = 0.35f),
-                            radius = (h * 0.45f) * glowPulse,
-                            center = androidx.compose.ui.geometry.Offset(w / 2, h / 2),
-                            style = Stroke(width = 2f)
-                        )
-                        drawCircle(
-                            color = SplitCruiserIndigo.copy(alpha = 0.2f),
-                            radius = h * 0.3f,
-                            center = androidx.compose.ui.geometry.Offset(w / 2, h / 2),
-                            style = Stroke(width = 1.5f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f))
-                        )
-
-                        val routePath = Path().apply {
-                            moveTo(w * 0.2f, h * 0.75f)
-                            quadraticTo(w * 0.45f, h * 0.15f, w * 0.8f, h * 0.5f)
-                        }
-                        drawPath(
-                            path = routePath,
-                            color = SplitCruiserSaffron.copy(alpha = 0.6f),
-                            style = Stroke(
-                                width = 3f,
-                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 12f), -flowOffset)
-                            )
-                        )
-
-                        drawCircle(
-                            color = SplitCruiserSaffron.copy(alpha = 0.2f * glowPulse),
-                            radius = 16f,
-                            center = androidx.compose.ui.geometry.Offset(w * 0.2f, h * 0.75f)
-                        )
-                        drawCircle(
-                            color = SplitCruiserSaffron,
-                            radius = 6f,
-                            center = androidx.compose.ui.geometry.Offset(w * 0.2f, h * 0.75f)
-                        )
-
-                        drawCircle(
-                            color = SplitCruiserEmerald.copy(alpha = 0.25f),
-                            radius = 14f,
-                            center = androidx.compose.ui.geometry.Offset(w * 0.8f, h * 0.5f)
-                        )
-                        drawCircle(
-                            color = SplitCruiserEmerald,
-                            radius = 5f,
-                            center = androidx.compose.ui.geometry.Offset(w * 0.8f, h * 0.5f)
-                        )
-                    }
-                }
-                "past" -> {
-                    Canvas(
-                        modifier = Modifier.fillMaxSize()
-                    ) {
-                        val w = size.width
-                        val h = size.height
-                        
-                        drawCircle(
-                            brush = Brush.radialGradient(
-                                colors = listOf(SplitCruiserIndigo.copy(alpha = 0.15f), Color.Transparent),
-                                center = androidx.compose.ui.geometry.Offset(w / 2, h / 2),
-                                radius = h * 0.7f
-                            )
-                        )
-
-                        // Draw a clock outline
-                        drawCircle(
-                            color = SplitCruiserIndigo.copy(alpha = 0.4f),
-                            radius = h * 0.4f * glowPulse,
-                            center = androidx.compose.ui.geometry.Offset(w / 2, h / 2),
-                            style = Stroke(width = 3f)
-                        )
-                        
-                        // Draw clock hands
-                        drawLine(
-                            color = SplitCruiserSaffron.copy(alpha = 0.7f),
-                            start = androidx.compose.ui.geometry.Offset(w / 2, h / 2),
-                            end = androidx.compose.ui.geometry.Offset(w / 2 + (h * 0.25f) * kotlin.math.cos(Math.toRadians(30.0).toFloat()).toFloat(), h / 2 + (h * 0.25f) * kotlin.math.sin(Math.toRadians(30.0).toFloat()).toFloat()),
-                            strokeWidth = 4f
-                        )
-                        drawLine(
-                            color = SplitCruiserSaffron.copy(alpha = 0.5f),
-                            start = androidx.compose.ui.geometry.Offset(w / 2, h / 2),
-                            end = androidx.compose.ui.geometry.Offset(w / 2 + (h * 0.18f) * kotlin.math.cos(Math.toRadians(120.0).toFloat()).toFloat(), h / 2 + (h * 0.18f) * kotlin.math.sin(Math.toRadians(120.0).toFloat()).toFloat()),
-                            strokeWidth = 4f
-                        )
-
-                        // Outer dash circle
-                        drawCircle(
-                            color = SplitCruiserIndigo.copy(alpha = 0.2f),
-                            radius = h * 0.55f,
-                            center = androidx.compose.ui.geometry.Offset(w / 2, h / 2),
-                            style = Stroke(width = 1.5f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(15f, 15f), -flowOffset))
-                        )
-                    }
-                }
-                else -> {
-                    Canvas(
-                        modifier = Modifier.fillMaxSize()
-                    ) {
-                        val w = size.width
-                        val h = size.height
-
-                        drawCircle(
-                            brush = Brush.radialGradient(
-                                colors = listOf(SplitCruiserIndigo.copy(alpha = 0.2f), Color.Transparent),
-                                center = androidx.compose.ui.geometry.Offset(w / 2, h / 2),
-                                radius = h * 0.6f
-                            )
-                        )
-                        drawCircle(
-                            color = SplitCruiserIndigo.copy(alpha = 0.3f),
-                            radius = (h * 0.35f) * glowPulse,
-                            center = androidx.compose.ui.geometry.Offset(w / 2, h / 2),
-                            style = Stroke(width = 2f)
-                        )
-                        drawCircle(
-                            color = SplitCruiserIndigo.copy(alpha = 0.15f),
-                            radius = h * 0.5f,
-                            center = androidx.compose.ui.geometry.Offset(w / 2, h / 2),
-                            style = Stroke(width = 1.5f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(15f, 15f), flowOffset))
-                        )
-                    }
-                }
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val centre = androidx.compose.ui.geometry.Offset(size.width / 2, size.height / 2)
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(accent.copy(alpha = 0.18f), Color.Transparent),
+                        center = centre,
+                        radius = size.minDimension * 0.5f
+                    )
+                )
+                drawCircle(
+                    color = accent.copy(alpha = 0.25f),
+                    radius = (size.minDimension * 0.34f) * pulse,
+                    center = centre,
+                    style = Stroke(width = 2f)
+                )
             }
 
             Box(
                 modifier = Modifier
-                    .offset(y = floatOffset.dp)
                     .size(68.dp)
                     .clip(CircleShape)
-                    .background(SplitCruiserCardBg)
-                    .border(2.dp, SplitCruiserSaffron, CircleShape)
+                    .background(SplitCruiserSurfaceCard)
+                    .border(2.dp, accent, CircleShape)
                     .padding(14.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = SplitCruiserSaffron,
+                    tint = accent,
                     modifier = Modifier.size(28.dp)
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(SplitCruiserSpacing.Lg))
 
         Text(
             text = title,
@@ -3107,25 +2879,25 @@ fun SplitCruiserEmptyState(
             fontSize = 13.sp,
             textAlign = TextAlign.Center,
             lineHeight = 18.sp,
-            modifier = Modifier.padding(horizontal = 24.dp)
+            modifier = Modifier.padding(horizontal = SplitCruiserSpacing.Xl)
         )
 
         if (actionLabel != null && onActionClick != null) {
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(SplitCruiserSpacing.Xl))
             Button(
                 onClick = onActionClick,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = SplitCruiserSaffron,
-                    contentColor = Color.White
+                    containerColor = SplitCruiserPrimary,
+                    contentColor = SplitCruiserOnPrimary
                 ),
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(SplitCruiserRadius.Md),
                 elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp),
                 modifier = Modifier.height(44.dp)
             ) {
                 Text(
                     text = actionLabel,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp
+                    fontSize = SplitCruiserTextSize.Body
                 )
             }
         }
@@ -3156,11 +2928,11 @@ fun SplitCruiserFeedLoadingSkeleton(
     ) {
         repeat(itemsCount) {
             Card(
-                colors = CardDefaults.cardColors(containerColor = SplitCruiserCardBg),
+                colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
                 shape = RoundedCornerShape(16.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, SplitCruiserDivider, RoundedCornerShape(16.dp))
+                    .border(1.dp, SplitCruiserOutline, RoundedCornerShape(16.dp))
             ) {
                 Column(
                     modifier = Modifier
@@ -3178,7 +2950,7 @@ fun SplitCruiserFeedLoadingSkeleton(
                                 modifier = Modifier
                                     .size(36.dp)
                                     .clip(CircleShape)
-                                    .background(SplitCruiserLightGray.copy(alpha = 0.3f))
+                                    .background(SplitCruiserTextSecondary.copy(alpha = 0.3f))
                             )
                             Spacer(modifier = Modifier.width(12.dp))
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -3187,14 +2959,14 @@ fun SplitCruiserFeedLoadingSkeleton(
                                         .width(120.dp)
                                         .height(14.dp)
                                         .clip(RoundedCornerShape(4.dp))
-                                        .background(SplitCruiserLightGray.copy(alpha = 0.3f))
+                                        .background(SplitCruiserTextSecondary.copy(alpha = 0.3f))
                                 )
                                 Box(
                                     modifier = Modifier
                                         .width(60.dp)
                                         .height(10.dp)
                                         .clip(RoundedCornerShape(4.dp))
-                                        .background(SplitCruiserLightGray.copy(alpha = 0.3f))
+                                        .background(SplitCruiserTextSecondary.copy(alpha = 0.3f))
                                 )
                             }
                         }
@@ -3203,7 +2975,7 @@ fun SplitCruiserFeedLoadingSkeleton(
                                 .width(50.dp)
                                 .height(20.dp)
                                 .clip(RoundedCornerShape(10.dp))
-                                .background(SplitCruiserLightGray.copy(alpha = 0.3f))
+                                .background(SplitCruiserTextSecondary.copy(alpha = 0.3f))
                         )
                     }
 
@@ -3219,19 +2991,19 @@ fun SplitCruiserFeedLoadingSkeleton(
                                 modifier = Modifier
                                     .size(10.dp)
                                     .clip(CircleShape)
-                                    .background(SplitCruiserLightGray.copy(alpha = 0.3f))
+                                    .background(SplitCruiserTextSecondary.copy(alpha = 0.3f))
                             )
                             Box(
                                 modifier = Modifier
                                     .width(2.dp)
                                     .height(24.dp)
-                                    .background(SplitCruiserLightGray.copy(alpha = 0.2f))
+                                    .background(SplitCruiserTextSecondary.copy(alpha = 0.2f))
                             )
                             Box(
                                 modifier = Modifier
                                     .size(10.dp)
                                     .clip(CircleShape)
-                                    .background(SplitCruiserLightGray.copy(alpha = 0.3f))
+                                    .background(SplitCruiserTextSecondary.copy(alpha = 0.3f))
                             )
                         }
                         Spacer(modifier = Modifier.width(14.dp))
@@ -3244,14 +3016,14 @@ fun SplitCruiserFeedLoadingSkeleton(
                                     .fillMaxWidth(0.8f)
                                     .height(14.dp)
                                     .clip(RoundedCornerShape(4.dp))
-                                    .background(SplitCruiserLightGray.copy(alpha = 0.3f))
+                                    .background(SplitCruiserTextSecondary.copy(alpha = 0.3f))
                             )
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth(0.6f)
                                     .height(14.dp)
                                     .clip(RoundedCornerShape(4.dp))
-                                    .background(SplitCruiserLightGray.copy(alpha = 0.3f))
+                                    .background(SplitCruiserTextSecondary.copy(alpha = 0.3f))
                             )
                         }
                     }
@@ -3269,14 +3041,14 @@ fun SplitCruiserFeedLoadingSkeleton(
                                 .width(140.dp)
                                 .height(12.dp)
                                 .clip(RoundedCornerShape(4.dp))
-                                .background(SplitCruiserLightGray.copy(alpha = 0.3f))
+                                .background(SplitCruiserTextSecondary.copy(alpha = 0.3f))
                         )
                         Box(
                             modifier = Modifier
                                 .width(70.dp)
                                 .height(28.dp)
                                 .clip(RoundedCornerShape(14.dp))
-                                .background(SplitCruiserLightGray.copy(alpha = 0.3f))
+                                .background(SplitCruiserTextSecondary.copy(alpha = 0.3f))
                         )
                     }
                 }
@@ -3313,12 +3085,12 @@ fun SplitCruiserLoadingState(
 
     val content = @Composable {
         Card(
-            colors = CardDefaults.cardColors(containerColor = SplitCruiserCardBg),
+            colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
             shape = RoundedCornerShape(20.dp),
             elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
             modifier = Modifier
                 .padding(24.dp)
-                .border(1.dp, SplitCruiserDivider, RoundedCornerShape(20.dp))
+                .border(1.dp, SplitCruiserOutline, RoundedCornerShape(20.dp))
         ) {
             Column(
                 modifier = Modifier.padding(32.dp),
@@ -3332,7 +3104,7 @@ fun SplitCruiserLoadingState(
                     // Outer rotating vibrant indicator
                     CircularProgressIndicator(
                         progress = { 0.75f },
-                        color = SplitCruiserSaffron,
+                        color = SplitCruiserPrimary,
                         strokeWidth = 4.dp,
                         modifier = Modifier
                             .fillMaxSize()
@@ -3387,11 +3159,6 @@ fun SplitCruiserLoadingState(
 }
 
 @Composable
-fun EmptyStateWidget(title: String, description: String) {
-    SplitCruiserEmptyState(title = title, description = description)
-}
-
-@Composable
 fun TripOfferCard(
     offer: TripOffer,
     isJoinable: Boolean = false,
@@ -3408,12 +3175,12 @@ fun TripOfferCard(
 
     Card(
         onClick = onClick,
-        colors = CardDefaults.cardColors(containerColor = SplitCruiserCardBg),
+        colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
         shape = RoundedCornerShape(16.dp),
         modifier = Modifier
             .fillMaxWidth()
             .padding(bottom = 12.dp)
-            .border(1.dp, SplitCruiserDivider, RoundedCornerShape(16.dp))
+            .border(1.dp, SplitCruiserOutline, RoundedCornerShape(16.dp))
     ) {
         BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
             val isWide = maxWidth >= 500.dp
@@ -3438,12 +3205,12 @@ fun TripOfferCard(
                                 modifier = Modifier
                                     .size(36.dp)
                                     .clip(CircleShape)
-                                    .background(SplitCruiserIndigo),
+                                    .background(SplitCruiserPrimaryContainer),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
                                     text = offer.hostName.take(1).uppercase(),
-                                    color = Color(0xFF001D36),
+                                    color = SplitCruiserOnPrimaryContainer,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 14.sp
                                 )
@@ -3478,19 +3245,19 @@ fun TripOfferCard(
                                     Icon(
                                         imageVector = Icons.Default.Star,
                                         contentDescription = "Rating",
-                                        tint = Color(0xFFEAB308),
+                                        tint = SplitCruiserWarning,
                                         modifier = Modifier.size(12.dp)
                                     )
                                     Spacer(modifier = Modifier.width(2.dp))
                                     Text(
                                         text = String.format(Locale.US, "%.1f", offer.hostRating),
-                                        color = SplitCruiserLightGray,
+                                        color = SplitCruiserTextSecondary,
                                         fontSize = 11.sp
                                     )
                                     if (offer.vehicleInfo.isNotEmpty()) {
                                         Text(
                                             text = " • ${offer.vehicleInfo}",
-                                            color = SplitCruiserLightGray,
+                                            color = SplitCruiserTextSecondary,
                                             fontSize = 11.sp,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
@@ -3500,20 +3267,7 @@ fun TripOfferCard(
                             }
                         }
 
-                        // Trip Route Connectors
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(Icons.Default.RadioButtonChecked, contentDescription = "Start", tint = SplitCruiserSaffron, modifier = Modifier.size(14.dp))
-                                Box(modifier = Modifier.width(1.5.dp).height(18.dp).background(SplitCruiserDivider))
-                                Icon(Icons.Default.Place, contentDescription = "End", tint = SplitCruiserIndigo, modifier = Modifier.size(14.dp))
-                            }
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Text(offer.origin, color = SplitCruiserTextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Text(offer.destination, color = SplitCruiserTextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                        }
+                        RouteIndicator(origin = offer.origin, destination = offer.destination, pins = true)
 
                         // Trip meta info: Time & Seats
                         Row(
@@ -3521,15 +3275,15 @@ fun TripOfferCard(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.AccessTime, contentDescription = "Time", tint = SplitCruiserLightGray, modifier = Modifier.size(13.dp))
+                                Icon(Icons.Default.AccessTime, contentDescription = "Time", tint = SplitCruiserTextSecondary, modifier = Modifier.size(13.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text(dateStr, color = SplitCruiserLightGray, fontSize = 11.sp)
+                                Text(dateStr, color = SplitCruiserTextSecondary, fontSize = 11.sp)
                             }
 
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.EventSeat, contentDescription = "Seats", tint = SplitCruiserEmerald, modifier = Modifier.size(13.dp))
+                                Icon(Icons.Default.EventSeat, contentDescription = "Seats", tint = SplitCruiserSuccess, modifier = Modifier.size(13.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("${offer.seatsLeft} of ${offer.totalSeats} seats open", color = SplitCruiserEmerald, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text("${offer.seatsLeft} of ${offer.totalSeats} seats open", color = SplitCruiserSuccess, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -3543,8 +3297,8 @@ fun TripOfferCard(
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Column(horizontalAlignment = Alignment.End) {
-                            Text("$${offer.costPerRider}", color = SplitCruiserSaffron, fontWeight = FontWeight.Black, fontSize = 22.sp)
-                            Text("per rider", color = SplitCruiserLightGray, fontSize = 10.sp)
+                            Text("$${offer.costPerRider}", color = SplitCruiserPrimary, fontWeight = FontWeight.Black, fontSize = 22.sp)
+                            Text("per rider", color = SplitCruiserTextSecondary, fontSize = 10.sp)
                         }
 
                         Column(
@@ -3558,8 +3312,8 @@ fun TripOfferCard(
                                     .fillMaxWidth()
                                     .height(36.dp),
                                 shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = SplitCruiserSaffron),
-                                border = BorderStroke(1.dp, SplitCruiserSaffron.copy(alpha = 0.5f)),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = SplitCruiserPrimary),
+                                border = BorderStroke(1.dp, SplitCruiserPrimary.copy(alpha = 0.5f)),
                                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                             ) {
                                 Text("View Details", fontSize = 11.sp, fontWeight = FontWeight.Bold)
@@ -3579,7 +3333,7 @@ fun TripOfferCard(
                                         .height(36.dp)
                                         .testTag("card_join_button_${offer.id}")
                                         .withButtonScale(joinScale),
-                                    colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserSaffron),
+                                    colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserPrimary),
                                     shape = RoundedCornerShape(8.dp),
                                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                                 ) {
@@ -3606,35 +3360,35 @@ fun TripOfferCard(
                                 }
                             } else if (hasAlreadyJoined) {
                                 Card(
-                                    colors = CardDefaults.cardColors(containerColor = SplitCruiserEmerald.copy(alpha = 0.12f)),
+                                    colors = CardDefaults.cardColors(containerColor = SplitCruiserSuccess.copy(alpha = 0.12f)),
                                     shape = RoundedCornerShape(8.dp),
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(36.dp)
-                                        .border(1.dp, SplitCruiserEmerald.copy(alpha = 0.25f), RoundedCornerShape(8.dp))
+                                        .border(1.dp, SplitCruiserSuccess.copy(alpha = 0.25f), RoundedCornerShape(8.dp))
                                 ) {
                                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Icon(Icons.Default.CheckCircle, contentDescription = "Joined", tint = SplitCruiserEmerald, modifier = Modifier.size(12.dp))
+                                            Icon(Icons.Default.CheckCircle, contentDescription = "Joined", tint = SplitCruiserSuccess, modifier = Modifier.size(12.dp))
                                             Spacer(modifier = Modifier.width(4.dp))
-                                            Text("Joined", color = SplitCruiserEmerald, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                            Text("Joined", color = SplitCruiserSuccess, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                                         }
                                     }
                                 }
                             } else if (isHost) {
                                 Card(
-                                    colors = CardDefaults.cardColors(containerColor = SplitCruiserIndigo.copy(alpha = 0.12f)),
+                                    colors = CardDefaults.cardColors(containerColor = SplitCruiserPrimaryContainer.copy(alpha = 0.12f)),
                                     shape = RoundedCornerShape(8.dp),
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(36.dp)
-                                        .border(1.dp, SplitCruiserIndigo.copy(alpha = 0.25f), RoundedCornerShape(8.dp))
+                                        .border(1.dp, SplitCruiserPrimaryContainer.copy(alpha = 0.25f), RoundedCornerShape(8.dp))
                                 ) {
                                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Icon(Icons.Default.DirectionsCar, contentDescription = "Your Trip", tint = SplitCruiserSaffron, modifier = Modifier.size(12.dp))
+                                            Icon(Icons.Default.DirectionsCar, contentDescription = "Your Trip", tint = SplitCruiserPrimary, modifier = Modifier.size(12.dp))
                                             Spacer(modifier = Modifier.width(4.dp))
-                                            Text("Your Trip", color = SplitCruiserSaffron, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                            Text("Your Trip", color = SplitCruiserPrimary, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                                         }
                                     }
                                 }
@@ -3656,12 +3410,12 @@ fun TripOfferCard(
                                 modifier = Modifier
                                     .size(32.dp)
                                     .clip(CircleShape)
-                                    .background(SplitCruiserIndigo),
+                                    .background(SplitCruiserPrimaryContainer),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
                                     text = offer.hostName.take(1).uppercase(),
-                                    color = Color(0xFF001D36),
+                                    color = SplitCruiserOnPrimaryContainer,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 12.sp
                                 )
@@ -3683,11 +3437,11 @@ fun TripOfferCard(
                                     }
                                 }
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Star, contentDescription = "Rating", tint = Color(0xFFEAB308), modifier = Modifier.size(12.dp))
+                                    Icon(Icons.Default.Star, contentDescription = "Rating", tint = SplitCruiserWarning, modifier = Modifier.size(12.dp))
                                     Spacer(modifier = Modifier.width(2.dp))
                                     Text(
                                         text = String.format(Locale.US, "%.1f", offer.hostRating),
-                                        color = SplitCruiserLightGray,
+                                        color = SplitCruiserTextSecondary,
                                         fontSize = 11.sp
                                     )
                                 }
@@ -3695,27 +3449,14 @@ fun TripOfferCard(
                         }
 
                         Column(horizontalAlignment = Alignment.End) {
-                            Text("$${offer.costPerRider}", color = SplitCruiserSaffron, fontWeight = FontWeight.Black, fontSize = 18.sp)
-                            Text("per rider", color = SplitCruiserLightGray, fontSize = 9.sp)
+                            Text("$${offer.costPerRider}", color = SplitCruiserPrimary, fontWeight = FontWeight.Black, fontSize = 18.sp)
+                            Text("per rider", color = SplitCruiserTextSecondary, fontSize = 9.sp)
                         }
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // Route details
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Default.RadioButtonChecked, contentDescription = "Start", tint = SplitCruiserSaffron, modifier = Modifier.size(14.dp))
-                            Box(modifier = Modifier.width(1.5.dp).height(24.dp).background(SplitCruiserDivider))
-                            Icon(Icons.Default.Place, contentDescription = "End", tint = SplitCruiserIndigo, modifier = Modifier.size(14.dp))
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(offer.origin, color = SplitCruiserTextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Spacer(modifier = Modifier.height(18.dp))
-                            Text(offer.destination, color = SplitCruiserTextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                    }
+                    RouteIndicator(origin = offer.origin, destination = offer.destination, pins = true)
 
                     Spacer(modifier = Modifier.height(12.dp))
 
@@ -3726,21 +3467,21 @@ fun TripOfferCard(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.AccessTime, contentDescription = "Time", tint = SplitCruiserLightGray, modifier = Modifier.size(13.dp))
+                            Icon(Icons.Default.AccessTime, contentDescription = "Time", tint = SplitCruiserTextSecondary, modifier = Modifier.size(13.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text(dateStr, color = SplitCruiserLightGray, fontSize = 11.sp)
+                            Text(dateStr, color = SplitCruiserTextSecondary, fontSize = 11.sp)
                         }
 
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.EventSeat, contentDescription = "Seats", tint = SplitCruiserEmerald, modifier = Modifier.size(13.dp))
+                            Icon(Icons.Default.EventSeat, contentDescription = "Seats", tint = SplitCruiserSuccess, modifier = Modifier.size(13.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("${offer.seatsLeft} of ${offer.totalSeats} seats open", color = SplitCruiserEmerald, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("${offer.seatsLeft} of ${offer.totalSeats} seats open", color = SplitCruiserSuccess, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
 
                     // Bottom CTAs
                     Spacer(modifier = Modifier.height(12.dp))
-                    HorizontalDivider(color = SplitCruiserDivider)
+                    HorizontalDivider(color = SplitCruiserOutline)
                     Spacer(modifier = Modifier.height(10.dp))
 
                     Row(
@@ -3754,8 +3495,8 @@ fun TripOfferCard(
                                 .weight(1f)
                                 .height(38.dp),
                             shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = SplitCruiserSaffron),
-                            border = BorderStroke(1.dp, SplitCruiserSaffron.copy(alpha = 0.5f)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = SplitCruiserPrimary),
+                            border = BorderStroke(1.dp, SplitCruiserPrimary.copy(alpha = 0.5f)),
                             contentPadding = PaddingValues(vertical = 4.dp)
                         ) {
                             Text("View Details", fontWeight = FontWeight.Bold, fontSize = 12.sp)
@@ -3769,7 +3510,7 @@ fun TripOfferCard(
                                     .weight(1f)
                                     .height(38.dp)
                                     .testTag("card_join_button_${offer.id}"),
-                                colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserSaffron),
+                                colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserPrimary),
                                 shape = RoundedCornerShape(8.dp),
                                 contentPadding = PaddingValues(vertical = 4.dp)
                             ) {
@@ -3796,35 +3537,35 @@ fun TripOfferCard(
                             }
                         } else if (hasAlreadyJoined) {
                             Card(
-                                colors = CardDefaults.cardColors(containerColor = SplitCruiserEmerald.copy(alpha = 0.15f)),
+                                colors = CardDefaults.cardColors(containerColor = SplitCruiserSuccess.copy(alpha = 0.15f)),
                                 shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(38.dp)
-                                    .border(1.dp, SplitCruiserEmerald.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                                    .border(1.dp, SplitCruiserSuccess.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
                             ) {
                                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Default.CheckCircle, contentDescription = "Joined", tint = SplitCruiserEmerald, modifier = Modifier.size(14.dp))
+                                        Icon(Icons.Default.CheckCircle, contentDescription = "Joined", tint = SplitCruiserSuccess, modifier = Modifier.size(14.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Joined", color = SplitCruiserEmerald, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                        Text("Joined", color = SplitCruiserSuccess, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                     }
                                 }
                             }
                         } else if (isHost) {
                             Card(
-                                colors = CardDefaults.cardColors(containerColor = SplitCruiserIndigo.copy(alpha = 0.15f)),
+                                colors = CardDefaults.cardColors(containerColor = SplitCruiserPrimaryContainer.copy(alpha = 0.15f)),
                                 shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(38.dp)
-                                    .border(1.dp, SplitCruiserIndigo.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                                    .border(1.dp, SplitCruiserPrimaryContainer.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
                             ) {
                                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Default.DirectionsCar, contentDescription = "Your Trip", tint = SplitCruiserSaffron, modifier = Modifier.size(14.dp))
+                                        Icon(Icons.Default.DirectionsCar, contentDescription = "Your Trip", tint = SplitCruiserPrimary, modifier = Modifier.size(14.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Your Trip", color = SplitCruiserSaffron, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                        Text("Your Trip", color = SplitCruiserPrimary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                     }
                                 }
                             }
@@ -3875,12 +3616,12 @@ fun TripOfferList(
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
-            placeholder = { Text("Search by origin, destination or host...", color = SplitCruiserLightGray, fontSize = 13.sp) },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search", tint = SplitCruiserLightGray) },
+            placeholder = { Text("Search by origin, destination or host...", color = SplitCruiserTextSecondary, fontSize = 13.sp) },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search", tint = SplitCruiserTextSecondary) },
             trailingIcon = {
                 if (searchQuery.isNotEmpty()) {
                     IconButton(onClick = { searchQuery = "" }) {
-                        Icon(Icons.Default.Clear, contentDescription = "Clear", tint = SplitCruiserLightGray)
+                        Icon(Icons.Default.Clear, contentDescription = "Clear", tint = SplitCruiserTextSecondary)
                     }
                 }
             },
@@ -3890,12 +3631,12 @@ fun TripOfferList(
                 .testTag("trip_list_search_input"),
             singleLine = true,
             colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = SplitCruiserSaffron,
-                unfocusedBorderColor = SplitCruiserDivider,
-                focusedContainerColor = SplitCruiserCardBg,
-                unfocusedContainerColor = SplitCruiserCardBg,
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White
+                focusedBorderColor = SplitCruiserPrimary,
+                unfocusedBorderColor = SplitCruiserOutline,
+                focusedContainerColor = SplitCruiserSurfaceCard,
+                unfocusedContainerColor = SplitCruiserSurfaceCard,
+                focusedTextColor = SplitCruiserTextPrimary,
+                unfocusedTextColor = SplitCruiserTextPrimary
             ),
             shape = RoundedCornerShape(12.dp)
         )
@@ -3914,15 +3655,15 @@ fun TripOfferList(
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(20.dp))
-                        .background(if (isSelected) SplitCruiserSaffron else SplitCruiserCardBg)
-                        .border(1.dp, if (isSelected) Color.Transparent else SplitCruiserDivider, RoundedCornerShape(20.dp))
+                        .background(if (isSelected) SplitCruiserPrimary else SplitCruiserSurfaceCard)
+                        .border(1.dp, if (isSelected) Color.Transparent else SplitCruiserOutline, RoundedCornerShape(20.dp))
                         .clickable { selectedFilter = filter }
                         .padding(horizontal = 14.dp, vertical = 6.dp)
                         .testTag("filter_chip_$filter")
                 ) {
                     Text(
                         text = filter,
-                        color = if (isSelected) Color.White else SplitCruiserLightGray,
+                        color = if (isSelected) Color.White else SplitCruiserTextSecondary,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -3942,8 +3683,8 @@ fun TripOfferList(
                 val isSelected = searchQuery.contains(placeTag, ignoreCase = true)
                 Surface(
                     shape = RoundedCornerShape(12.dp),
-                    color = if (isSelected) SplitCruiserEmerald.copy(alpha = 0.25f) else Color(0xFF252D3C),
-                    border = BorderStroke(1.dp, if (isSelected) SplitCruiserEmerald else SplitCruiserDivider)
+                    color = if (isSelected) SplitCruiserSuccess.copy(alpha = 0.25f) else SplitCruiserSurfaceCard,
+                    border = BorderStroke(1.dp, if (isSelected) SplitCruiserSuccess else SplitCruiserOutline)
                 ) {
                     Row(
                         modifier = Modifier
@@ -3956,13 +3697,13 @@ fun TripOfferList(
                         Icon(
                             imageVector = Icons.Default.Place,
                             contentDescription = null,
-                            tint = if (isSelected) SplitCruiserEmerald else SplitCruiserSaffron,
+                            tint = if (isSelected) SplitCruiserSuccess else SplitCruiserPrimary,
                             modifier = Modifier.size(12.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = placeTag,
-                            color = if (isSelected) SplitCruiserEmerald else SplitCruiserTextPrimary,
+                            color = if (isSelected) SplitCruiserSuccess else SplitCruiserTextPrimary,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -4023,8 +3764,8 @@ fun JoinSuccessDialog(
                 .fillMaxWidth()
                 .padding(16.dp),
             shape = RoundedCornerShape(24.dp),
-            color = SplitCruiserCardBg,
-            border = BorderStroke(1.dp, SplitCruiserDivider),
+            color = SplitCruiserSurfaceCard,
+            border = BorderStroke(1.dp, SplitCruiserOutline),
             shadowElevation = 8.dp
         ) {
             Column(
@@ -4038,20 +3779,20 @@ fun JoinSuccessDialog(
                     modifier = Modifier
                         .size(64.dp)
                         .clip(CircleShape)
-                        .background(SplitCruiserIndigo.copy(alpha = 0.4f)),
+                        .background(SplitCruiserPrimaryContainer.copy(alpha = 0.4f)),
                     contentAlignment = Alignment.Center
                 ) {
                     Box(
                         modifier = Modifier
                             .size(48.dp)
                             .clip(CircleShape)
-                            .background(SplitCruiserIndigo),
+                            .background(SplitCruiserPrimaryContainer),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.CheckCircle,
                             contentDescription = "Success",
-                            tint = SplitCruiserSaffron,
+                            tint = SplitCruiserPrimary,
                             modifier = Modifier.size(32.dp)
                         )
                     }
@@ -4071,7 +3812,7 @@ fun JoinSuccessDialog(
 
                 Text(
                     text = "We've notified ${offer.hostName} of your request. Once accepted, you'll be able to coordinate details.",
-                    color = SplitCruiserLightGray,
+                    color = SplitCruiserTextSecondary,
                     fontSize = 12.sp,
                     textAlign = TextAlign.Center,
                     lineHeight = 16.sp
@@ -4081,11 +3822,11 @@ fun JoinSuccessDialog(
 
                 // Trip Card details in dialog
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = SplitCruiserDarkBg),
+                    colors = CardDefaults.cardColors(containerColor = SplitCruiserSurface),
                     shape = RoundedCornerShape(16.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .border(1.dp, SplitCruiserDivider, RoundedCornerShape(16.dp))
+                        .border(1.dp, SplitCruiserOutline, RoundedCornerShape(16.dp))
                 ) {
                     Column(
                         modifier = Modifier.padding(16.dp),
@@ -4102,12 +3843,12 @@ fun JoinSuccessDialog(
                                     modifier = Modifier
                                         .size(28.dp)
                                         .clip(CircleShape)
-                                        .background(SplitCruiserIndigo),
+                                        .background(SplitCruiserPrimaryContainer),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
                                         text = offer.hostName.take(1).uppercase(),
-                                        color = Color(0xFF001D36),
+                                        color = SplitCruiserOnPrimaryContainer,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 11.sp
                                     )
@@ -4123,36 +3864,28 @@ fun JoinSuccessDialog(
 
                             Text(
                                 text = "$${offer.costPerRider}",
-                                color = SplitCruiserSaffron,
+                                color = SplitCruiserPrimary,
                                 fontWeight = FontWeight.Black,
                                 fontSize = 16.sp
                             )
                         }
 
-                        HorizontalDivider(color = SplitCruiserDivider)
+                        HorizontalDivider(color = SplitCruiserOutline)
 
-                        // Route Connectors
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(Icons.Default.RadioButtonChecked, contentDescription = "Start", tint = SplitCruiserSaffron, modifier = Modifier.size(12.dp))
-                                Box(modifier = Modifier.width(1.5.dp).height(14.dp).background(SplitCruiserDivider))
-                                Icon(Icons.Default.Place, contentDescription = "End", tint = SplitCruiserSaffron, modifier = Modifier.size(12.dp))
-                            }
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Text(offer.origin, color = SplitCruiserTextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Spacer(modifier = Modifier.height(10.dp))
-                                Text(offer.destination, color = SplitCruiserTextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                        }
+                        RouteIndicator(
+                            origin = offer.origin,
+                            destination = offer.destination,
+                            scale = RouteScale.Compact,
+                            pins = true
+                        )
 
-                        HorizontalDivider(color = SplitCruiserDivider)
+                        HorizontalDivider(color = SplitCruiserOutline)
 
                         // Time
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.AccessTime, contentDescription = "Time", tint = SplitCruiserLightGray, modifier = Modifier.size(12.dp))
+                            Icon(Icons.Default.AccessTime, contentDescription = "Time", tint = SplitCruiserTextSecondary, modifier = Modifier.size(12.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text(dateStr, color = SplitCruiserLightGray, fontSize = 11.sp)
+                            Text(dateStr, color = SplitCruiserTextSecondary, fontSize = 11.sp)
                         }
                     }
                 }
@@ -4166,7 +3899,7 @@ fun JoinSuccessDialog(
                         .fillMaxWidth()
                         .height(46.dp)
                         .testTag("dialog_view_trips_button"),
-                    colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserSaffron),
+                    colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserPrimary),
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Text("View My Trips", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
@@ -4181,8 +3914,8 @@ fun JoinSuccessDialog(
                         .height(46.dp)
                         .testTag("dialog_dismiss_button"),
                     shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = SplitCruiserSaffron),
-                    border = BorderStroke(1.dp, SplitCruiserSaffron.copy(alpha = 0.5f))
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = SplitCruiserPrimary),
+                    border = BorderStroke(1.dp, SplitCruiserPrimary.copy(alpha = 0.5f))
                 ) {
                     Text("Done", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 }
@@ -4198,12 +3931,12 @@ fun RideRequestCard(request: RideRequest, onClick: () -> Unit) {
 
     Card(
         onClick = onClick,
-        colors = CardDefaults.cardColors(containerColor = SplitCruiserCardBg),
+        colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
         shape = RoundedCornerShape(16.dp),
         modifier = Modifier
             .fillMaxWidth()
             .padding(bottom = 12.dp)
-            .border(1.dp, SplitCruiserDivider, RoundedCornerShape(16.dp))
+            .border(1.dp, SplitCruiserOutline, RoundedCornerShape(16.dp))
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -4216,12 +3949,12 @@ fun RideRequestCard(request: RideRequest, onClick: () -> Unit) {
                         modifier = Modifier
                             .size(32.dp)
                             .clip(CircleShape)
-                            .background(SplitCruiserSaffron.copy(alpha = 0.2f)),
+                            .background(SplitCruiserPrimary.copy(alpha = 0.2f)),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = request.riderName.take(1).uppercase(),
-                            color = SplitCruiserSaffron,
+                            color = SplitCruiserPrimary,
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.sp
                         )
@@ -4230,11 +3963,11 @@ fun RideRequestCard(request: RideRequest, onClick: () -> Unit) {
                     Column {
                         Text(request.riderName, color = SplitCruiserTextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Star, contentDescription = "Rating", tint = Color(0xFFEAB308), modifier = Modifier.size(12.dp))
+                            Icon(Icons.Default.Star, contentDescription = "Rating", tint = SplitCruiserWarning, modifier = Modifier.size(12.dp))
                             Spacer(modifier = Modifier.width(2.dp))
                             Text(
                                 text = String.format(Locale.US, "%.1f", request.riderRating),
-                                color = SplitCruiserLightGray,
+                                color = SplitCruiserTextSecondary,
                                 fontSize = 11.sp
                             )
                         }
@@ -4245,12 +3978,12 @@ fun RideRequestCard(request: RideRequest, onClick: () -> Unit) {
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(6.dp))
-                        .background(SplitCruiserSaffron.copy(alpha = 0.15f))
+                        .background(SplitCruiserPrimary.copy(alpha = 0.15f))
                         .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                     Text(
                         text = "${request.seatsNeeded} Seat${if (request.seatsNeeded > 1) "s" else ""}",
-                        color = SplitCruiserSaffron,
+                        color = SplitCruiserPrimary,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -4259,20 +3992,7 @@ fun RideRequestCard(request: RideRequest, onClick: () -> Unit) {
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Routes
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.RadioButtonChecked, contentDescription = "Start", tint = SplitCruiserSaffron, modifier = Modifier.size(14.dp))
-                    Box(modifier = Modifier.width(1.5.dp).height(24.dp).background(SplitCruiserDivider))
-                    Icon(Icons.Default.Place, contentDescription = "End", tint = SplitCruiserIndigo, modifier = Modifier.size(14.dp))
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column {
-                    Text(request.origin, color = SplitCruiserTextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                    Spacer(modifier = Modifier.height(18.dp))
-                    Text(request.destination, color = SplitCruiserTextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                }
-            }
+            RouteIndicator(origin = request.origin, destination = request.destination, pins = true)
 
             Spacer(modifier = Modifier.height(14.dp))
 
@@ -4282,22 +4002,22 @@ fun RideRequestCard(request: RideRequest, onClick: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.AccessTime, contentDescription = "Time", tint = SplitCruiserLightGray, modifier = Modifier.size(13.dp))
+                    Icon(Icons.Default.AccessTime, contentDescription = "Time", tint = SplitCruiserTextSecondary, modifier = Modifier.size(13.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text(dateStr, color = SplitCruiserLightGray, fontSize = 11.sp)
+                    Text(dateStr, color = SplitCruiserTextSecondary, fontSize = 11.sp)
                 }
 
                 if (request.womenOnly) {
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
-                            .background(Color(0xFFE91E63).copy(alpha = 0.15f))
+                            .background(SplitCruiserAccent.copy(alpha = 0.15f))
                             .padding(horizontal = 6.dp, vertical = 2.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.Female, contentDescription = "Female Only", tint = Color(0xFFE91E63), modifier = Modifier.size(12.dp))
+                        Icon(Icons.Default.Female, contentDescription = "Female Only", tint = SplitCruiserAccent, modifier = Modifier.size(12.dp))
                         Spacer(modifier = Modifier.width(3.dp))
-                        Text("Women Only", color = Color(0xFFE91E63), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("Women Only", color = SplitCruiserAccent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -4385,56 +4105,55 @@ fun PostOfferScreen(viewModel: MainViewModel, navController: NavController) {
             }
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Origin AutoComplete
-            LocationAutoCompleteTextField(
-                value = origin,
-                onValueChange = { origin = it },
-                onLocationSelected = { place ->
-                    originLat = place.lat
-                    originLng = place.lng
-                },
-                label = "Pickup Location (Origin)",
-                placeholder = "e.g. Mission Hill, Boston or Snell Library",
-                testTag = "offer_origin_input",
-                focusedBorderColor = SplitCruiserEmerald,
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.MyLocation,
-                        contentDescription = "Pickup location icon",
-                        tint = SplitCruiserEmerald
-                    )
-                }
-            )
+            FormSection(title = "Route") {
+                // Origin AutoComplete
+                LocationAutoCompleteTextField(
+                    value = origin,
+                    onValueChange = { origin = it },
+                    onLocationSelected = { place ->
+                        originLat = place.lat
+                        originLng = place.lng
+                    },
+                    label = "Pickup Location (Origin)",
+                    placeholder = "e.g. Mission Hill, Boston or Snell Library",
+                    testTag = "offer_origin_input",
+                    focusedBorderColor = SplitCruiserSuccess,
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.MyLocation,
+                            contentDescription = "Pickup location icon",
+                            tint = SplitCruiserSuccess
+                        )
+                    }
+                )
 
-            Spacer(modifier = Modifier.height(14.dp))
+                // Destination AutoComplete
+                LocationAutoCompleteTextField(
+                    value = destination,
+                    onValueChange = { destination = it },
+                    onLocationSelected = { place ->
+                        destLat = place.lat
+                        destLng = place.lng
+                    },
+                    label = "Dropoff Location (Destination)",
+                    placeholder = "e.g. Logan Airport or NEU Campus",
+                    testTag = "offer_destination_input",
+                    focusedBorderColor = Color(0xFFF97316),
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Place,
+                            contentDescription = "Dropoff location icon",
+                            tint = Color(0xFFF97316)
+                        )
+                    }
+                )
 
-            // Destination AutoComplete
-            LocationAutoCompleteTextField(
-                value = destination,
-                onValueChange = { destination = it },
-                onLocationSelected = { place ->
-                    destLat = place.lat
-                    destLng = place.lng
-                },
-                label = "Dropoff Location (Destination)",
-                placeholder = "e.g. Logan Airport or NEU Campus",
-                testTag = "offer_destination_input",
-                focusedBorderColor = Color(0xFFF97316),
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Place,
-                        contentDescription = "Dropoff location icon",
-                        tint = Color(0xFFF97316)
-                    )
-                }
-            )
+                GoogleMapsMatrixCard(origin = origin, destination = destination)
+            }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(SplitCruiserSpacing.Lg))
 
-            GoogleMapsMatrixCard(origin = origin, destination = destination)
-
-            Spacer(modifier = Modifier.height(14.dp))
-
+            FormSection(title = "Trip") {
             // Departure Date & Time Fields
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -4453,19 +4172,19 @@ fun PostOfferScreen(viewModel: MainViewModel, navController: NavController) {
                         enabled = false,
                         label = { Text("Departure Date") },
                         modifier = Modifier.fillMaxWidth().testTag("offer_date_input"),
-                        shape = RoundedCornerShape(14.dp),
+                        shape = RoundedCornerShape(SplitCruiserRadius.Md),
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Default.CalendarToday,
                                 contentDescription = "Departure date icon",
-                                tint = SplitCruiserSaffron
+                                tint = SplitCruiserPrimary
                             )
                         },
                         colors = OutlinedTextFieldDefaults.colors(
-                            disabledBorderColor = SplitCruiserDivider,
+                            disabledBorderColor = SplitCruiserOutline,
                             disabledTextColor = SplitCruiserTextPrimary,
-                            disabledLabelColor = SplitCruiserLightGray,
-                            disabledContainerColor = SplitCruiserCardBg
+                            disabledLabelColor = SplitCruiserTextSecondary,
+                            disabledContainerColor = SplitCruiserSurfaceCard
                         )
                     )
                 }
@@ -4483,25 +4202,23 @@ fun PostOfferScreen(viewModel: MainViewModel, navController: NavController) {
                         enabled = false,
                         label = { Text("Departure Time") },
                         modifier = Modifier.fillMaxWidth().testTag("offer_time_input"),
-                        shape = RoundedCornerShape(14.dp),
+                        shape = RoundedCornerShape(SplitCruiserRadius.Md),
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Default.AccessTime,
                                 contentDescription = "Departure time icon",
-                                tint = SplitCruiserSaffron
+                                tint = SplitCruiserPrimary
                             )
                         },
                         colors = OutlinedTextFieldDefaults.colors(
-                            disabledBorderColor = SplitCruiserDivider,
+                            disabledBorderColor = SplitCruiserOutline,
                             disabledTextColor = SplitCruiserTextPrimary,
-                            disabledLabelColor = SplitCruiserLightGray,
-                            disabledContainerColor = SplitCruiserCardBg
+                            disabledLabelColor = SplitCruiserTextSecondary,
+                            disabledContainerColor = SplitCruiserSurfaceCard
                         )
                     )
                 }
             }
-
-            Spacer(modifier = Modifier.height(14.dp))
 
             Row(modifier = Modifier.fillMaxWidth()) {
                 // Cost per rider
@@ -4514,23 +4231,23 @@ fun PostOfferScreen(viewModel: MainViewModel, navController: NavController) {
                         .weight(1f)
                         .padding(end = 6.dp)
                         .testTag("offer_cost_input"),
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(SplitCruiserRadius.Md),
                     leadingIcon = {
                         Icon(
                             imageVector = Icons.Default.AttachMoney,
                             contentDescription = "Cost icon",
-                            tint = Color(0xFFEAB308)
+                            tint = SplitCruiserWarning
                         )
                     },
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Color(0xFFEAB308),
-                        unfocusedBorderColor = SplitCruiserDivider,
+                        focusedBorderColor = SplitCruiserWarning,
+                        unfocusedBorderColor = SplitCruiserOutline,
                         focusedTextColor = SplitCruiserTextPrimary,
                         unfocusedTextColor = SplitCruiserTextPrimary,
-                        focusedLabelColor = Color(0xFFEAB308),
-                        unfocusedLabelColor = SplitCruiserLightGray,
-                        focusedContainerColor = SplitCruiserCardBg,
-                        unfocusedContainerColor = SplitCruiserCardBg
+                        focusedLabelColor = SplitCruiserWarning,
+                        unfocusedLabelColor = SplitCruiserTextSecondary,
+                        focusedContainerColor = SplitCruiserSurfaceCard,
+                        unfocusedContainerColor = SplitCruiserSurfaceCard
                     )
                 )
 
@@ -4544,7 +4261,7 @@ fun PostOfferScreen(viewModel: MainViewModel, navController: NavController) {
                         .weight(1f)
                         .padding(start = 6.dp)
                         .testTag("offer_seats_input"),
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(SplitCruiserRadius.Md),
                     leadingIcon = {
                         Icon(
                             imageVector = Icons.Default.People,
@@ -4554,55 +4271,50 @@ fun PostOfferScreen(viewModel: MainViewModel, navController: NavController) {
                     },
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = Color(0xFF8B5CF6),
-                        unfocusedBorderColor = SplitCruiserDivider,
+                        unfocusedBorderColor = SplitCruiserOutline,
                         focusedTextColor = SplitCruiserTextPrimary,
                         unfocusedTextColor = SplitCruiserTextPrimary,
                         focusedLabelColor = Color(0xFF8B5CF6),
-                        unfocusedLabelColor = SplitCruiserLightGray,
-                        focusedContainerColor = SplitCruiserCardBg,
-                        unfocusedContainerColor = SplitCruiserCardBg
+                        unfocusedLabelColor = SplitCruiserTextSecondary,
+                        focusedContainerColor = SplitCruiserSurfaceCard,
+                        unfocusedContainerColor = SplitCruiserSurfaceCard
                     )
                 )
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
             // Women Only Offer
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(SplitCruiserCardBg, RoundedCornerShape(12.dp))
-                    .border(1.dp, SplitCruiserDivider, RoundedCornerShape(12.dp))
-                    .padding(12.dp),
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(imageVector = Icons.Default.Female, contentDescription = "Women Only", tint = Color(0xFFE91E63))
+                    Icon(imageVector = Icons.Default.Female, contentDescription = "Women Only", tint = SplitCruiserAccent)
                     Spacer(modifier = Modifier.width(8.dp))
                     Column {
                         Text("Women-Only Trip Offer", color = SplitCruiserTextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                        Text("Only visible to other female riders", color = SplitCruiserLightGray, fontSize = 10.sp)
+                        Text("Only visible to other female riders", color = SplitCruiserTextSecondary, fontSize = 10.sp)
                     }
                 }
                 Switch(
                     checked = womenOnly,
                     onCheckedChange = { womenOnly = it },
-                    colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFFE91E63))
+                    colors = SwitchDefaults.colors(checkedThumbColor = SplitCruiserAccent)
                 )
             }
+            }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(SplitCruiserSpacing.Lg))
 
             // Vehicle Check
             if (userVehicle == null) {
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = SplitCruiserSaffron.copy(alpha = 0.1f)),
+                    colors = CardDefaults.cardColors(containerColor = SplitCruiserPrimary.copy(alpha = 0.1f)),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Warning, contentDescription = "No vehicle", tint = SplitCruiserSaffron)
+                        Icon(Icons.Default.Warning, contentDescription = "No vehicle", tint = SplitCruiserPrimary)
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(
                             text = "You haven't setup your vehicle details. We'll post using a standard Sedan. Setup vehicle in Profile anytime.",
@@ -4653,10 +4365,10 @@ fun PostOfferScreen(viewModel: MainViewModel, navController: NavController) {
                     .fillMaxWidth()
                     .height(54.dp)
                     .testTag("submit_offer_button"),
-                colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserSaffron),
+                colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserPrimary),
                 shape = RoundedCornerShape(12.dp)
             ) {
-                Text("Broadcast Ride Offer", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text("Post ride offer", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
             }
         }
     }
@@ -4734,56 +4446,55 @@ fun PostRequestScreen(viewModel: MainViewModel, navController: NavController) {
             }
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Origin AutoComplete
-            LocationAutoCompleteTextField(
-                value = origin,
-                onValueChange = { origin = it },
-                onLocationSelected = { place ->
-                    originLat = place.lat
-                    originLng = place.lng
-                },
-                label = "Where to pick you up?",
-                placeholder = "e.g. Snell Library lobby or Ruggles Station",
-                testTag = "request_origin_input",
-                focusedBorderColor = SplitCruiserEmerald,
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.MyLocation,
-                        contentDescription = "Pickup location icon",
-                        tint = SplitCruiserEmerald
-                    )
-                }
-            )
+            FormSection(title = "Route") {
+                // Origin AutoComplete
+                LocationAutoCompleteTextField(
+                    value = origin,
+                    onValueChange = { origin = it },
+                    onLocationSelected = { place ->
+                        originLat = place.lat
+                        originLng = place.lng
+                    },
+                    label = "Where to pick you up?",
+                    placeholder = "e.g. Snell Library lobby or Ruggles Station",
+                    testTag = "request_origin_input",
+                    focusedBorderColor = SplitCruiserSuccess,
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.MyLocation,
+                            contentDescription = "Pickup location icon",
+                            tint = SplitCruiserSuccess
+                        )
+                    }
+                )
 
-            Spacer(modifier = Modifier.height(14.dp))
+                // Destination AutoComplete
+                LocationAutoCompleteTextField(
+                    value = destination,
+                    onValueChange = { destination = it },
+                    onLocationSelected = { place ->
+                        destLat = place.lat
+                        destLng = place.lng
+                    },
+                    label = "Where are you going?",
+                    placeholder = "e.g. Logan International Airport",
+                    testTag = "request_destination_input",
+                    focusedBorderColor = Color(0xFFF97316),
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Place,
+                            contentDescription = "Dropoff location icon",
+                            tint = Color(0xFFF97316)
+                        )
+                    }
+                )
 
-            // Destination AutoComplete
-            LocationAutoCompleteTextField(
-                value = destination,
-                onValueChange = { destination = it },
-                onLocationSelected = { place ->
-                    destLat = place.lat
-                    destLng = place.lng
-                },
-                label = "Where are you going?",
-                placeholder = "e.g. Logan International Airport",
-                testTag = "request_destination_input",
-                focusedBorderColor = Color(0xFFF97316),
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Place,
-                        contentDescription = "Dropoff location icon",
-                        tint = Color(0xFFF97316)
-                    )
-                }
-            )
+                GoogleMapsMatrixCard(origin = origin, destination = destination)
+            }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(SplitCruiserSpacing.Lg))
 
-            GoogleMapsMatrixCard(origin = origin, destination = destination)
-
-            Spacer(modifier = Modifier.height(14.dp))
-
+            FormSection(title = "Trip") {
             // Departure Time
             Box(
                 modifier = Modifier
@@ -4797,24 +4508,22 @@ fun PostRequestScreen(viewModel: MainViewModel, navController: NavController) {
                     enabled = false,
                     label = { Text("Preferred Departure Time") },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(SplitCruiserRadius.Md),
                     leadingIcon = {
                         Icon(
                             imageVector = Icons.Default.CalendarToday,
                             contentDescription = "Departure time icon",
-                            tint = SplitCruiserSaffron
+                            tint = SplitCruiserPrimary
                         )
                     },
                     colors = OutlinedTextFieldDefaults.colors(
-                        disabledBorderColor = SplitCruiserDivider,
+                        disabledBorderColor = SplitCruiserOutline,
                         disabledTextColor = SplitCruiserTextPrimary,
-                        disabledLabelColor = SplitCruiserLightGray,
-                        disabledContainerColor = SplitCruiserCardBg
+                        disabledLabelColor = SplitCruiserTextSecondary,
+                        disabledContainerColor = SplitCruiserSurfaceCard
                     )
                 )
             }
-
-            Spacer(modifier = Modifier.height(14.dp))
 
             // Seats needed
             OutlinedTextField(
@@ -4823,7 +4532,7 @@ fun PostRequestScreen(viewModel: MainViewModel, navController: NavController) {
                 label = { Text("Seats needed") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(SplitCruiserRadius.Md),
                 leadingIcon = {
                     Icon(
                         imageVector = Icons.Default.People,
@@ -4833,17 +4542,15 @@ fun PostRequestScreen(viewModel: MainViewModel, navController: NavController) {
                 },
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = Color(0xFF8B5CF6),
-                    unfocusedBorderColor = SplitCruiserDivider,
+                    unfocusedBorderColor = SplitCruiserOutline,
                     focusedTextColor = SplitCruiserTextPrimary,
                     unfocusedTextColor = SplitCruiserTextPrimary,
                     focusedLabelColor = Color(0xFF8B5CF6),
-                    unfocusedLabelColor = SplitCruiserLightGray,
-                    focusedContainerColor = SplitCruiserCardBg,
-                    unfocusedContainerColor = SplitCruiserCardBg
+                    unfocusedLabelColor = SplitCruiserTextSecondary,
+                    focusedContainerColor = SplitCruiserSurfaceCard,
+                    unfocusedContainerColor = SplitCruiserSurfaceCard
                 )
             )
-
-            Spacer(modifier = Modifier.height(14.dp))
 
             // Notes
             OutlinedTextField(
@@ -4852,7 +4559,7 @@ fun PostRequestScreen(viewModel: MainViewModel, navController: NavController) {
                 label = { Text("Notes for host (Luggage details, etc.)") },
                 placeholder = { Text("e.g. 1 big suitcase. Can pay via Venmo/cash.") },
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(SplitCruiserRadius.Md),
                 leadingIcon = {
                     Icon(
                         imageVector = Icons.Default.Info,
@@ -4862,44 +4569,39 @@ fun PostRequestScreen(viewModel: MainViewModel, navController: NavController) {
                 },
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = Color(0xFF14B8A6),
-                    unfocusedBorderColor = SplitCruiserDivider,
+                    unfocusedBorderColor = SplitCruiserOutline,
                     focusedTextColor = SplitCruiserTextPrimary,
                     unfocusedTextColor = SplitCruiserTextPrimary,
                     focusedLabelColor = Color(0xFF14B8A6),
-                    unfocusedLabelColor = SplitCruiserLightGray,
-                    focusedContainerColor = SplitCruiserCardBg,
-                    unfocusedContainerColor = SplitCruiserCardBg
+                    unfocusedLabelColor = SplitCruiserTextSecondary,
+                    focusedContainerColor = SplitCruiserSurfaceCard,
+                    unfocusedContainerColor = SplitCruiserSurfaceCard
                 )
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
-
             // Women Only
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(SplitCruiserCardBg, RoundedCornerShape(12.dp))
-                    .border(1.dp, SplitCruiserDivider, RoundedCornerShape(12.dp))
-                    .padding(12.dp),
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(imageVector = Icons.Default.Female, contentDescription = "Women Only", tint = Color(0xFFE91E63))
+                    Icon(imageVector = Icons.Default.Female, contentDescription = "Women Only", tint = SplitCruiserAccent)
                     Spacer(modifier = Modifier.width(8.dp))
                     Column {
                         Text("Women-Only Request", color = SplitCruiserTextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                        Text("Only visible to other female hosts", color = SplitCruiserLightGray, fontSize = 10.sp)
+                        Text("Only visible to other female hosts", color = SplitCruiserTextSecondary, fontSize = 10.sp)
                     }
                 }
                 Switch(
                     checked = womenOnly,
                     onCheckedChange = { womenOnly = it },
-                    colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFFE91E63))
+                    colors = SwitchDefaults.colors(checkedThumbColor = SplitCruiserAccent)
                 )
             }
+            }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(SplitCruiserSpacing.Xl))
 
             Button(
                 onClick = {
@@ -4930,10 +4632,10 @@ fun PostRequestScreen(viewModel: MainViewModel, navController: NavController) {
                     .fillMaxWidth()
                     .height(54.dp)
                     .testTag("submit_request_button"),
-                colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserSaffron),
+                colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserPrimary),
                 shape = RoundedCornerShape(12.dp)
             ) {
-                Text("Broadcast Ride Request", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text("Post ride request", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
             }
         }
     }
@@ -4976,17 +4678,17 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
         if (offer == null) {
             if (!offerFetchAttempted) {
                 Box(
-                    modifier = Modifier.fillMaxSize().background(SplitCruiserDarkBg),
+                    modifier = Modifier.fillMaxSize().background(SplitCruiserSurface),
                     contentAlignment = Alignment.Center
                 ) {
-                    CircularProgressIndicator(color = SplitCruiserSaffron)
+                    CircularProgressIndicator(color = SplitCruiserPrimary)
                 }
                 return
             }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(SplitCruiserDarkBg),
+                    .background(SplitCruiserSurface),
                 contentAlignment = Alignment.Center
             ) {
                 SplitCruiserEmptyState(
@@ -5072,28 +4774,21 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
 
                 // Route card
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = SplitCruiserCardBg),
+                    colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
                     shape = RoundedCornerShape(16.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .border(1.dp, SplitCruiserDivider, RoundedCornerShape(16.dp))
+                        .border(1.dp, SplitCruiserOutline, RoundedCornerShape(16.dp))
                 ) {
                     Column(modifier = Modifier.padding(20.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(Icons.Default.RadioButtonChecked, contentDescription = "Start", tint = SplitCruiserSaffron, modifier = Modifier.size(16.dp))
-                                Box(modifier = Modifier.width(2.dp).height(40.dp).background(SplitCruiserDivider))
-                                Icon(Icons.Default.Place, contentDescription = "End", tint = SplitCruiserIndigo, modifier = Modifier.size(16.dp))
-                            }
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Column {
-                                Text("PICKUP", color = SplitCruiserLightGray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                Text(offer.origin, color = SplitCruiserTextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                                Spacer(modifier = Modifier.height(22.dp))
-                                Text("DROPOFF", color = SplitCruiserLightGray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                Text(offer.destination, color = SplitCruiserTextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
+                        RouteIndicator(
+                            origin = offer.origin,
+                            destination = offer.destination,
+                            scale = RouteScale.Detail,
+                            pins = true,
+                            originLabel = "PICKUP",
+                            destinationLabel = "DROPOFF"
+                        )
                     }
                 }
 
@@ -5105,11 +4800,11 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
 
                 // Status and Seat info Card
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = SplitCruiserCardBg),
+                    colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
                     shape = RoundedCornerShape(16.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .border(1.dp, SplitCruiserDivider, RoundedCornerShape(16.dp))
+                        .border(1.dp, SplitCruiserOutline, RoundedCornerShape(16.dp))
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Row(
@@ -5117,22 +4812,22 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("STATUS & SEATS", color = SplitCruiserSaffron, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                            Text("STATUS & SEATS", color = SplitCruiserPrimary, fontSize = 11.sp, fontWeight = FontWeight.Black)
                             
                             // Badge with status color
                             val badgeBg = when (offer.status.lowercase()) {
-                                "active" -> SplitCruiserIndigo
+                                "active" -> SplitCruiserPrimaryContainer
                                 "full" -> Color(0xFFFEF3C7) // Amber
-                                "completed" -> SplitCruiserEmerald.copy(alpha = 0.2f)
+                                "completed" -> SplitCruiserSuccess.copy(alpha = 0.2f)
                                 "cancelled" -> Color(0xFFFEE2E2) // Light red
-                                else -> SplitCruiserIndigo
+                                else -> SplitCruiserPrimaryContainer
                             }
                             val badgeText = when (offer.status.lowercase()) {
-                                "active" -> SplitCruiserSaffron
+                                "active" -> SplitCruiserPrimary
                                 "full" -> Color(0xFFD97706)
-                                "completed" -> SplitCruiserEmerald
+                                "completed" -> SplitCruiserSuccess
                                 "cancelled" -> Color(0xFFDC2626)
-                                else -> SplitCruiserSaffron
+                                else -> SplitCruiserPrimary
                             }
                             
                             Box(
@@ -5170,12 +4865,12 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
 
                 // Host Details
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = SplitCruiserCardBg),
+                    colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
                     shape = RoundedCornerShape(16.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { isHostCardExpanded = !isHostCardExpanded }
-                        .border(1.dp, SplitCruiserDivider, RoundedCornerShape(16.dp))
+                        .border(1.dp, SplitCruiserOutline, RoundedCornerShape(16.dp))
                 ) {
                     Column {
                         Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -5188,7 +4883,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                             Spacer(modifier = Modifier.width(16.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(offer.hostName, color = SplitCruiserTextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                Text("Host Rating: ${String.format(Locale.US, "%.1f", offer.hostRating)} ★", color = SplitCruiserLightGray, fontSize = 12.sp)
+                                Text("Host Rating: ${String.format(Locale.US, "%.1f", offer.hostRating)} ★", color = SplitCruiserTextSecondary, fontSize = 12.sp)
                             }
                             IconButton(onClick = {
                                 isHostCardExpanded = !isHostCardExpanded
@@ -5196,7 +4891,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                 Icon(
                                     imageVector = if (isHostCardExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                                     contentDescription = "Expand info",
-                                    tint = SplitCruiserSaffron
+                                    tint = SplitCruiserPrimary
                                 )
                             }
                             Spacer(modifier = Modifier.width(4.dp))
@@ -5213,25 +4908,25 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
 
                         AnimatedVisibility(visible = isHostCardExpanded) {
                             Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
-                                HorizontalDivider(color = SplitCruiserDivider)
+                                HorizontalDivider(color = SplitCruiserOutline)
                                 Spacer(modifier = Modifier.height(12.dp))
                                 
                                 Text(
                                     text = "VEHICLE & CONTACT OVERVIEW",
-                                    color = SplitCruiserSaffron,
+                                    color = SplitCruiserPrimary,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
                                 
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.DirectionsCar, contentDescription = "Vehicle", tint = SplitCruiserLightGray, modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Default.DirectionsCar, contentDescription = "Vehicle", tint = SplitCruiserTextSecondary, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text("Vehicle: $vehicleMakeModel", color = SplitCruiserTextPrimary, fontSize = 13.sp)
                                 }
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Phone, contentDescription = "Phone", tint = SplitCruiserLightGray, modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Default.Phone, contentDescription = "Phone", tint = SplitCruiserTextSecondary, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text("Phone: $hostPhone", color = SplitCruiserTextPrimary, fontSize = 13.sp)
                                 }
@@ -5239,14 +4934,14 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                 Spacer(modifier = Modifier.height(12.dp))
                                 Button(
                                     onClick = { showDriverModal = true },
-                                    colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserIndigo),
+                                    colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserPrimaryContainer),
                                     shape = RoundedCornerShape(8.dp),
                                     modifier = Modifier.fillMaxWidth().height(36.dp),
                                     contentPadding = PaddingValues(vertical = 4.dp)
                                 ) {
-                                    Icon(Icons.Default.Phone, contentDescription = "Contact", tint = SplitCruiserSaffron, modifier = Modifier.size(14.dp))
+                                    Icon(Icons.Default.Phone, contentDescription = "Contact", tint = SplitCruiserPrimary, modifier = Modifier.size(14.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("View Full Driver & Contact Card", color = SplitCruiserSaffron, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    Text("View Full Driver & Contact Card", color = SplitCruiserPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -5257,14 +4952,14 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
 
                 // Cost split calculations
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = SplitCruiserCardBg),
+                    colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
                     shape = RoundedCornerShape(16.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .border(1.dp, SplitCruiserDivider, RoundedCornerShape(16.dp))
+                        .border(1.dp, SplitCruiserOutline, RoundedCornerShape(16.dp))
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Text("COST ALLOCATION", color = SplitCruiserSaffron, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                        Text("COST ALLOCATION", color = SplitCruiserPrimary, fontSize = 11.sp, fontWeight = FontWeight.Black)
                         Spacer(modifier = Modifier.height(12.dp))
                         
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -5273,20 +4968,20 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                         }
 
                         Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Server Max Limit (2x Cost Cap):", color = SplitCruiserLightGray, fontSize = 12.sp)
-                            Text("$${costLimit}", color = SplitCruiserLightGray, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("Server Max Limit (2x Cost Cap):", color = SplitCruiserTextSecondary, fontSize = 12.sp)
+                            Text("$${costLimit}", color = SplitCruiserTextSecondary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
 
                         Spacer(modifier = Modifier.height(14.dp))
-                        Divider(color = SplitCruiserDivider)
+                        Divider(color = SplitCruiserOutline)
                         Spacer(modifier = Modifier.height(14.dp))
 
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Info, contentDescription = "Info", tint = SplitCruiserEmerald, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.Info, contentDescription = "Info", tint = SplitCruiserSuccess, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 "Cash split is paid in-person directly to the host. No commission or app fees.",
-                                color = SplitCruiserLightGray,
+                                color = SplitCruiserTextSecondary,
                                 fontSize = 11.sp,
                                 lineHeight = 15.sp
                             )
@@ -5297,14 +4992,14 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                 Spacer(modifier = Modifier.height(24.dp))
 
                 if (offer.passengers.isNotEmpty()) {
-                    Text("RESERVED PASSENGERS", color = SplitCruiserSaffron, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                    Text("RESERVED PASSENGERS", color = SplitCruiserPrimary, fontSize = 11.sp, fontWeight = FontWeight.Black)
                     Spacer(modifier = Modifier.height(8.dp))
                     Card(
-                        colors = CardDefaults.cardColors(containerColor = SplitCruiserCardBg),
+                        colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .border(1.dp, SplitCruiserDivider, RoundedCornerShape(16.dp))
+                            .border(1.dp, SplitCruiserOutline, RoundedCornerShape(16.dp))
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             offer.passengerNames.zip(offer.passengers).forEachIndexed { index, (name, id) ->
@@ -5312,7 +5007,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                     verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
                                 ) {
-                                    Icon(Icons.Default.Person, contentDescription = "Passenger", tint = SplitCruiserLightGray, modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Default.Person, contentDescription = "Passenger", tint = SplitCruiserTextSecondary, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
                                         text = if (id == currentUser?.id) "$name (You)" else name,
@@ -5322,7 +5017,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                     )
                                 }
                                 if (index < offer.passengerNames.size - 1) {
-                                    HorizontalDivider(color = SplitCruiserDivider, modifier = Modifier.padding(vertical = 4.dp))
+                                    HorizontalDivider(color = SplitCruiserOutline, modifier = Modifier.padding(vertical = 4.dp))
                                 }
                             }
                         }
@@ -5332,14 +5027,14 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
 
                 // Message history section (if match exists)
                 if (existingMatch != null && matchMessages.isNotEmpty()) {
-                    Text("RECENT COORDINATION", color = SplitCruiserSaffron, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                    Text("RECENT COORDINATION", color = SplitCruiserPrimary, fontSize = 11.sp, fontWeight = FontWeight.Black)
                     Spacer(modifier = Modifier.height(8.dp))
                     Card(
-                        colors = CardDefaults.cardColors(containerColor = SplitCruiserCardBg),
+                        colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .border(1.dp, SplitCruiserDivider, RoundedCornerShape(16.dp))
+                            .border(1.dp, SplitCruiserOutline, RoundedCornerShape(16.dp))
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             matchMessages.forEachIndexed { index, message ->
@@ -5347,7 +5042,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                     Icon(
                                         imageVector = if (message.senderId == currentUser?.id) Icons.AutoMirrored.Filled.Send else Icons.AutoMirrored.Filled.Chat,
                                         contentDescription = "Message",
-                                        tint = SplitCruiserLightGray,
+                                        tint = SplitCruiserTextSecondary,
                                         modifier = Modifier.size(14.dp)
                                     )
                                     Column(modifier = Modifier.weight(1f)) {
@@ -5359,27 +5054,27 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                         )
                                         Text(
                                             text = "${if (message.senderId == currentUser?.id) "You" else offer.hostName}",
-                                            color = SplitCruiserLightGray,
+                                            color = SplitCruiserTextSecondary,
                                             fontSize = 10.sp
                                         )
                                     }
                                 }
                                 if (index < matchMessages.size - 1) {
-                                    HorizontalDivider(color = SplitCruiserDivider, modifier = Modifier.padding(vertical = 8.dp))
+                                    HorizontalDivider(color = SplitCruiserOutline, modifier = Modifier.padding(vertical = 8.dp))
                                 }
                             }
 
                             Spacer(modifier = Modifier.height(12.dp))
                             Button(
                                 onClick = { navController.navigate("chat/${existingMatch.id}") },
-                                colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserIndigo),
+                                colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserPrimaryContainer),
                                 modifier = Modifier.fillMaxWidth().height(36.dp),
                                 contentPadding = PaddingValues(vertical = 4.dp),
                                 shape = RoundedCornerShape(8.dp)
                             ) {
-                                Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = "Chat", tint = SplitCruiserSaffron, modifier = Modifier.size(14.dp))
+                                Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = "Chat", tint = SplitCruiserPrimary, modifier = Modifier.size(14.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("View Full Chat", color = SplitCruiserSaffron, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text("View Full Chat", color = SplitCruiserPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -5389,14 +5084,14 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                 val isHost = (offer.hostId == currentUser?.id)
 
                 if (isHost) {
-                    Text("HOST CONTROLS", color = SplitCruiserSaffron, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                    Text("HOST CONTROLS", color = SplitCruiserPrimary, fontSize = 11.sp, fontWeight = FontWeight.Black)
                     Spacer(modifier = Modifier.height(8.dp))
                     Card(
-                        colors = CardDefaults.cardColors(containerColor = SplitCruiserCardBg),
+                        colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .border(1.dp, SplitCruiserDivider, RoundedCornerShape(16.dp))
+                            .border(1.dp, SplitCruiserOutline, RoundedCornerShape(16.dp))
                     ) {
                         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text("Manage ride status in Firestore:", color = SplitCruiserTextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
@@ -5409,7 +5104,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                                 Toast.makeText(context, "Ride is now active!", Toast.LENGTH_SHORT).show()
                                             }
                                         },
-                                        colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserSaffron),
+                                        colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserPrimary),
                                         modifier = Modifier.weight(1f).testTag("host_status_active_btn")
                                     ) {
                                         Text("Set Active", fontSize = 12.sp, fontWeight = FontWeight.Bold)
@@ -5442,7 +5137,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                                 Toast.makeText(context, "Ride completed!", Toast.LENGTH_SHORT).show()
                                             }
                                         },
-                                        colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserEmerald),
+                                        colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserSuccess),
                                         modifier = Modifier.weight(1f).testTag("host_status_completed_btn").withButtonScale(completeScale)
                                     ) {
                                         Text("Complete", fontSize = 12.sp, fontWeight = FontWeight.Bold)
@@ -5473,12 +5168,12 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                     
                     if (hasAlreadyJoined) {
                         Card(
-                            colors = CardDefaults.cardColors(containerColor = SplitCruiserEmerald.copy(alpha = 0.15f)),
+                            colors = CardDefaults.cardColors(containerColor = SplitCruiserSuccess.copy(alpha = 0.15f)),
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(Icons.Default.CheckCircle, contentDescription = "Reserved", tint = SplitCruiserEmerald, modifier = Modifier.size(32.dp))
+                                Icon(Icons.Default.CheckCircle, contentDescription = "Reserved", tint = SplitCruiserSuccess, modifier = Modifier.size(32.dp))
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
                                     text = "Your seat is reserved!",
@@ -5497,7 +5192,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                     Spacer(modifier = Modifier.height(12.dp))
                                     Button(
                                         onClick = { navController.navigate("chat/${existingMatch.id}") },
-                                        colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserEmerald),
+                                        colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserSuccess),
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
                                         Text("Open Chat with ${offer.hostName}", color = Color.White, fontWeight = FontWeight.Bold)
@@ -5513,9 +5208,9 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                     onClick = {},
                                     enabled = false,
                                     modifier = Modifier.fillMaxWidth().height(54.dp),
-                                    colors = ButtonDefaults.buttonColors(disabledContainerColor = SplitCruiserDivider)
+                                    colors = ButtonDefaults.buttonColors(disabledContainerColor = SplitCruiserOutline)
                                 ) {
-                                    Text("This Trip is Completed", color = SplitCruiserLightGray, fontWeight = FontWeight.Bold)
+                                    Text("This Trip is Completed", color = SplitCruiserTextSecondary, fontWeight = FontWeight.Bold)
                                 }
                             }
                             offer.status == "cancelled" -> {
@@ -5523,9 +5218,9 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                     onClick = {},
                                     enabled = false,
                                     modifier = Modifier.fillMaxWidth().height(54.dp),
-                                    colors = ButtonDefaults.buttonColors(disabledContainerColor = SplitCruiserDivider)
+                                    colors = ButtonDefaults.buttonColors(disabledContainerColor = SplitCruiserOutline)
                                 ) {
-                                    Text("This Trip is Cancelled", color = SplitCruiserLightGray, fontWeight = FontWeight.Bold)
+                                    Text("This Trip is Cancelled", color = SplitCruiserTextSecondary, fontWeight = FontWeight.Bold)
                                 }
                             }
                             offer.status == "full" || offer.seatsLeft <= 0 -> {
@@ -5533,9 +5228,9 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                     onClick = {},
                                     enabled = false,
                                     modifier = Modifier.fillMaxWidth().height(54.dp),
-                                    colors = ButtonDefaults.buttonColors(disabledContainerColor = SplitCruiserDivider)
+                                    colors = ButtonDefaults.buttonColors(disabledContainerColor = SplitCruiserOutline)
                                 ) {
-                                    Text("Ride is Full", color = SplitCruiserLightGray, fontWeight = FontWeight.Bold)
+                                    Text("Ride is Full", color = SplitCruiserTextSecondary, fontWeight = FontWeight.Bold)
                                 }
                             }
                             else -> {
@@ -5561,7 +5256,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                             .height(54.dp)
                                             .testTag("direct_join_button")
                                             .withButtonScale(joinScale),
-                                        colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserSaffron),
+                                        colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserPrimary),
                                         shape = RoundedCornerShape(12.dp)
                                     ) {
                                         Icon(Icons.Default.Add, contentDescription = "Join", tint = Color.White)
@@ -5570,7 +5265,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                     }
                                     Text(
                                         text = "Reserves your seat immediately at $${offer.costPerRider} — no host approval needed.",
-                                        color = SplitCruiserLightGray,
+                                        color = SplitCruiserTextSecondary,
                                         fontSize = 11.sp,
                                         textAlign = TextAlign.Center,
                                         modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
@@ -5581,7 +5276,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                     // Alternatively keep the original Request to Join Match system as secondary option
                                     Text(
                                         text = "OR PROPOSE A DIFFERENT AMOUNT (HOST MUST APPROVE):",
-                                        color = SplitCruiserLightGray,
+                                        color = SplitCruiserTextSecondary,
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
                                         modifier = Modifier.align(Alignment.CenterHorizontally)
@@ -5602,12 +5297,12 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                             modifier = Modifier.fillMaxWidth(),
                                             colors = OutlinedTextFieldDefaults.colors(
-                                                focusedBorderColor = SplitCruiserSaffron,
-                                                unfocusedBorderColor = SplitCruiserDivider,
+                                                focusedBorderColor = SplitCruiserPrimary,
+                                                unfocusedBorderColor = SplitCruiserOutline,
                                                 focusedTextColor = SplitCruiserTextPrimary,
                                                 unfocusedTextColor = SplitCruiserTextPrimary,
-                                                focusedContainerColor = SplitCruiserCardBg,
-                                                unfocusedContainerColor = SplitCruiserCardBg
+                                                focusedContainerColor = SplitCruiserSurfaceCard,
+                                                unfocusedContainerColor = SplitCruiserSurfaceCard
                                             )
                                         )
 
@@ -5624,14 +5319,14 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                                 .fillMaxWidth()
                                                 .height(48.dp)
                                                 .testTag("propose_contribution_button"),
-                                            colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserIndigo),
+                                            colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserPrimaryContainer),
                                             shape = RoundedCornerShape(12.dp)
                                         ) {
-                                            Text("Propose Contribution", color = SplitCruiserSaffron, fontWeight = FontWeight.Bold)
+                                            Text("Propose Contribution", color = SplitCruiserPrimary, fontWeight = FontWeight.Bold)
                                         }
                                     } else {
                                         Card(
-                                            colors = CardDefaults.cardColors(containerColor = if (existingMatch.status == "accepted") SplitCruiserEmerald.copy(alpha = 0.15f) else SplitCruiserSaffron.copy(alpha = 0.15f)),
+                                            colors = CardDefaults.cardColors(containerColor = if (existingMatch.status == "accepted") SplitCruiserSuccess.copy(alpha = 0.15f) else SplitCruiserPrimary.copy(alpha = 0.15f)),
                                             shape = RoundedCornerShape(12.dp),
                                             modifier = Modifier.fillMaxWidth()
                                         ) {
@@ -5640,7 +5335,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                                     Icon(
                                                         imageVector = if (existingMatch.status == "accepted") Icons.Default.CheckCircle else Icons.Default.HourglassEmpty,
                                                         contentDescription = "Status",
-                                                        tint = if (existingMatch.status == "accepted") SplitCruiserEmerald else SplitCruiserSaffron
+                                                        tint = if (existingMatch.status == "accepted") SplitCruiserSuccess else SplitCruiserPrimary
                                                     )
                                                     Spacer(modifier = Modifier.width(12.dp))
                                                     Text(
@@ -5654,7 +5349,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                                     Spacer(modifier = Modifier.height(12.dp))
                                                     Button(
                                                         onClick = { navController.navigate("chat/${existingMatch.id}") },
-                                                        colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserEmerald),
+                                                        colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserSuccess),
                                                         modifier = Modifier.fillMaxWidth()
                                                     ) {
                                                         Text("Open Coordinator Chat", color = Color.White, fontWeight = FontWeight.Bold)
@@ -5694,17 +5389,17 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
         if (request == null) {
             if (!requestFetchAttempted) {
                 Box(
-                    modifier = Modifier.fillMaxSize().background(SplitCruiserDarkBg),
+                    modifier = Modifier.fillMaxSize().background(SplitCruiserSurface),
                     contentAlignment = Alignment.Center
                 ) {
-                    CircularProgressIndicator(color = SplitCruiserSaffron)
+                    CircularProgressIndicator(color = SplitCruiserPrimary)
                 }
                 return
             }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(SplitCruiserDarkBg),
+                    .background(SplitCruiserSurface),
                 contentAlignment = Alignment.Center
             ) {
                 SplitCruiserEmptyState(
@@ -5743,28 +5438,21 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
 
                 // Route card
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = SplitCruiserCardBg),
+                    colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
                     shape = RoundedCornerShape(16.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .border(1.dp, SplitCruiserDivider, RoundedCornerShape(16.dp))
+                        .border(1.dp, SplitCruiserOutline, RoundedCornerShape(16.dp))
                 ) {
                     Column(modifier = Modifier.padding(20.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(Icons.Default.RadioButtonChecked, contentDescription = "Start", tint = SplitCruiserSaffron, modifier = Modifier.size(16.dp))
-                                Box(modifier = Modifier.width(2.dp).height(40.dp).background(SplitCruiserDivider))
-                                Icon(Icons.Default.Place, contentDescription = "End", tint = SplitCruiserIndigo, modifier = Modifier.size(16.dp))
-                            }
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Column {
-                                Text("RIDER PICKUP", color = SplitCruiserLightGray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                Text(request.origin, color = SplitCruiserTextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                                Spacer(modifier = Modifier.height(22.dp))
-                                Text("RIDER DROPOFF", color = SplitCruiserLightGray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                Text(request.destination, color = SplitCruiserTextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
+                        RouteIndicator(
+                            origin = request.origin,
+                            destination = request.destination,
+                            scale = RouteScale.Detail,
+                            pins = true,
+                            originLabel = "RIDER PICKUP",
+                            destinationLabel = "RIDER DROPOFF"
+                        )
                     }
                 }
 
@@ -5776,11 +5464,11 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
 
                 // Rider details
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = SplitCruiserCardBg),
+                    colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
                     shape = RoundedCornerShape(16.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .border(1.dp, SplitCruiserDivider, RoundedCornerShape(16.dp))
+                        .border(1.dp, SplitCruiserOutline, RoundedCornerShape(16.dp))
                         .animateContentSize(
                             animationSpec = spring(
                                 dampingRatio = 0.8f,
@@ -5794,15 +5482,15 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                             modifier = Modifier
                                 .size(48.dp)
                                 .clip(CircleShape)
-                                .background(SplitCruiserSaffron.copy(alpha = 0.2f)),
+                                .background(SplitCruiserPrimary.copy(alpha = 0.2f)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(request.riderName.take(1).uppercase(), color = SplitCruiserSaffron, fontWeight = FontWeight.Bold)
+                            Text(request.riderName.take(1).uppercase(), color = SplitCruiserPrimary, fontWeight = FontWeight.Bold)
                         }
                         Spacer(modifier = Modifier.width(16.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(request.riderName, color = SplitCruiserTextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                            Text("Rider Rating: ${String.format(Locale.US, "%.1f", request.riderRating)} ★", color = SplitCruiserLightGray, fontSize = 12.sp)
+                            Text("Rider Rating: ${String.format(Locale.US, "%.1f", request.riderRating)} ★", color = SplitCruiserTextSecondary, fontSize = 12.sp)
                         }
                         IconButton(onClick = {
                             coroutineScope.launch {
@@ -5820,14 +5508,14 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                 Spacer(modifier = Modifier.height(16.dp))
 
                 if (request.notes.isNotEmpty()) {
-                    Text("RIDER NOTES", color = SplitCruiserSaffron, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                    Text("RIDER NOTES", color = SplitCruiserPrimary, fontSize = 11.sp, fontWeight = FontWeight.Black)
                     Spacer(modifier = Modifier.height(8.dp))
                     Card(
-                        colors = CardDefaults.cardColors(containerColor = SplitCruiserCardBg),
+                        colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .border(1.dp, SplitCruiserDivider, RoundedCornerShape(12.dp))
+                            .border(1.dp, SplitCruiserOutline, RoundedCornerShape(12.dp))
                     ) {
                         Text(
                             text = "\"${request.notes}\"",
@@ -5842,7 +5530,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                 // Match status actions for Host
                 if (activeAcceptedMatch != null) {
                     Card(
-                        colors = CardDefaults.cardColors(containerColor = SplitCruiserEmerald.copy(alpha = 0.15f)),
+                        colors = CardDefaults.cardColors(containerColor = SplitCruiserSuccess.copy(alpha = 0.15f)),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -5851,7 +5539,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                             Spacer(modifier = Modifier.height(12.dp))
                             Button(
                                 onClick = { navController.navigate("chat/${activeAcceptedMatch.id}") },
-                                colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserEmerald),
+                                colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserSuccess),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Text("Open Chat Room", color = Color.White, fontWeight = FontWeight.Bold)
@@ -5859,17 +5547,17 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                         }
                     }
                 } else if (activePendingMatch != null) {
-                    Text("PENDING COST-SPLIT MATCH", color = SplitCruiserSaffron, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                    Text("PENDING COST-SPLIT MATCH", color = SplitCruiserPrimary, fontSize = 11.sp, fontWeight = FontWeight.Black)
                     Spacer(modifier = Modifier.height(8.dp))
                     Card(
-                        colors = CardDefaults.cardColors(containerColor = SplitCruiserCardBg),
+                        colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .border(1.dp, SplitCruiserDivider, RoundedCornerShape(16.dp))
+                            .border(1.dp, SplitCruiserOutline, RoundedCornerShape(16.dp))
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
-                            Text("Rider offered gas contribution split:", color = SplitCruiserLightGray, fontSize = 12.sp)
+                            Text("Rider offered gas contribution split:", color = SplitCruiserTextSecondary, fontSize = 12.sp)
                             Text("$${activePendingMatch.contribution}", color = SplitCruiserTextPrimary, fontWeight = FontWeight.Black, fontSize = 24.sp)
                             
                             Spacer(modifier = Modifier.height(16.dp))
@@ -5889,7 +5577,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                             navController.navigate("chat/${activePendingMatch.id}")
                                         }
                                     },
-                                    colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserEmerald),
+                                    colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserSuccess),
                                     modifier = Modifier.weight(1f).padding(start = 6.dp),
                                     shape = RoundedCornerShape(8.dp)
                                 ) {
@@ -5913,7 +5601,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                     if (showOfferPicker) {
                         AlertDialog(
                             onDismissRequest = { showOfferPicker = false },
-                            containerColor = SplitCruiserCardBg,
+                            containerColor = SplitCruiserSurfaceCard,
                             title = {
                                 Text(
                                     "Which ride are you offering?",
@@ -5953,7 +5641,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                             },
                             confirmButton = {
                                 TextButton(onClick = { showOfferPicker = false }) {
-                                    Text("Cancel", color = SplitCruiserSaffron)
+                                    Text("Cancel", color = SplitCruiserPrimary)
                                 }
                             }
                         )
@@ -5984,7 +5672,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(54.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserSaffron),
+                        colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserPrimary),
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Text("Accept & Offer Ride Share", color = Color.White, fontWeight = FontWeight.Bold)
@@ -6042,7 +5730,7 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
                         Text(
                             text = "Split Contribution: $${currentMatch?.contribution ?: 0.0}",
                             fontSize = 11.sp,
-                            color = SplitCruiserSaffron
+                            color = SplitCruiserPrimary
                         )
                     }
                 },
@@ -6062,7 +5750,7 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
                         }
                         context.startActivity(Intent.createChooser(intent, "Share Trip Details"))
                     }) {
-                        Icon(imageVector = Icons.Default.Share, contentDescription = "Share", tint = SplitCruiserSaffron)
+                        Icon(imageVector = Icons.Default.Share, contentDescription = "Share", tint = SplitCruiserPrimary)
                     }
 
                     // Complete Trip / Rating Action
@@ -6073,18 +5761,18 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
                             navController.navigate("profile")
                         }
                     }) {
-                        Icon(imageVector = Icons.Default.Check, contentDescription = "Complete Trip", tint = SplitCruiserEmerald)
+                        Icon(imageVector = Icons.Default.Check, contentDescription = "Complete Trip", tint = SplitCruiserSuccess)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = SplitCruiserCardBg)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = SplitCruiserSurfaceCard)
             )
         },
         bottomBar = {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(SplitCruiserCardBg)
-                    .border(1.dp, SplitCruiserDivider)
+                    .background(SplitCruiserSurfaceCard)
+                    .border(1.dp, SplitCruiserOutline)
                     .navigationBarsPadding()
                     .padding(vertical = 8.dp)
             ) {
@@ -6108,13 +5796,13 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(16.dp))
-                                .background(SplitCruiserIndigo.copy(alpha = 0.4f))
+                                .background(SplitCruiserPrimaryContainer.copy(alpha = 0.4f))
                                 .clickable {
                                     viewModel.sendMessage(matchId, text)
                                 }
                                 .padding(horizontal = 12.dp, vertical = 6.dp)
                         ) {
-                            Text(text = text, color = SplitCruiserSaffron, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text(text = text, color = SplitCruiserPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -6137,10 +5825,10 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = SplitCruiserTextPrimary,
                             unfocusedTextColor = SplitCruiserTextPrimary,
-                            focusedBorderColor = SplitCruiserSaffron,
-                            unfocusedBorderColor = SplitCruiserDivider,
-                            focusedContainerColor = SplitCruiserDarkBg,
-                            unfocusedContainerColor = SplitCruiserDarkBg
+                            focusedBorderColor = SplitCruiserPrimary,
+                            unfocusedBorderColor = SplitCruiserOutline,
+                            focusedContainerColor = SplitCruiserSurface,
+                            unfocusedContainerColor = SplitCruiserSurface
                         ),
                         shape = RoundedCornerShape(24.dp)
                     )
@@ -6152,7 +5840,7 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
                                 currentMsgText = ""
                             }
                         },
-                        containerColor = SplitCruiserSaffron,
+                        containerColor = SplitCruiserPrimary,
                         contentColor = Color.White,
                         shape = CircleShape,
                         modifier = Modifier
@@ -6164,7 +5852,7 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
                 }
             }
         },
-        containerColor = SplitCruiserDarkBg
+        containerColor = SplitCruiserSurface
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -6176,9 +5864,9 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 8.dp),
-                    colors = CardDefaults.cardColors(containerColor = SplitCruiserIndigo.copy(alpha = 0.25f)),
+                    colors = CardDefaults.cardColors(containerColor = SplitCruiserPrimaryContainer.copy(alpha = 0.25f)),
                     shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, SplitCruiserIndigo)
+                    border = BorderStroke(1.dp, SplitCruiserPrimaryContainer)
                 ) {
                     Column(
                         modifier = Modifier
@@ -6199,7 +5887,7 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
                                 Icon(
                                     imageVector = Icons.Default.DirectionsCar,
                                     contentDescription = null,
-                                    tint = SplitCruiserSaffron,
+                                    tint = SplitCruiserPrimary,
                                     modifier = Modifier.size(20.dp)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
@@ -6214,14 +5902,14 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
                                 Text(
                                     text = if (isOfferDetailsExpanded) "Hide" else "Show",
                                     fontSize = 12.sp,
-                                    color = SplitCruiserSaffron,
+                                    color = SplitCruiserPrimary,
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Icon(
                                     imageVector = if (isOfferDetailsExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                                     contentDescription = null,
-                                    tint = SplitCruiserSaffron,
+                                    tint = SplitCruiserPrimary,
                                     modifier = Modifier.size(16.dp)
                                 )
                             }
@@ -6234,16 +5922,16 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
                                     .padding(top = 10.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Divider(color = SplitCruiserDivider.copy(alpha = 0.5f))
+                                Divider(color = SplitCruiserOutline.copy(alpha = 0.5f))
                                 
                                 Row(verticalAlignment = Alignment.Top) {
-                                    Icon(imageVector = Icons.Default.Place, contentDescription = null, tint = SplitCruiserSaffron, modifier = Modifier.size(16.dp).padding(top = 2.dp))
+                                    Icon(imageVector = Icons.Default.Place, contentDescription = null, tint = SplitCruiserPrimary, modifier = Modifier.size(16.dp).padding(top = 2.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Column {
-                                        Text("FROM:", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = SplitCruiserLightGray)
+                                        Text("FROM:", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = SplitCruiserTextSecondary)
                                         Text(currentOffer.origin, fontSize = 12.sp, color = SplitCruiserTextPrimary)
                                         Spacer(modifier = Modifier.height(4.dp))
-                                        Text("TO:", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = SplitCruiserLightGray)
+                                        Text("TO:", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = SplitCruiserTextSecondary)
                                         Text(currentOffer.destination, fontSize = 12.sp, color = SplitCruiserTextPrimary)
                                     }
                                 }
@@ -6257,7 +5945,7 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
                                     }
                                 }
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(imageVector = Icons.Default.Refresh, contentDescription = null, tint = SplitCruiserSaffron, modifier = Modifier.size(16.dp))
+                                    Icon(imageVector = Icons.Default.Refresh, contentDescription = null, tint = SplitCruiserPrimary, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
                                         text = "Departure: $formattedTime",
@@ -6268,7 +5956,7 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
 
                                 if (currentOffer.vehicleInfo.isNotEmpty()) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(imageVector = Icons.Default.DirectionsCar, contentDescription = null, tint = SplitCruiserSaffron, modifier = Modifier.size(16.dp))
+                                        Icon(imageVector = Icons.Default.DirectionsCar, contentDescription = null, tint = SplitCruiserPrimary, modifier = Modifier.size(16.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text(
                                             text = "Vehicle: ${currentOffer.vehicleInfo}",
@@ -6282,7 +5970,7 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
 
                                 Button(
                                     onClick = { showProposeDialog = true },
-                                    colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserSaffron),
+                                    colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserPrimary),
                                     shape = RoundedCornerShape(8.dp),
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -6308,8 +5996,11 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
                 items(messageList) { msg ->
                     val isMe = (msg.senderId == currentUser?.id)
                     val isSystem = msg.isSystem
-                    val isProposal = msg.text.startsWith("[PROPOSAL]")
-                    val isConfirmed = msg.text.startsWith("[CONFIRMED]")
+                    // Read off the message's own type. This used to be `text.startsWith
+                    // ("[PROPOSAL]")`, so anything a user typed beginning with that literal
+                    // rendered as a system proposal card instead of their message.
+                    val isProposal = msg.kind == MessageType.PICKUP_PROPOSAL
+                    val isConfirmed = msg.kind == MessageType.PICKUP_CONFIRMED
 
                     Row(
                         modifier = Modifier
@@ -6318,19 +6009,14 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
                         horizontalArrangement = if (isSystem) Arrangement.Center else if (isMe) Arrangement.End else Arrangement.Start
                     ) {
                         if (isProposal) {
-                            val parsed = remember(msg.text) {
-                                val loc = msg.text.substringAfter("Location: ").substringBefore(" | Time:")
-                                val time = msg.text.substringAfter("| Time: ")
-                                Pair(loc, time)
-                            }
                             Card(
                                 modifier = Modifier
                                     .widthIn(max = 280.dp)
                                     .padding(vertical = 4.dp),
                                 colors = CardDefaults.cardColors(
-                                    containerColor = if (isMe) SplitCruiserSaffron.copy(alpha = 0.05f) else SplitCruiserIndigo.copy(alpha = 0.15f)
+                                    containerColor = if (isMe) SplitCruiserPrimary.copy(alpha = 0.05f) else SplitCruiserPrimaryContainer.copy(alpha = 0.15f)
                                 ),
-                                border = BorderStroke(1.dp, SplitCruiserSaffron),
+                                border = BorderStroke(1.dp, SplitCruiserPrimary),
                                 shape = RoundedCornerShape(16.dp)
                             ) {
                                 Column(modifier = Modifier.padding(12.dp)) {
@@ -6338,7 +6024,7 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
                                         Icon(
                                             imageVector = Icons.Default.Place,
                                             contentDescription = null,
-                                            tint = SplitCruiserSaffron,
+                                            tint = SplitCruiserPrimary,
                                             modifier = Modifier.size(16.dp)
                                         )
                                         Spacer(modifier = Modifier.width(6.dp))
@@ -6346,19 +6032,19 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
                                             text = "Proposed Pickup Info",
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 13.sp,
-                                            color = SplitCruiserSaffron
+                                            color = SplitCruiserPrimary
                                         )
                                     }
                                     Spacer(modifier = Modifier.height(6.dp))
                                     Text(
-                                        text = "📍 Spot: ${parsed.first}",
-                                        fontSize = 12.sp,
+                                        text = "📍 Spot: ${msg.spot}",
+                                        fontSize = SplitCruiserTextSize.Caption,
                                         fontWeight = FontWeight.Medium,
                                         color = SplitCruiserTextPrimary
                                     )
                                     Text(
-                                        text = "⏰ Time: ${parsed.second}",
-                                        fontSize = 12.sp,
+                                        text = "⏰ Time: ${msg.time}",
+                                        fontSize = SplitCruiserTextSize.Caption,
                                         fontWeight = FontWeight.Medium,
                                         color = SplitCruiserTextPrimary
                                     )
@@ -6366,12 +6052,14 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
                                     if (!isMe) {
                                         Button(
                                             onClick = {
-                                                viewModel.sendMessage(
-                                                    matchId,
-                                                    "[CONFIRMED] Meet at ${parsed.first} at ${parsed.second}"
+                                                viewModel.sendPickupMessage(
+                                                    matchId = matchId,
+                                                    type = MessageType.PICKUP_CONFIRMED,
+                                                    spot = msg.spot,
+                                                    time = msg.time,
                                                 )
                                             },
-                                            colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserEmerald),
+                                            colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserSuccess),
                                             shape = RoundedCornerShape(8.dp),
                                             modifier = Modifier
                                                 .fillMaxWidth()
@@ -6386,7 +6074,7 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .clip(RoundedCornerShape(4.dp))
-                                                .background(SplitCruiserLightGray.copy(alpha = 0.1f))
+                                                .background(SplitCruiserTextSecondary.copy(alpha = 0.1f))
                                                 .padding(vertical = 4.dp),
                                             contentAlignment = Alignment.Center
                                         ) {
@@ -6394,22 +6082,21 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
                                                 text = "Awaiting other's confirmation...",
                                                 fontSize = 10.sp,
                                                 fontWeight = FontWeight.SemiBold,
-                                                color = SplitCruiserLightGray
+                                                color = SplitCruiserTextSecondary
                                             )
                                         }
                                     }
                                 }
                             }
                         } else if (isConfirmed) {
-                            val details = msg.text.substringAfter("[CONFIRMED] ")
                             Card(
                                 modifier = Modifier
                                     .widthIn(max = 280.dp)
                                     .padding(vertical = 4.dp),
                                 colors = CardDefaults.cardColors(
-                                    containerColor = SplitCruiserEmerald.copy(alpha = 0.12f)
+                                    containerColor = SplitCruiserSuccess.copy(alpha = 0.12f)
                                 ),
-                                border = BorderStroke(1.5.dp, SplitCruiserEmerald),
+                                border = BorderStroke(1.5.dp, SplitCruiserSuccess),
                                 shape = RoundedCornerShape(16.dp)
                             ) {
                                 Column(modifier = Modifier.padding(12.dp)) {
@@ -6417,7 +6104,7 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
                                         Icon(
                                             imageVector = Icons.Default.Check,
                                             contentDescription = null,
-                                            tint = SplitCruiserEmerald,
+                                            tint = SplitCruiserSuccess,
                                             modifier = Modifier.size(18.dp)
                                         )
                                         Spacer(modifier = Modifier.width(6.dp))
@@ -6425,13 +6112,13 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
                                             text = "Pickup Confirmed!",
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 13.sp,
-                                            color = SplitCruiserEmerald
+                                            color = SplitCruiserSuccess
                                         )
                                     }
-                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Spacer(modifier = Modifier.height(SplitCruiserSpacing.Xs))
                                     Text(
-                                        text = details,
-                                        fontSize = 12.sp,
+                                        text = "Meet at ${msg.spot} at ${msg.time}",
+                                        fontSize = SplitCruiserTextSize.Caption,
                                         fontWeight = FontWeight.Medium,
                                         color = SplitCruiserTextPrimary
                                     )
@@ -6448,21 +6135,21 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
                                 modifier = Modifier
                                     .clip(bubbleShape)
                                     .background(
-                                        if (isSystem) Color(0xFFE2E8F0) else if (isMe) SplitCruiserSaffron else SplitCruiserCardBg
+                                        if (isSystem) SplitCruiserOutline else if (isMe) SplitCruiserPrimary else SplitCruiserSurfaceCard
                                     )
                                     .then(
-                                        if (isMe || isSystem) Modifier else Modifier.border(1.dp, SplitCruiserDivider, bubbleShape)
+                                        if (isMe || isSystem) Modifier else Modifier.border(1.dp, SplitCruiserOutline, bubbleShape)
                                     )
                                     .padding(horizontal = 14.dp, vertical = 10.dp)
                             ) {
                                 Column {
                                     if (!isSystem && !isMe) {
-                                        Text(msg.senderName, color = SplitCruiserSaffron, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        Text(msg.senderName, color = SplitCruiserPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                         Spacer(modifier = Modifier.height(2.dp))
                                     }
                                     Text(
                                         text = msg.text,
-                                        color = if (isSystem) Color(0xFF64748B) else if (isMe) Color.White else SplitCruiserTextPrimary,
+                                        color = if (isSystem) SplitCruiserTextSecondary else if (isMe) Color.White else SplitCruiserTextPrimary,
                                         fontSize = 13.sp
                                     )
                                 }
@@ -6478,7 +6165,12 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
         ProposePickupDialog(
             onDismiss = { showProposeDialog = false },
             onPropose = { location, time ->
-                viewModel.sendMessage(matchId, "[PROPOSAL] Location: $location | Time: $time")
+                viewModel.sendPickupMessage(
+                    matchId = matchId,
+                    type = MessageType.PICKUP_PROPOSAL,
+                    spot = location,
+                    time = time,
+                )
                 showProposeDialog = false
             }
         )
@@ -6497,12 +6189,12 @@ fun ProposePickupDialog(
         onDismissRequest = onDismiss,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(imageVector = Icons.Default.Place, contentDescription = null, tint = SplitCruiserSaffron)
+                Icon(imageVector = Icons.Default.Place, contentDescription = null, tint = SplitCruiserPrimary)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("Propose Pickup Spot", color = SplitCruiserTextPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
             }
         },
-        containerColor = SplitCruiserCardBg,
+        containerColor = SplitCruiserSurfaceCard,
         text = {
             Column(
                 modifier = Modifier.fillMaxWidth(),
@@ -6510,7 +6202,7 @@ fun ProposePickupDialog(
             ) {
                 Text(
                     text = "Suggest a specific meeting spot and time for your carpool buddy.",
-                    color = SplitCruiserLightGray,
+                    color = SplitCruiserTextSecondary,
                     fontSize = 13.sp
                 )
 
@@ -6520,14 +6212,14 @@ fun ProposePickupDialog(
                     label = { Text("Meeting Spot") },
                     placeholder = { Text("e.g. Science Library entrance") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().testTag("propose_location_input"),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = SplitCruiserTextPrimary,
                         unfocusedTextColor = SplitCruiserTextPrimary,
-                        focusedBorderColor = SplitCruiserSaffron,
-                        unfocusedBorderColor = SplitCruiserDivider,
-                        focusedLabelColor = SplitCruiserSaffron,
-                        unfocusedLabelColor = SplitCruiserLightGray
+                        focusedBorderColor = SplitCruiserPrimary,
+                        unfocusedBorderColor = SplitCruiserOutline,
+                        focusedLabelColor = SplitCruiserPrimary,
+                        unfocusedLabelColor = SplitCruiserTextSecondary
                     )
                 )
 
@@ -6537,14 +6229,14 @@ fun ProposePickupDialog(
                     label = { Text("Proposed Time") },
                     placeholder = { Text("e.g. 5:45 PM or in 10 mins") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().testTag("propose_time_input"),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = SplitCruiserTextPrimary,
                         unfocusedTextColor = SplitCruiserTextPrimary,
-                        focusedBorderColor = SplitCruiserSaffron,
-                        unfocusedBorderColor = SplitCruiserDivider,
-                        focusedLabelColor = SplitCruiserSaffron,
-                        unfocusedLabelColor = SplitCruiserLightGray
+                        focusedBorderColor = SplitCruiserPrimary,
+                        unfocusedBorderColor = SplitCruiserOutline,
+                        focusedLabelColor = SplitCruiserPrimary,
+                        unfocusedLabelColor = SplitCruiserTextSecondary
                     )
                 )
             }
@@ -6556,7 +6248,7 @@ fun ProposePickupDialog(
                         onPropose(location.trim(), time.trim())
                     }
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserSaffron),
+                colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserPrimary),
                 enabled = location.trim().isNotEmpty() && time.trim().isNotEmpty()
             ) {
                 Text("Send Proposal", color = Color.White, fontWeight = FontWeight.Bold)
@@ -6564,7 +6256,7 @@ fun ProposePickupDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel", color = SplitCruiserLightGray)
+                Text("Cancel", color = SplitCruiserTextSecondary)
             }
         }
     )
@@ -6582,7 +6274,9 @@ fun StudentAvatar(
         modifier = modifier
             .size(size)
             .clip(CircleShape)
-            .background(Brush.linearGradient(listOf(SplitCruiserSaffron, SplitCruiserIndigo))),
+            // Both stops are dark: the fallback initial inside is drawn in white, and the pale
+            // PrimaryContainer this used to end on left it barely visible.
+            .background(Brush.linearGradient(listOf(SplitCruiserPrimary, SplitCruiserOnPrimaryContainer))),
         contentAlignment = Alignment.Center
     ) {
         if (avatarUrl.isNotEmpty()) {
@@ -6655,14 +6349,14 @@ fun EditProfileDialog(
         title = {
             Text("Edit Your Profile", color = SplitCruiserTextPrimary, fontWeight = FontWeight.Bold)
         },
-        containerColor = SplitCruiserCardBg,
+        containerColor = SplitCruiserSurfaceCard,
         text = {
             LazyColumn(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 item {
-                    Text("PROFILE PICTURE", color = SplitCruiserSaffron, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("PROFILE PICTURE", color = SplitCruiserPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(6.dp))
                     
                     Row(
@@ -6678,7 +6372,7 @@ fun EditProfileDialog(
                     }
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    Text("Select a Preset Avatar:", color = SplitCruiserLightGray, fontSize = 12.sp)
+                    Text("Select a Preset Avatar:", color = SplitCruiserTextSecondary, fontSize = 12.sp)
                     Spacer(modifier = Modifier.height(8.dp))
                     
                     Row(
@@ -6691,10 +6385,10 @@ fun EditProfileDialog(
                                 modifier = Modifier
                                     .size(40.dp)
                                     .clip(CircleShape)
-                                    .background(if (isSelected) SplitCruiserSaffron.copy(alpha = 0.25f) else SplitCruiserDarkBg)
+                                    .background(if (isSelected) SplitCruiserPrimary.copy(alpha = 0.25f) else SplitCruiserSurface)
                                     .border(
                                         width = if (isSelected) 2.dp else 1.dp,
-                                        color = if (isSelected) SplitCruiserSaffron else Color.Transparent,
+                                        color = if (isSelected) SplitCruiserPrimary else Color.Transparent,
                                         shape = CircleShape
                                     )
                                     .clickable {
@@ -6723,19 +6417,19 @@ fun EditProfileDialog(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = SplitCruiserSaffron,
-                            unfocusedBorderColor = SplitCruiserDivider,
+                            focusedBorderColor = SplitCruiserPrimary,
+                            unfocusedBorderColor = SplitCruiserOutline,
                             focusedTextColor = SplitCruiserTextPrimary,
                             unfocusedTextColor = SplitCruiserTextPrimary,
-                            focusedLabelColor = SplitCruiserSaffron,
-                            unfocusedLabelColor = SplitCruiserLightGray
+                            focusedLabelColor = SplitCruiserPrimary,
+                            unfocusedLabelColor = SplitCruiserTextSecondary
                         )
                     )
                 }
 
                 item {
-                    Divider(color = SplitCruiserDivider, modifier = Modifier.padding(vertical = 8.dp))
-                    Text("PERSONAL DETAILS", color = SplitCruiserSaffron, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Divider(color = SplitCruiserOutline, modifier = Modifier.padding(vertical = 8.dp))
+                    Text("PERSONAL DETAILS", color = SplitCruiserPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -6746,12 +6440,12 @@ fun EditProfileDialog(
                             singleLine = true,
                             modifier = Modifier.weight(1f),
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = SplitCruiserSaffron,
-                                unfocusedBorderColor = SplitCruiserDivider,
+                                focusedBorderColor = SplitCruiserPrimary,
+                                unfocusedBorderColor = SplitCruiserOutline,
                                 focusedTextColor = SplitCruiserTextPrimary,
                                 unfocusedTextColor = SplitCruiserTextPrimary,
-                                focusedLabelColor = SplitCruiserSaffron,
-                                unfocusedLabelColor = SplitCruiserLightGray
+                                focusedLabelColor = SplitCruiserPrimary,
+                                unfocusedLabelColor = SplitCruiserTextSecondary
                             )
                         )
                         OutlinedTextField(
@@ -6761,12 +6455,12 @@ fun EditProfileDialog(
                             singleLine = true,
                             modifier = Modifier.width(60.dp),
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = SplitCruiserSaffron,
-                                unfocusedBorderColor = SplitCruiserDivider,
+                                focusedBorderColor = SplitCruiserPrimary,
+                                unfocusedBorderColor = SplitCruiserOutline,
                                 focusedTextColor = SplitCruiserTextPrimary,
                                 unfocusedTextColor = SplitCruiserTextPrimary,
-                                focusedLabelColor = SplitCruiserSaffron,
-                                unfocusedLabelColor = SplitCruiserLightGray
+                                focusedLabelColor = SplitCruiserPrimary,
+                                unfocusedLabelColor = SplitCruiserTextSecondary
                             )
                         )
                     }
@@ -6785,14 +6479,14 @@ fun EditProfileDialog(
                         onSuccess = onDismiss
                     )
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserSaffron)
+                colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserPrimary)
             ) {
                 Text("Save Changes", color = Color.White, fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel", color = SplitCruiserLightGray)
+                Text("Cancel", color = SplitCruiserTextSecondary)
             }
         }
     )
@@ -6809,10 +6503,35 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
 
     var showEditProfileDialog by remember { mutableStateOf(false) }
 
-    // Rating Submit State
-    var ratingTargetUserId by remember { mutableStateOf("") }
+    // Rating submit state. The target is picked from the user's own match history — it used to
+    // be a free-text field asking for the other person's Firebase uid, which nobody can know.
+    val userMatches by viewModel.userMatches.collectAsState()
+    val rateableCompanions = remember(userMatches, currentUser) {
+        val me = currentUser?.id.orEmpty()
+        userMatches
+            .filter { it.status == "accepted" || it.status == "completed" }
+            .mapNotNull { match ->
+                val otherId = if (match.hostId == me) match.riderId else match.hostId
+                if (otherId.isBlank() || otherId == me) return@mapNotNull null
+                val name = if (match.hostId == me) {
+                    match.riderName.takeIf { it.isNotBlank() } ?: "Your rider"
+                } else {
+                    viewModel.getUserPublicProfile(otherId)?.displayName
+                        ?: viewModel.getTripOfferById(match.offerId)?.hostName
+                        ?: "Your host"
+                }
+                RatingCompanion(userId = otherId, displayName = name, wasHost = match.hostId != me)
+            }
+            .distinctBy { it.userId }
+    }
+    var ratingTarget by remember { mutableStateOf<RatingCompanion?>(null) }
     var ratingValue by remember { mutableStateOf(5f) }
     var ratingComment by remember { mutableStateOf("") }
+
+    // A companion who leaves the list (e.g. the match was cancelled) must not stay selected.
+    LaunchedEffect(rateableCompanions) {
+        if (rateableCompanions.none { it.userId == ratingTarget?.userId }) ratingTarget = null
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -6824,17 +6543,17 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { navController.popBackStack() }) {
-                    Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+                    Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = SplitCruiserTextPrimary)
                 }
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Your Split Cruiser Account", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black)
+                Text("Your Split Cruiser Account", color = SplitCruiserTextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Black)
             }
 
             Spacer(modifier = Modifier.height(24.dp))
 
             // User Identity Card
             Card(
-                colors = CardDefaults.cardColors(containerColor = SplitCruiserCardBg),
+                colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
                 shape = RoundedCornerShape(16.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -6849,7 +6568,7 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
 
                     Text(
                         text = currentUser?.displayName ?: "Rider",
-                        color = Color.White,
+                        color = SplitCruiserTextPrimary,
                         fontWeight = FontWeight.Bold,
                         fontSize = 18.sp
                     )
@@ -6863,18 +6582,18 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(12.dp))
-                                    .background(SplitCruiserEmerald.copy(alpha = 0.15f))
+                                    .background(SplitCruiserSuccess.copy(alpha = 0.15f))
                                     .padding(horizontal = 8.dp, vertical = 4.dp)
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(
                                         imageVector = Icons.Default.Check,
                                         contentDescription = "Verified",
-                                        tint = SplitCruiserEmerald,
+                                        tint = SplitCruiserSuccess,
                                         modifier = Modifier.size(10.dp)
                                     )
                                     Spacer(modifier = Modifier.width(2.dp))
-                                    Text("Verified", color = SplitCruiserEmerald, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("Verified", color = SplitCruiserSuccess, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -6884,7 +6603,7 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
                     
                     Button(
                         onClick = { showEditProfileDialog = true },
-                        colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserSaffron.copy(alpha = 0.15f), contentColor = SplitCruiserSaffron),
+                        colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserPrimary.copy(alpha = 0.15f), contentColor = SplitCruiserPrimary),
                         shape = RoundedCornerShape(8.dp),
                         modifier = Modifier
                             .height(36.dp)
@@ -6896,27 +6615,27 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
-                    Divider(color = SplitCruiserDivider)
+                    Divider(color = SplitCruiserOutline)
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
                                 text = if (currentUser?.ratingCount ?: 0 > 0) String.format(Locale.US, "%.1f ★", currentUser!!.ratingAvg) else "N/A",
-                                color = SplitCruiserSaffron,
+                                color = SplitCruiserPrimary,
                                 fontWeight = FontWeight.Black,
                                 fontSize = 18.sp
                             )
-                            Text("Rating Avg", color = SplitCruiserLightGray, fontSize = 11.sp)
+                            Text("Rating Avg", color = SplitCruiserTextSecondary, fontSize = 11.sp)
                         }
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
                                 text = "${currentUser?.ratingCount ?: 0}",
-                                color = Color.White,
+                                color = SplitCruiserTextPrimary,
                                 fontWeight = FontWeight.Black,
                                 fontSize = 18.sp
                             )
-                            Text("Trips Shared", color = SplitCruiserLightGray, fontSize = 11.sp)
+                            Text("Trips Shared", color = SplitCruiserTextSecondary, fontSize = 11.sp)
                         }
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
@@ -6925,7 +6644,7 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
                                 fontWeight = FontWeight.Black,
                                 fontSize = 18.sp
                             )
-                            Text("No Shows", color = SplitCruiserLightGray, fontSize = 11.sp)
+                            Text("No Shows", color = SplitCruiserTextSecondary, fontSize = 11.sp)
                         }
                     }
                 }
@@ -6934,18 +6653,18 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
             Spacer(modifier = Modifier.height(20.dp))
 
             // Notification Preferences Settings
-            Text("NOTIFICATION PREFERENCES", color = SplitCruiserSaffron, fontSize = 11.sp, fontWeight = FontWeight.Black)
+            Text("NOTIFICATION PREFERENCES", color = SplitCruiserPrimary, fontSize = 11.sp, fontWeight = FontWeight.Black)
             Spacer(modifier = Modifier.height(8.dp))
 
             Card(
-                colors = CardDefaults.cardColors(containerColor = SplitCruiserCardBg),
+                colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
                         text = "Get real-time alerts whenever another rider posts a carpool trip that matches your exact active ride requests.",
-                        color = SplitCruiserLightGray,
+                        color = SplitCruiserTextSecondary,
                         fontSize = 12.sp,
                         lineHeight = 16.sp
                     )
@@ -6958,22 +6677,22 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Email, contentDescription = "Email Settings", tint = SplitCruiserSaffron)
+                            Icon(Icons.Default.Email, contentDescription = "Email Settings", tint = SplitCruiserPrimary)
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
-                                Text("Email Notifications", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                Text("Receive matching routes via inbox", color = SplitCruiserLightGray, fontSize = 10.sp)
+                                Text("Email Notifications", color = SplitCruiserTextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text("Receive matching routes via inbox", color = SplitCruiserTextSecondary, fontSize = 10.sp)
                             }
                         }
                         Switch(
                             checked = currentUser?.emailNotificationsEnabled ?: false,
                             onCheckedChange = { viewModel.toggleEmailNotifications(it) },
-                            colors = SwitchDefaults.colors(checkedThumbColor = SplitCruiserSaffron)
+                            colors = SwitchDefaults.colors(checkedThumbColor = SplitCruiserPrimary)
                         )
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
-                    Divider(color = SplitCruiserDivider)
+                    Divider(color = SplitCruiserOutline)
                     Spacer(modifier = Modifier.height(12.dp))
 
                     Row(
@@ -6982,17 +6701,17 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Notifications, contentDescription = "Push Settings", tint = SplitCruiserSaffron)
+                            Icon(Icons.Default.Notifications, contentDescription = "Push Settings", tint = SplitCruiserPrimary)
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
-                                Text("Push Notifications", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                Text("Instantly alert on device screen", color = SplitCruiserLightGray, fontSize = 10.sp)
+                                Text("Push Notifications", color = SplitCruiserTextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text("Instantly alert on device screen", color = SplitCruiserTextSecondary, fontSize = 10.sp)
                             }
                         }
                         Switch(
                             checked = currentUser?.pushNotificationsEnabled ?: false,
                             onCheckedChange = { viewModel.togglePushNotifications(it) },
-                            colors = SwitchDefaults.colors(checkedThumbColor = SplitCruiserSaffron)
+                            colors = SwitchDefaults.colors(checkedThumbColor = SplitCruiserPrimary)
                         )
                     }
                 }
@@ -7005,7 +6724,7 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("ACTIVE TRIP ALERT MATCHES", color = SplitCruiserSaffron, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                    Text("ACTIVE TRIP ALERT MATCHES", color = SplitCruiserPrimary, fontSize = 11.sp, fontWeight = FontWeight.Black)
                     TextButton(onClick = { viewModel.clearNotifications() }) {
                         Text("Clear All", color = Color.Red.copy(alpha = 0.8f), fontSize = 11.sp)
                     }
@@ -7015,7 +6734,7 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
                 userAlerts.forEach { alert ->
                     Card(
                         colors = CardDefaults.cardColors(
-                            containerColor = if (alert.isRead) SplitCruiserCardBg.copy(alpha = 0.5f) else SplitCruiserCardBg
+                            containerColor = if (alert.isRead) SplitCruiserSurfaceCard.copy(alpha = 0.5f) else SplitCruiserSurfaceCard
                         ),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
@@ -7023,7 +6742,7 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
                             .padding(bottom = 8.dp)
                             .border(
                                 width = if (alert.isRead) 0.dp else 1.dp,
-                                color = SplitCruiserSaffron.copy(alpha = 0.3f),
+                                color = SplitCruiserPrimary.copy(alpha = 0.3f),
                                 shape = RoundedCornerShape(12.dp)
                             )
                     ) {
@@ -7037,13 +6756,13 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
                                     Icon(
                                         imageVector = if (alert.type == "email") Icons.Default.Email else Icons.Default.Notifications,
                                         contentDescription = "Alert",
-                                        tint = if (alert.isRead) SplitCruiserLightGray else SplitCruiserSaffron,
+                                        tint = if (alert.isRead) SplitCruiserTextSecondary else SplitCruiserPrimary,
                                         modifier = Modifier.size(16.dp)
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
                                         text = alert.title,
-                                        color = if (alert.isRead) SplitCruiserLightGray else Color.White,
+                                        color = if (alert.isRead) SplitCruiserTextSecondary else SplitCruiserTextPrimary,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 12.sp
                                     )
@@ -7054,14 +6773,14 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
                                         contentPadding = PaddingValues(0.dp),
                                         modifier = Modifier.height(24.dp)
                                     ) {
-                                        Text("Mark Read", color = SplitCruiserSaffron, fontSize = 10.sp)
+                                        Text("Mark Read", color = SplitCruiserPrimary, fontSize = 10.sp)
                                     }
                                 }
                             }
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
                                 text = alert.message,
-                                color = SplitCruiserLightGray,
+                                color = SplitCruiserTextSecondary,
                                 fontSize = 11.sp,
                                 lineHeight = 15.sp
                             )
@@ -7073,11 +6792,11 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
             Spacer(modifier = Modifier.height(20.dp))
 
             // Safety Filters Settings
-            Text("SAFETY AND PRIVACY", color = SplitCruiserSaffron, fontSize = 11.sp, fontWeight = FontWeight.Black)
+            Text("SAFETY AND PRIVACY", color = SplitCruiserPrimary, fontSize = 11.sp, fontWeight = FontWeight.Black)
             Spacer(modifier = Modifier.height(8.dp))
 
             Card(
-                colors = CardDefaults.cardColors(containerColor = SplitCruiserCardBg),
+                colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -7088,22 +6807,22 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Female, contentDescription = "Women Filter", tint = Color(0xFFE91E63))
+                            Icon(Icons.Default.Female, contentDescription = "Women Filter", tint = SplitCruiserAccent)
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
-                                Text("Women-Only Filter", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                Text("Only match with other women", color = SplitCruiserLightGray, fontSize = 10.sp)
+                                Text("Women-Only Filter", color = SplitCruiserTextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text("Only match with other women", color = SplitCruiserTextSecondary, fontSize = 10.sp)
                             }
                         }
                         Switch(
                             checked = currentUser?.isWomenOnlyFilterEnabled ?: false,
                             onCheckedChange = { viewModel.toggleWomenOnlyFilter(it) },
-                            colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFFE91E63))
+                            colors = SwitchDefaults.colors(checkedThumbColor = SplitCruiserAccent)
                         )
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
-                    Divider(color = SplitCruiserDivider)
+                    Divider(color = SplitCruiserOutline)
                     Spacer(modifier = Modifier.height(12.dp))
 
                     Row(
@@ -7114,11 +6833,11 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Block, contentDescription = "Blocked", tint = SplitCruiserLightGray)
+                            Icon(Icons.Default.Block, contentDescription = "Blocked", tint = SplitCruiserTextSecondary)
                             Spacer(modifier = Modifier.width(12.dp))
-                            Text("Manage Blocked Users", color = Color.White, fontSize = 13.sp)
+                            Text("Manage Blocked Users", color = SplitCruiserTextPrimary, fontSize = 13.sp)
                         }
-                        Icon(imageVector = Icons.Default.ChevronRight, contentDescription = "Open", tint = SplitCruiserLightGray)
+                        Icon(imageVector = Icons.Default.ChevronRight, contentDescription = "Open", tint = SplitCruiserTextSecondary)
                     }
                 }
             }
@@ -7126,62 +6845,118 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
             Spacer(modifier = Modifier.height(20.dp))
 
             // Sub-Section: Fast submit mutual ratings
-            Text("SUBMIT COMPANION RATING", color = SplitCruiserSaffron, fontSize = 11.sp, fontWeight = FontWeight.Black)
-            Spacer(modifier = Modifier.height(8.dp))
+            Text("RATE SOMEONE YOU RODE WITH", color = SplitCruiserPrimary, fontSize = SplitCruiserTextSize.Eyebrow, fontWeight = FontWeight.Black)
+            Spacer(modifier = Modifier.height(SplitCruiserSpacing.Sm))
 
             Card(
-                colors = CardDefaults.cardColors(containerColor = SplitCruiserCardBg),
-                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
+                shape = RoundedCornerShape(SplitCruiserRadius.Md),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    OutlinedTextField(
-                        value = ratingTargetUserId,
-                        onValueChange = { ratingTargetUserId = it },
-                        label = { Text("Companion User ID (e.g. host_abc)") },
-                        placeholder = { Text("user_123") },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = SplitCruiserSaffron)
-                    )
+                Column(modifier = Modifier.padding(SplitCruiserSpacing.Lg)) {
+                    if (rateableCompanions.isEmpty()) {
+                        Text(
+                            text = "Once you've shared a ride, whoever you rode with shows up here to rate.",
+                            color = SplitCruiserTextSecondary,
+                            fontSize = SplitCruiserTextSize.Caption,
+                            lineHeight = 16.sp
+                        )
+                    } else {
+                        Text(
+                            text = "Who did you ride with?",
+                            color = SplitCruiserTextPrimary,
+                            fontSize = SplitCruiserTextSize.Caption,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(SplitCruiserSpacing.Sm))
 
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Text("Give Stars (1 to 5)", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Slider(
-                        value = ratingValue,
-                        onValueChange = { ratingValue = it },
-                        valueRange = 1f..5f,
-                        steps = 3,
-                        colors = SliderDefaults.colors(thumbColor = SplitCruiserSaffron, activeTrackColor = SplitCruiserSaffron)
-                    )
-                    Text("${ratingValue.toInt()} Stars Selected", color = SplitCruiserSaffron, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    OutlinedTextField(
-                        value = ratingComment,
-                        onValueChange = { ratingComment = it },
-                        label = { Text("Comment (Vouch notes)") },
-                        placeholder = { Text("Super friendly host, safe driving!") },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = SplitCruiserSaffron)
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Button(
-                        onClick = {
-                            if (ratingTargetUserId.isNotEmpty()) {
-                                viewModel.submitRating(ratingTargetUserId, ratingValue, ratingComment) {
-                                    ratingTargetUserId = ""
-                                    ratingComment = ""
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(SplitCruiserSpacing.Sm)) {
+                            items(rateableCompanions) { companion ->
+                                val isSelected = companion.userId == ratingTarget?.userId
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(SplitCruiserRadius.Pill))
+                                        .background(
+                                            if (isSelected) SplitCruiserPrimary
+                                            else SplitCruiserPrimaryContainer.copy(alpha = 0.4f)
+                                        )
+                                        .clickable { ratingTarget = companion }
+                                        .padding(horizontal = SplitCruiserSpacing.Md, vertical = SplitCruiserSpacing.Sm)
+                                        .testTag("rating_companion_${companion.userId}"),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = if (companion.wasHost) Icons.Default.DirectionsCar else Icons.Default.Person,
+                                        contentDescription = null,
+                                        tint = if (isSelected) SplitCruiserOnPrimary else SplitCruiserPrimary,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = companion.displayName,
+                                        color = if (isSelected) SplitCruiserOnPrimary else SplitCruiserTextPrimary,
+                                        fontSize = SplitCruiserTextSize.Caption,
+                                        fontWeight = FontWeight.Bold
+                                    )
                                 }
                             }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserSaffron),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Submit Star Rating", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+
+                        Spacer(modifier = Modifier.height(SplitCruiserSpacing.Md))
+
+                        Text(
+                            text = "How did it go?",
+                            color = SplitCruiserTextPrimary,
+                            fontSize = SplitCruiserTextSize.Caption,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Slider(
+                            value = ratingValue,
+                            onValueChange = { ratingValue = it },
+                            valueRange = 1f..5f,
+                            steps = 3,
+                            colors = SliderDefaults.colors(thumbColor = SplitCruiserPrimary, activeTrackColor = SplitCruiserPrimary)
+                        )
+                        Text(
+                            text = "${ratingValue.toInt()} of 5 stars",
+                            color = SplitCruiserPrimary,
+                            fontSize = SplitCruiserTextSize.Eyebrow,
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        Spacer(modifier = Modifier.height(SplitCruiserSpacing.Md))
+
+                        OutlinedTextField(
+                            value = ratingComment,
+                            onValueChange = { ratingComment = it },
+                            label = { Text("Add a note (optional)") },
+                            placeholder = { Text("Friendly, easy to find, safe driving") },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(SplitCruiserRadius.Md),
+                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = SplitCruiserPrimary)
+                        )
+
+                        Spacer(modifier = Modifier.height(SplitCruiserSpacing.Md))
+
+                        Button(
+                            onClick = {
+                                ratingTarget?.let { target ->
+                                    viewModel.submitRating(target.userId, ratingValue, ratingComment) {
+                                        ratingTarget = null
+                                        ratingComment = ""
+                                        ratingValue = 5f
+                                    }
+                                }
+                            },
+                            enabled = ratingTarget != null,
+                            shape = RoundedCornerShape(SplitCruiserRadius.Md),
+                            colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserPrimary),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("submit_rating_button")
+                        ) {
+                            Text("Submit rating", color = SplitCruiserOnPrimary, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
@@ -7247,19 +7022,25 @@ fun BlockedListScreen(viewModel: MainViewModel, navController: NavController) {
                             .fillMaxWidth()
                             .padding(bottom = 12.dp)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(SplitCruiserCardBg)
-                            .border(1.dp, SplitCruiserDivider, RoundedCornerShape(12.dp))
+                            .background(SplitCruiserSurfaceCard)
+                            .border(1.dp, SplitCruiserOutline, RoundedCornerShape(12.dp))
                             .padding(16.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Column {
                             Text(user.displayName, color = SplitCruiserTextPrimary, fontWeight = FontWeight.Bold)
-                            Text("User ID: ${user.id}", color = SplitCruiserLightGray, fontSize = 11.sp)
+                            // The Firebase uid used to be printed here. It means nothing to the
+                            // person reading it; "what happens if I unblock" does.
+                            Text(
+                                text = "Hidden from your feed and can't message you",
+                                color = SplitCruiserTextSecondary,
+                                fontSize = SplitCruiserTextSize.Eyebrow
+                            )
                         }
                         Button(
                             onClick = { viewModel.unblockUser(user.id) },
-                            colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserSaffron),
+                            colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserPrimary),
                             shape = RoundedCornerShape(8.dp)
                         ) {
                             Text("Unblock", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
@@ -7291,8 +7072,8 @@ fun DriverContactModal(
                 .fillMaxWidth()
                 .padding(16.dp),
             shape = RoundedCornerShape(24.dp),
-            color = SplitCruiserCardBg,
-            border = BorderStroke(1.dp, SplitCruiserDivider)
+            color = SplitCruiserSurfaceCard,
+            border = BorderStroke(1.dp, SplitCruiserOutline)
         ) {
             Column(
                 modifier = Modifier
@@ -7308,7 +7089,7 @@ fun DriverContactModal(
                 ) {
                     Text(
                         text = "DRIVER & CONTACT CARD",
-                        color = SplitCruiserSaffron,
+                        color = SplitCruiserPrimary,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Black,
                         letterSpacing = 1.sp
@@ -7320,7 +7101,7 @@ fun DriverContactModal(
                         Icon(
                             imageVector = Icons.Default.Close,
                             contentDescription = "Close",
-                            tint = SplitCruiserLightGray,
+                            tint = SplitCruiserTextSecondary,
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -7333,12 +7114,12 @@ fun DriverContactModal(
                     modifier = Modifier
                         .size(72.dp)
                         .clip(CircleShape)
-                        .background(SplitCruiserIndigo),
+                        .background(SplitCruiserPrimaryContainer),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = hostName.take(1).uppercase(),
-                        color = Color(0xFF001D36),
+                        color = SplitCruiserOnPrimaryContainer,
                         fontSize = 28.sp,
                         fontWeight = FontWeight.ExtraBold
                     )
@@ -7363,13 +7144,13 @@ fun DriverContactModal(
                         Icon(
                             imageVector = Icons.Default.Star,
                             contentDescription = "Rating",
-                            tint = Color(0xFFEAB308),
+                            tint = SplitCruiserWarning,
                             modifier = Modifier.size(14.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = String.format(Locale.US, "%.1f", hostRating),
-                            color = SplitCruiserLightGray,
+                            color = SplitCruiserTextSecondary,
                             fontSize = 12.sp
                         )
                     }
@@ -7379,12 +7160,12 @@ fun DriverContactModal(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
-                            .background(if (isVouched) SplitCruiserEmerald.copy(alpha = 0.2f) else SplitCruiserLightGray.copy(alpha = 0.2f))
+                            .background(if (isVouched) SplitCruiserSuccess.copy(alpha = 0.2f) else SplitCruiserTextSecondary.copy(alpha = 0.2f))
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
                             text = if (isVouched) "VERIFIED" else "UNVERIFIED",
-                            color = if (isVouched) SplitCruiserEmerald else SplitCruiserLightGray,
+                            color = if (isVouched) SplitCruiserSuccess else SplitCruiserTextSecondary,
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -7392,13 +7173,13 @@ fun DriverContactModal(
                 }
 
                 Spacer(modifier = Modifier.height(24.dp))
-                HorizontalDivider(color = SplitCruiserDivider)
+                HorizontalDivider(color = SplitCruiserOutline)
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // Contact Information
                 Text(
                     text = "CONTACT DETAILS",
-                    color = SplitCruiserLightGray,
+                    color = SplitCruiserTextSecondary,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.align(Alignment.Start)
@@ -7413,7 +7194,7 @@ fun DriverContactModal(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column {
-                        Text("Phone Number", color = SplitCruiserLightGray, fontSize = 11.sp)
+                        Text("Phone Number", color = SplitCruiserTextSecondary, fontSize = 11.sp)
                         Text(hostPhone, color = SplitCruiserTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                     }
                     IconButton(
@@ -7425,9 +7206,9 @@ fun DriverContactModal(
                                 Toast.makeText(context, "Cannot dial: ${e.message}", Toast.LENGTH_SHORT).show()
                             }
                         },
-                        colors = IconButtonDefaults.iconButtonColors(containerColor = SplitCruiserIndigo)
+                        colors = IconButtonDefaults.iconButtonColors(containerColor = SplitCruiserPrimaryContainer)
                     ) {
-                        Icon(imageVector = Icons.Default.Phone, contentDescription = "Call", tint = SplitCruiserSaffron)
+                        Icon(imageVector = Icons.Default.Phone, contentDescription = "Call", tint = SplitCruiserPrimary)
                     }
                 }
 
@@ -7440,7 +7221,7 @@ fun DriverContactModal(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column {
-                        Text("Email Address", color = SplitCruiserLightGray, fontSize = 11.sp)
+                        Text("Email Address", color = SplitCruiserTextSecondary, fontSize = 11.sp)
                         Text(hostEmail, color = SplitCruiserTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                     }
                     IconButton(
@@ -7452,20 +7233,20 @@ fun DriverContactModal(
                                 Toast.makeText(context, "Cannot email: ${e.message}", Toast.LENGTH_SHORT).show()
                             }
                         },
-                        colors = IconButtonDefaults.iconButtonColors(containerColor = SplitCruiserIndigo)
+                        colors = IconButtonDefaults.iconButtonColors(containerColor = SplitCruiserPrimaryContainer)
                     ) {
-                        Icon(imageVector = Icons.Default.Email, contentDescription = "Email", tint = SplitCruiserSaffron)
+                        Icon(imageVector = Icons.Default.Email, contentDescription = "Email", tint = SplitCruiserPrimary)
                     }
                 }
 
                 Spacer(modifier = Modifier.height(20.dp))
-                HorizontalDivider(color = SplitCruiserDivider)
+                HorizontalDivider(color = SplitCruiserOutline)
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // Vehicle Information
                 Text(
                     text = "VEHICLE DETAILS",
-                    color = SplitCruiserLightGray,
+                    color = SplitCruiserTextSecondary,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.align(Alignment.Start)
@@ -7481,13 +7262,13 @@ fun DriverContactModal(
                         modifier = Modifier
                             .size(40.dp)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(SplitCruiserIndigo),
+                            .background(SplitCruiserPrimaryContainer),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.DirectionsCar,
                             contentDescription = "Car",
-                            tint = SplitCruiserSaffron
+                            tint = SplitCruiserPrimary
                         )
                     }
                     Spacer(modifier = Modifier.width(16.dp))
@@ -7500,19 +7281,19 @@ fun DriverContactModal(
                         )
                         Text(
                             text = "Color: $vehicleColor • Year: $vehicleYear",
-                            color = SplitCruiserLightGray,
+                            color = SplitCruiserTextSecondary,
                             fontSize = 11.sp
                         )
                         Box(
                             modifier = Modifier
                                 .padding(top = 4.dp)
                                 .clip(RoundedCornerShape(4.dp))
-                                .background(SplitCruiserIndigo.copy(alpha = 0.3f))
+                                .background(SplitCruiserPrimaryContainer.copy(alpha = 0.3f))
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         ) {
                             Text(
                                 text = "License Plate: $vehiclePlate",
-                                color = SplitCruiserSaffron,
+                                color = SplitCruiserPrimary,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -7524,7 +7305,7 @@ fun DriverContactModal(
 
                 Button(
                     onClick = onDismiss,
-                    colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserSaffron),
+                    colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserPrimary),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -7544,7 +7325,7 @@ fun LocationAutoCompleteTextField(
     placeholder: String,
     modifier: Modifier = Modifier,
     testTag: String = "",
-    focusedBorderColor: Color = SplitCruiserEmerald,
+    focusedBorderColor: Color = SplitCruiserSuccess,
     leadingIcon: @Composable (() -> Unit)? = null
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -7611,14 +7392,14 @@ fun LocationAutoCompleteTextField(
                     }
                 }
                 .testTag(testTag),
-            shape = RoundedCornerShape(14.dp),
+            shape = RoundedCornerShape(SplitCruiserRadius.Md),
             leadingIcon = leadingIcon,
             trailingIcon = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (isSearchingPhoton) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(16.dp),
-                            color = SplitCruiserEmerald,
+                            color = SplitCruiserSuccess,
                             strokeWidth = 2.dp
                         )
                         Spacer(modifier = Modifier.width(6.dp))
@@ -7628,27 +7409,27 @@ fun LocationAutoCompleteTextField(
                             onValueChange("")
                             expanded = true
                         }) {
-                            Icon(Icons.Default.Clear, contentDescription = "Clear location", tint = SplitCruiserLightGray)
+                            Icon(Icons.Default.Clear, contentDescription = "Clear location", tint = SplitCruiserTextSecondary)
                         }
                     }
                     IconButton(onClick = { expanded = !expanded }) {
                         Icon(
                             if (expanded) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown,
                             contentDescription = "Toggle location suggestions",
-                            tint = SplitCruiserLightGray
+                            tint = SplitCruiserTextSecondary
                         )
                     }
                 }
             },
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = focusedBorderColor,
-                unfocusedBorderColor = SplitCruiserDivider,
+                unfocusedBorderColor = SplitCruiserOutline,
                 focusedTextColor = SplitCruiserTextPrimary,
                 unfocusedTextColor = SplitCruiserTextPrimary,
                 focusedLabelColor = focusedBorderColor,
-                unfocusedLabelColor = SplitCruiserLightGray,
-                focusedContainerColor = SplitCruiserCardBg,
-                unfocusedContainerColor = SplitCruiserCardBg
+                unfocusedLabelColor = SplitCruiserTextSecondary,
+                focusedContainerColor = SplitCruiserSurfaceCard,
+                unfocusedContainerColor = SplitCruiserSurfaceCard
             ),
             singleLine = true
         )
@@ -7662,9 +7443,9 @@ fun LocationAutoCompleteTextField(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 6.dp),
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF202634)),
-                border = BorderStroke(1.dp, SplitCruiserDivider),
+                shape = RoundedCornerShape(SplitCruiserRadius.Md),
+                colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
+                border = BorderStroke(1.dp, SplitCruiserOutline),
                 elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
             ) {
                 Column(
@@ -7683,14 +7464,14 @@ fun LocationAutoCompleteTextField(
                             text = if (photonResults.isNotEmpty()) "OPENSTREETMAP PHOTON SUGGESTIONS" else if (value.isBlank()) "POPULAR CAMPUS & TRANSIT SPOTS" else "AUTO MATCHING PLACES",
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (photonResults.isNotEmpty()) Color(0xFF38BDF8) else SplitCruiserSaffron,
+                            color = if (photonResults.isNotEmpty()) Color(0xFF38BDF8) else SplitCruiserPrimary,
                             letterSpacing = 0.5.sp
                         )
 
                         Row(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(SplitCruiserEmerald.copy(alpha = 0.15f))
+                                .background(SplitCruiserSuccess.copy(alpha = 0.15f))
                                 .clickable {
                                     if (!isReverseGeocodingGps) {
                                         isReverseGeocodingGps = true
@@ -7712,18 +7493,18 @@ fun LocationAutoCompleteTextField(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             if (isReverseGeocodingGps) {
-                                CircularProgressIndicator(modifier = Modifier.size(10.dp), color = SplitCruiserEmerald, strokeWidth = 1.5.dp)
+                                CircularProgressIndicator(modifier = Modifier.size(10.dp), color = SplitCruiserSuccess, strokeWidth = 1.5.dp)
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Nominatim GPS...", fontSize = 10.sp, color = SplitCruiserEmerald, fontWeight = FontWeight.Bold)
+                                Text("Nominatim GPS...", fontSize = 10.sp, color = SplitCruiserSuccess, fontWeight = FontWeight.Bold)
                             } else {
-                                Icon(Icons.Default.MyLocation, contentDescription = null, tint = SplitCruiserEmerald, modifier = Modifier.size(12.dp))
+                                Icon(Icons.Default.MyLocation, contentDescription = null, tint = SplitCruiserSuccess, modifier = Modifier.size(12.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Use GPS (Nominatim)", fontSize = 10.sp, color = SplitCruiserEmerald, fontWeight = FontWeight.Bold)
+                                Text("Use GPS (Nominatim)", fontSize = 10.sp, color = SplitCruiserSuccess, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
 
-                    HorizontalDivider(color = SplitCruiserDivider, thickness = 0.5.dp, modifier = Modifier.padding(vertical = 4.dp))
+                    HorizontalDivider(color = SplitCruiserOutline, thickness = 0.5.dp, modifier = Modifier.padding(vertical = 4.dp))
 
                     filteredPlaces.forEach { place ->
                         Row(
@@ -7743,9 +7524,9 @@ fun LocationAutoCompleteTextField(
                                     .clip(CircleShape)
                                     .background(
                                         when (place.category) {
-                                            "Campus" -> Color(0xFF3B82F6).copy(alpha = 0.2f)
-                                            "Airport" -> Color(0xFFEAB308).copy(alpha = 0.2f)
-                                            "Transit" -> Color(0xFF10B981).copy(alpha = 0.2f)
+                                            "Campus" -> SplitCruiserInfo.copy(alpha = 0.2f)
+                                            "Airport" -> SplitCruiserWarning.copy(alpha = 0.2f)
+                                            "Transit" -> SplitCruiserSuccess.copy(alpha = 0.2f)
                                             "Neighborhood" -> Color(0xFFA855F7).copy(alpha = 0.2f)
                                             else -> Color(0xFF38BDF8).copy(alpha = 0.2f)
                                         }
@@ -7764,7 +7545,7 @@ fun LocationAutoCompleteTextField(
                                     tint = when (place.category) {
                                         "Campus" -> Color(0xFF60A5FA)
                                         "Airport" -> Color(0xFFFACC15)
-                                        "Transit" -> SplitCruiserEmerald
+                                        "Transit" -> SplitCruiserSuccess
                                         "Neighborhood" -> Color(0xFFC084FC)
                                         else -> Color(0xFF38BDF8)
                                     },
@@ -7785,7 +7566,7 @@ fun LocationAutoCompleteTextField(
                                 )
                                 Text(
                                     text = place.address,
-                                    color = SplitCruiserLightGray,
+                                    color = SplitCruiserTextSecondary,
                                     fontSize = 11.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -7796,11 +7577,11 @@ fun LocationAutoCompleteTextField(
 
                             Surface(
                                 shape = RoundedCornerShape(6.dp),
-                                color = SplitCruiserCardBg
+                                color = SplitCruiserSurfaceCard
                             ) {
                                 Text(
                                     text = place.category,
-                                    color = SplitCruiserLightGray,
+                                    color = SplitCruiserTextSecondary,
                                     fontSize = 9.sp,
                                     fontWeight = FontWeight.Medium,
                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -7829,7 +7610,7 @@ fun GoogleMapsMatrixCard(
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E2430)),
+        colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
         border = BorderStroke(1.dp, Color(0xFF4285F4).copy(alpha = 0.5f))
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
@@ -7981,7 +7762,7 @@ fun GoogleMapsMatrixCard(
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
                         "Calculating route...",
-                        color = SplitCruiserLightGray,
+                        color = SplitCruiserTextSecondary,
                         fontSize = 12.sp
                     )
                 }
@@ -7992,32 +7773,32 @@ fun GoogleMapsMatrixCard(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("ESTIMATED DISTANCE", fontSize = 9.sp, color = SplitCruiserLightGray, fontWeight = FontWeight.Bold)
+                        Text("ESTIMATED DISTANCE", fontSize = 9.sp, color = SplitCruiserTextSecondary, fontWeight = FontWeight.Bold)
                         Text(data.distanceText, fontSize = 14.sp, color = Color(0xFF4285F4), fontWeight = FontWeight.ExtraBold)
                     }
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("DRIVING TIME", fontSize = 9.sp, color = SplitCruiserLightGray, fontWeight = FontWeight.Bold)
+                        Text("DRIVING TIME", fontSize = 9.sp, color = SplitCruiserTextSecondary, fontWeight = FontWeight.Bold)
                         Text(data.durationText, fontSize = 14.sp, color = Color(0xFF34A853), fontWeight = FontWeight.ExtraBold)
                     }
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
-                HorizontalDivider(color = SplitCruiserDivider.copy(alpha = 0.5f))
+                HorizontalDivider(color = SplitCruiserOutline.copy(alpha = 0.5f))
                 Spacer(modifier = Modifier.height(8.dp))
 
-                Text("ROUTE SUMMARY", fontSize = 9.sp, color = SplitCruiserSaffron, fontWeight = FontWeight.Bold)
+                Text("ROUTE SUMMARY", fontSize = 9.sp, color = SplitCruiserPrimary, fontWeight = FontWeight.Bold)
                 Text(data.routeSummary, fontSize = 12.sp, color = SplitCruiserTextPrimary, maxLines = 2, overflow = TextOverflow.Ellipsis)
 
                 Spacer(modifier = Modifier.height(6.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.School, contentDescription = null, tint = Color(0xFFA855F7), modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text(data.universityContext, fontSize = 11.sp, color = SplitCruiserLightGray)
+                    Text(data.universityContext, fontSize = 11.sp, color = SplitCruiserTextSecondary)
                 }
 
                 Spacer(modifier = Modifier.height(6.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.MyLocation, contentDescription = null, tint = SplitCruiserEmerald, modifier = Modifier.size(14.dp))
+                    Icon(Icons.Default.MyLocation, contentDescription = null, tint = SplitCruiserSuccess, modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("Pickup Hub: ${data.pickupRecommendation}", fontSize = 11.sp, color = SplitCruiserTextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }

@@ -11,7 +11,10 @@ iosApp/
 ├── iosApp.xcodeproj/          # Xcode project (auto-generated)
 ├── iosApp/
 │   ├── iOSApp.swift           # App entry point (@main)
+│   ├── Theme.swift            # Brand palette + shared views, read from `:shared` tokens
 │   ├── ContentView.swift       # Main navigation & tabs
+│   ├── RideDetailView.swift   # The pre-booking trust screen
+│   ├── ChatView.swift         # Coordinating a pickup after a match
 │   ├── ViewModel.swift         # iOS-Swift bridge to shared models
 │   ├── Info.plist             # App configuration
 │   ├── LaunchScreen.storyboard # Launch screen UI
@@ -37,12 +40,14 @@ iosApp/
 
 ### 1. Authentication
 **Screen:** `LoginView`
-- Phone number + password login
-- Sign-up for new users
+- Email + password login, matching Android. It asked for a phone number until 2026-07; no
+  backend ever authenticated against one.
+- Sign-up for new users, with the same client-side checks Android does: 6-character minimum and
+  a confirm-password field.
 - Error handling and loading states
 
 **ViewModel Methods:**
-- `loginUser(phoneNumber:password:)` - Authenticate user
+- `logIn(email:password:)` / `signUp(email:password:)` - Authenticate user
 - `currentUser` - Published user state
 
 ### 2. Browse Rides (Home Tab)
@@ -70,16 +75,24 @@ iosApp/
 - `activeRequests` - User's ride requests
 - `userMatches` - Active ride matches
 
-### 4. Messages
-**Screen:** `MessagesTabView`
-- (Placeholder for future messaging UI)
-- Will integrate with shared `Message` model
+### 4. Matches and chat
+**Screens:** `MatchesTabView` → `ChatView`
+- Accept or decline a pending match
+- Once accepted, open the conversation: message thread, quick replies, and a structured
+  pickup proposal the other side can confirm
+- Messages arrive through `repository.observeChat(matchId:)`, polled every 3s while open —
+  Firestore's realtime channel is gRPC-only, so there are no snapshot listeners
+
+**Message types** are a real field (`Message.type`, see `MessageType` in `:shared`), not a
+`[PROPOSAL]` prefix parsed out of the text.
 
 ### 5. Profile
 **Screen:** `ProfileTabView`
-- User information (name, email, phone)
+- The user's own avatar (`avatarUrl`, falling back to initials), name, email and contact number
 - Rating and statistics
 - Logout functionality
+- Backend connectivity appears **only in debug builds**. It used to sit alongside the rating
+  with the same visual weight, which is developer instrumentation shipped to riders.
 
 **Data:**
 - `currentUser: User?` - Current logged-in user
@@ -240,12 +253,15 @@ To test a specific view:
 3. Adjust `AppViewModel` initialization for test data
 
 ### Manual Testing Checklist
-- [ ] Login with phone number
+- [ ] Login with email
 - [ ] Sign up new account
 - [ ] Browse available rides
 - [ ] Request a ride
 - [ ] View my posted rides
 - [ ] Check profile information
+- [ ] Open a ride's detail screen: host rating, vehicle, contact, cost breakdown, passengers
+- [ ] Accept a match, then open the chat and confirm a pickup proposal
+- [ ] Onboarding stores a phone number and home address; a new ride request prefills its pickup
 - [ ] Logout
 - [ ] Network error handling
 - [ ] Shared.framework linking verification

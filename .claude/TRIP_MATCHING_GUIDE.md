@@ -156,7 +156,7 @@ messages/{messageId}
 ├── id: String                          // Unique message ID (msg_xxxxx)
 ├── matchId: String                     // Reference to trip_matches/{matchId}
 ├── senderId: String                    // Sender user ID or "system"
-├── senderName: String                  // Display name or "Split CruiserBot"
+├── senderName: String                  // Display name or ""Split Cruiser" (the system sender name)"
 ├── text: String                        // Message content
 └── timestamp: Long                     // Unix timestamp (milliseconds)
 ```
@@ -169,7 +169,7 @@ messages/{messageId}
 - Stored with user ID and display name
 
 **2. System Messages**
-- Sent by Split CruiserBot (senderId = "system")
+- Sent by "Split Cruiser" (the system sender name) (senderId = "system")
 - Announce match events:
   - "Match created! Waiting for driver to confirm."
   - "Trip request accepted by host! You can now chat and coordinate cash-in-person split."

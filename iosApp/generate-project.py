@@ -21,6 +21,25 @@ def generate_id(name, length=24):
     return uuid.uuid5(_ID_NAMESPACE, name).hex[:length].upper()
 
 
+# Every Swift file the app target compiles, in compile order. Adding a file here is the whole
+# change: the PBXBuildFile, PBXFileReference, group child and Sources build-phase entries are all
+# derived from this list. They used to be written out by hand in four places, which is how
+# ViewModel.swift ended up on disk, defining AppViewModel, and never compiled.
+SWIFT_SOURCES = [
+    "iOSApp.swift",
+    "Theme.swift",
+    "ContentView.swift",
+    "RideDetailView.swift",
+    "ChatView.swift",
+    "ViewModel.swift",
+]
+
+
+def _swift_key(filename):
+    """The `ids` key for a Swift source, e.g. "ContentView.swift" -> "contentview_swift"."""
+    return filename.replace(".swift", "").lower() + "_swift"
+
+
 def create_xcode_project():
     """Create a complete iOS Xcode project structure."""
 
@@ -48,9 +67,6 @@ def create_xcode_project():
         "frameworks_build_phase": generate_id("frameworks_build_phase"),
         "sources_build_phase": generate_id("sources_build_phase"),
         "resources_build_phase": generate_id("resources_build_phase"),
-        "iosapp_swift": generate_id("iosapp_swift"),
-        "contentview_swift": generate_id("contentview_swift"),
-        "viewmodel_swift": generate_id("viewmodel_swift"),
         "info_plist": generate_id("info_plist"),
         "assets": generate_id("assets"),
         "launchscreen": generate_id("launchscreen"),
@@ -62,11 +78,6 @@ def create_xcode_project():
         "project_debug": generate_id("project_debug"),
         "project_release": generate_id("project_release"),
         # PBXFileReference ids, distinct from the PBXBuildFile ids above.
-        "iosapp_swift_ref": generate_id("iosapp_swift_ref"),
-        "contentview_swift_ref": generate_id("contentview_swift_ref"),
-        # ViewModel.swift existed on disk and defined AppViewModel, but was never added to the
-        # project, so it was never compiled and ContentView could not resolve AppViewModel.
-        "viewmodel_swift_ref": generate_id("viewmodel_swift_ref"),
         "info_plist_ref": generate_id("info_plist_ref"),
         "assets_ref": generate_id("assets_ref"),
         "launchscreen_ref": generate_id("launchscreen_ref"),
@@ -77,6 +88,32 @@ def create_xcode_project():
         "target_config_list": generate_id("target_config_list"),
     }
 
+    # Two ids per Swift source: the PBXBuildFile and the PBXFileReference it points at.
+    for source in SWIFT_SOURCES:
+        key = _swift_key(source)
+        ids[key] = generate_id(key)
+        ids[f"{key}_ref"] = generate_id(f"{key}_ref")
+
+    def swift_lines(template, indent="\t\t"):
+        return "\n".join(
+            indent + template.format(
+                build=ids[_swift_key(name)],
+                ref=ids[f"{_swift_key(name)}_ref"],
+                name=name,
+            )
+            for name in SWIFT_SOURCES
+        )
+
+    swift_build_files = swift_lines(
+        "{build} /* {name} in Sources */ = {{isa = PBXBuildFile; fileRef = {ref} /* {name} */; }};"
+    )
+    swift_file_refs = swift_lines(
+        "{ref} /* {name} */ = {{isa = PBXFileReference; lastKnownFileType = sourcecode.swift; "
+        "path = {name}; sourceTree = \"<group>\"; }};"
+    )
+    swift_group_children = swift_lines("{ref} /* {name} */,", indent="\t\t\t\t")
+    swift_sources_phase = swift_lines("{build} /* {name} in Sources */,", indent="\t\t\t\t")
+
     pbxproj = f"""// !$*UTF8*$!
 {{
 	archiveVersion = 1;
@@ -85,9 +122,7 @@ def create_xcode_project():
 	objectVersion = 56;
 	objects = {{
 /* Begin PBXBuildFile section */
-		{ids['iosapp_swift']} /* iOSApp.swift in Sources */ = {{isa = PBXBuildFile; fileRef = {ids['iosapp_swift_ref']} /* iOSApp.swift */; }};
-		{ids['contentview_swift']} /* ContentView.swift in Sources */ = {{isa = PBXBuildFile; fileRef = {ids['contentview_swift_ref']} /* ContentView.swift */; }};
-		{ids['viewmodel_swift']} /* ViewModel.swift in Sources */ = {{isa = PBXBuildFile; fileRef = {ids['viewmodel_swift_ref']} /* ViewModel.swift */; }};
+{swift_build_files}
 		{ids['assets']} /* Assets.xcassets in Resources */ = {{isa = PBXBuildFile; fileRef = {ids['assets_ref']} /* Assets.xcassets */; }};
 		{ids['launchscreen']} /* LaunchScreen.storyboard in Resources */ = {{isa = PBXBuildFile; fileRef = {ids['launchscreen_ref']} /* LaunchScreen.storyboard */; }};
 		{ids['shared_framework_build']} /* Shared.xcframework in Frameworks */ = {{isa = PBXBuildFile; fileRef = {ids['shared_framework_ref']} /* Shared.xcframework */; }};
@@ -95,9 +130,7 @@ def create_xcode_project():
 
 /* Begin PBXFileReference section */
 		{ids['app_product']} /* iosApp.app */ = {{isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = iosApp.app; sourceTree = BUILT_PRODUCTS_DIR; }};
-		{ids['iosapp_swift_ref']} /* iOSApp.swift */ = {{isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp.swift; sourceTree = "<group>"; }};
-		{ids['contentview_swift_ref']} /* ContentView.swift */ = {{isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; }};
-		{ids['viewmodel_swift_ref']} /* ViewModel.swift */ = {{isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewModel.swift; sourceTree = "<group>"; }};
+{swift_file_refs}
 		{ids['info_plist_ref']} /* Info.plist */ = {{isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; }};
 		{ids['assets_ref']} /* Assets.xcassets */ = {{isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; }};
 		{ids['launchscreen_ref']} /* LaunchScreen.storyboard */ = {{isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; }};
@@ -136,9 +169,7 @@ def create_xcode_project():
 		{ids['iosapp_group']} /* iosApp */ = {{
 			isa = PBXGroup;
 			children = (
-				{ids['iosapp_swift_ref']} /* iOSApp.swift */,
-				{ids['contentview_swift_ref']} /* ContentView.swift */,
-				{ids['viewmodel_swift_ref']} /* ViewModel.swift */,
+{swift_group_children}
 				{ids['resources_group']} /* Resources */,
 			);
 			path = iosApp;
@@ -233,9 +264,7 @@ def create_xcode_project():
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				{ids['iosapp_swift']} /* iOSApp.swift in Sources */,
-				{ids['contentview_swift']} /* ContentView.swift in Sources */,
-				{ids['viewmodel_swift']} /* ViewModel.swift in Sources */,
+{swift_sources_phase}
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		}};

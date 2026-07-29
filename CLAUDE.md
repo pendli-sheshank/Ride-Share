@@ -27,6 +27,17 @@ syntax in seconds; three separate CI failures here would have been caught by it.
 The Android SDK is not preinstalled in the Claude Code container — see §6 of the skill for the
 one-time install.
 
+## Design
+
+**`.claude/DESIGN_SYSTEM.md` holds the colour/spacing/radius tokens, the voice guide, and the
+cross-platform parity checklist.** Read it before adding a colour, writing user-facing copy, or
+changing a screen that exists on both platforms.
+
+The short version: colours live once, in `shared/.../ui/theme/Color.kt`, and both platforms wrap
+them. Their names describe what they render as — they used to describe an earlier saffron/indigo
+brand while holding Material baseline blue, which is how `ProfileScreen` ended up drawing white
+text on a white card.
+
 ## Layout
 
 | Path | What |
@@ -78,13 +89,16 @@ not evidence. Verify against a build.
 ## Known gaps
 
 - **The UI is not shared.** The backend is, but Android is Jetpack Compose in `:app` and iOS is
-  SwiftUI in `iosApp/`, so every screen exists twice. iOS covers a subset: auth, browse, post an
-  offer, post a request, reserve a seat, accept/decline. No chat, ratings, blocking or profile
-  pictures yet. **Google sign-in is Android-only** — the token exchange is in `:shared`, but only
-  Android acquires a Google ID token (Credential Manager); iOS would need an
-  `ASWebAuthenticationSession` flow and a URL scheme in the generated Xcode project.
-  Sharing the UI would mean Compose Multiplatform and moving `SplitCruiserApp.kt` into
-  `commonMain`.
+  SwiftUI in `iosApp/`, so every screen exists twice. Design *tokens* are now shared, and iOS
+  covers auth, onboarding (including phone/address/vehicle), browse, a full ride-detail screen,
+  post an offer, post a request, reserve a seat, accept/decline, and chat. Still Android-only:
+  host analytics, blocked-user management, profile editing and picture upload, and ratings.
+  **Google sign-in is Android-only** — the token exchange is in `:shared`, but only Android
+  acquires a Google ID token (Credential Manager); iOS would need an `ASWebAuthenticationSession`
+  flow and a URL scheme in the generated Xcode project. Sharing the UI itself would mean Compose
+  Multiplatform and moving `SplitCruiserApp.kt` into `commonMain`.
+  **Nothing keeps the two in sync automatically** — use the parity checklist in
+  `.claude/DESIGN_SYSTEM.md` at PR time.
 - **iOS keeps the refresh token in `NSUserDefaults`, not the Keychain.** It is a long-lived
   credential sitting in a plaintext plist that is included in unencrypted backups. `KeychainStore`
   is the fix; it was deferred because Keychain cinterop cannot be compile-checked on Linux.
@@ -97,6 +111,11 @@ not evidence. Verify against a build.
   filename.
 - The `google-services` and `secrets` Gradle plugins are inert on `:app` now that no native
   Firebase SDK consumes them.
-- Test coverage: 135 tests in `:shared` cover the codec, the REST clients, token refresh, the feed
-  rules and the repository. `:app` has three (a Robolectric label check, a Roborazzi screenshot,
-  and an arithmetic placeholder); the androidTest suite is still not run by any CI job.
+- **`Theme.swift` reads the shared tokens through the Kotlin/Native ObjC export**
+  (`SplitCruiserColors.shared.Primary`). That cannot be compile-checked on Linux; if the exported
+  property names turn out to differ, it is a one-token fix, and the whole mapping is in one file.
+- Test coverage: 142 tests in `:shared` cover the codec, the REST clients, token refresh, the feed
+  rules, the repository and chat message types. `:app` has three unit tests (a Robolectric label
+  check, a Roborazzi screenshot, and an arithmetic placeholder). The androidTest suite now renders
+  real composables instead of asserting on local variables — but **no CI job runs it**, so it is
+  only as good as whoever remembers to run it locally.

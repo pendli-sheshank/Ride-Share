@@ -15,8 +15,9 @@ import org.junit.runner.RunWith
 class ExampleInstrumentedTest {
   @Test
   fun useAppContext() {
-    // Context of the app under test.
+    // Context of the app under test. This asserted "com.example" — the template's package, not
+    // this app's — so it could only ever have passed by never being run.
     val appContext = InstrumentationRegistry.getInstrumentation().targetContext
-    assertEquals("com.example", appContext.packageName)
+    assertEquals("com.splitcruiser.app", appContext.packageName)
   }
 }

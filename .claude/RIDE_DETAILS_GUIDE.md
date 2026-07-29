@@ -532,12 +532,12 @@ host_dashboard
 ## Material 3 Design
 
 ### Colors
-- **Primary Action:** Split CruiserSaffron (#0061A4) - Blue
-- **Success:** Split CruiserEmerald (#10B981) - Green  
+- **Primary Action:** SplitCruiserPrimary (#0061A4) — blue
+- **Success:** SplitCruiserSuccess (#10B981) — green  
 - **Warning:** Amber (#D97706) - Orange
 - **Danger:** Red (#DC2626) - Red
-- **Divider:** Split CruiserDivider (#E2E8F0) - Light Gray
-- **Text:** Split CruiserTextPrimary (#0F172A) - Dark
+- **Divider:** SplitCruiserOutline (#E2E8F0) — hairline grey
+- **Text:** SplitCruiserTextPrimary (#0F172A) — near-black
 
 ### Typography
 - **Header:** 20sp Bold

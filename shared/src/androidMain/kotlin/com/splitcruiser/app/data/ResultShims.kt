@@ -89,8 +89,13 @@ suspend fun SplitCruiserRepository.blockUserResult(blockedUserId: String): Resul
 suspend fun SplitCruiserRepository.unblockUserResult(blockedUserId: String): Result<Unit> =
     runCatching { unblockUser(blockedUserId) }
 
-suspend fun SplitCruiserRepository.sendMessageResult(matchId: String, text: String): Result<Unit> =
-    runCatching { sendMessage(matchId, text) }
+suspend fun SplitCruiserRepository.sendMessageResult(
+    matchId: String,
+    text: String,
+    type: String = MessageType.TEXT,
+    pickupSpot: String = "",
+    pickupTime: String = "",
+): Result<Unit> = runCatching { sendMessage(matchId, text, type, pickupSpot, pickupTime) }
 
 suspend fun SplitCruiserRepository.uploadProfilePictureResult(
     userId: String,

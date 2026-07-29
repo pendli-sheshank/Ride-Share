@@ -1128,6 +1128,66 @@ has no way to know two Known Issues entries are both worth keeping rather than a
 other. When resolving a conflict here, default to keeping every entry present on either side unless
 one clearly supersedes the other.
 
+### 2026-07-29 — a `private companion object` on a `@Serializable` class broke 33 tests at runtime
+
+`Message` grew a `type` field, plus two constants for the legacy `[PROPOSAL]`/`[CONFIRMED]`
+prefixes, which were parked in a `private companion object` on the data class. It compiled cleanly.
+Then 33 `SplitCruiserRepositoryTest` cases failed, all with the same misleading symptom:
+
+```
+java.lang.RuntimeException: Method w in android.util.Log not mocked.
+	at com.splitcruiser.app.data.Platform_androidKt.logWarn(Platform.android.kt:10)
+	at ...SplitCruiserRepository.loadSignedInUser(SplitCruiserRepository.kt:423)
+```
+
+**Cause:** kotlinx.serialization generates `serializer()` on the class's companion object. Declaring
+that companion `private` makes the generated accessor private too, and every `serializer<Message>()`
+call site fails at runtime with
+
+```
+java.lang.IllegalAccessError: class ...SplitCruiserRepository tried to access
+private field com.splitcruiser.app.data.Message.Companion
+```
+
+`refreshChat` was the first caller, inside a `runCatching { refreshNow() }` in `loadSignedInUser`,
+so the real error was swallowed and re-surfaced as the unmocked-`Log` exception from the `logWarn`
+in the failure branch. The stack trace points at logging, not at serialization.
+
+**Fix:** move the constants to file-private top-level `const val`s. Never put a `private companion
+object` on a `@Serializable` class.
+
+**Recognising it:** "Method w in android.util.Log not mocked" from `logWarn` in a `:shared` unit
+test almost never means what it says — it means something inside the `runCatching` above it threw.
+Print the swallowed throwable before believing the trace.
+
+---
+
+### 2026-07-29 — UI/UX audit: token rename, shared components, and iOS parity
+
+A static audit of `SplitCruiserApp.kt` and the SwiftUI app produced a large change. What matters
+here, for whoever hits a red build afterwards:
+
+- **Colour tokens were renamed** (`SplitCruiserSaffron` → `SplitCruiserPrimary`, `Indigo` →
+  `PrimaryContainer`, `DarkBg` → `Surface`, `CardBg` → `SurfaceCard`, `Emerald` → `Success`,
+  `LightGray` → `TextSecondary` (merged with the identical `TextSecondary`), `Divider` → `Outline`)
+  and moved out of `SplitCruiserApp.kt` into `app/.../ui/theme/Color.kt`, which now wraps the
+  shared `SplitCruiserColors`. `MyApplicationTheme` is now `SplitCruiserTheme` and builds a real
+  `ColorScheme` with **dynamic colour off**. A branch that predates this will conflict on every
+  line touching a colour; the rename is mechanical (`sed`), the theme file is not.
+- **`app/src/main/res/values/colors.xml` was deleted** — a 100%-Compose codebase referenced none
+  of it.
+- **Three new Swift files** (`Theme.swift`, `RideDetailView.swift`, `ChatView.swift`).
+  `generate-project.py` now derives every pbxproj entry from a single `SWIFT_SOURCES` list, so
+  adding a Swift file is a one-line change instead of four hand-written blocks. Existing files'
+  ids are unchanged — regenerating produced a 12-line diff, all additions.
+- **`Theme.swift` reads the shared tokens over the ObjC export** (`SplitCruiserColors.shared.Primary`,
+  `SplitCruiserScale.shared.SpaceMd`). **This cannot be compile-checked on Linux.** If the macOS
+  runner reports unresolved members, the property names are the thing to check — the whole mapping
+  is in `Theme.swift`'s `Brand` and `BrandScale` enums, nowhere else.
+- **`Message` gained `type` / `pickupSpot` / `pickupTime`**, and `sendMessage` gained a 5-argument
+  overload. Both overloads are exported to Swift; ObjC selectors differ by argument labels, so
+  neither is mangled away.
+
 ---
 
 ## 8. Pre-flight checklist before merging to `main`
@@ -1147,6 +1207,12 @@ one clearly supersedes the other.
 - [ ] If `GOOGLE_WEB_CLIENT_ID` is set: it is the **Web** client ID, and this build's signing
       SHA-1 is registered on the Android app in the Firebase console (§4)
 - [ ] Nothing exported to Swift returns `Result` or `Pair`, or relies on a default argument
+- [ ] No `private companion object` on a `@Serializable` class — it compiles and then fails at
+      runtime with `IllegalAccessError` on the generated `serializer()`
+- [ ] A new Swift file was added to `SWIFT_SOURCES` in `generate-project.py` and the project
+      regenerated, or Xcode will not compile it
+- [ ] If a screen in `.claude/DESIGN_SYSTEM.md`'s parity table changed, both platforms changed —
+      or the PR says why not
 
 ## 9. Rollback
 

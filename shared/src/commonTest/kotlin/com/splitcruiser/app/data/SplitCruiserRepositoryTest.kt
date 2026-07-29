@@ -576,7 +576,7 @@ class SplitCruiserRepositoryTest {
         val messageWrite = requests.first {
             it.url.toString().contains("/documents/messages/") && it.method.value == "PATCH"
         }
-        assertContains((messageWrite.body as TextContent).text, "accepted by the host")
+        assertContains((messageWrite.body as TextContent).text, "You're in!")
     }
 
     @Test
