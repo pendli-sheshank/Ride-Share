@@ -51,6 +51,7 @@ object RideFactory {
         costPerRider: Double,
         womenOnly: Boolean,
         vehicleInfo: String,
+        exitLocation: String,
     ): TripOffer = TripOffer(
         origin = origin,
         destination = destination,
@@ -64,6 +65,7 @@ object RideFactory {
         costPerRider = costPerRider,
         womenOnly = womenOnly,
         vehicleInfo = vehicleInfo,
+        exitLocation = exitLocation,
     )
 
     fun newRideRequest(
@@ -77,6 +79,7 @@ object RideFactory {
         seatsNeeded: Int,
         notes: String,
         womenOnly: Boolean,
+        exitLocation: String,
     ): RideRequest = RideRequest(
         origin = origin,
         destination = destination,
@@ -88,5 +91,6 @@ object RideFactory {
         seatsNeeded = seatsNeeded,
         notes = notes,
         womenOnly = womenOnly,
+        exitLocation = exitLocation,
     )
 }

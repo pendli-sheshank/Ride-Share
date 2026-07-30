@@ -227,6 +227,7 @@ class SplitCruiserRepositoryTest {
                 costPerRider = 12.0,
                 womenOnly = false,
                 vehicleInfo = "Blue Civic",
+                exitLocation = "",
             )
         )
         val posted = repo.getHostedRides("me").single()
@@ -245,7 +246,7 @@ class SplitCruiserRepositoryTest {
                 RideFactory.newTripOffer(
                     "A", "B", 1.0, 1.0, 2.0, 2.0,
                     departureTime = now - 1, totalSeats = 2, costPerRider = 5.0,
-                    womenOnly = false, vehicleInfo = "",
+                    womenOnly = false, vehicleInfo = "", exitLocation = "",
                 )
             )
         }
@@ -260,7 +261,7 @@ class SplitCruiserRepositoryTest {
                 RideFactory.newTripOffer(
                     "A", "B", 0.0, 0.0, 0.0, 0.0,
                     departureTime = future, totalSeats = 2, costPerRider = 5.0,
-                    womenOnly = false, vehicleInfo = "",
+                    womenOnly = false, vehicleInfo = "", exitLocation = "",
                 )
             )
         }
@@ -271,7 +272,7 @@ class SplitCruiserRepositoryTest {
         val repo = repository(scriptedBackend())
         val failure = assertFailsWith<SplitCruiserException> {
             repo.postRideRequest(
-                RideFactory.newRideRequest("A", "B", 1.0, 1.0, 2.0, 2.0, future, 1, "", false)
+                RideFactory.newRideRequest("A", "B", 1.0, 1.0, 2.0, 2.0, future, 1, "", false, "")
             )
         }
         assertEquals("UNAUTHENTICATED", failure.code)
@@ -281,7 +282,7 @@ class SplitCruiserRepositoryTest {
     fun postingARideRequestFillsInTheRiderAndGeohashes() = runTest {
         val repo = signedIn(repository(scriptedBackend()))
         repo.postRideRequest(
-            RideFactory.newRideRequest("Back Bay", "South Station", 42.3503, -71.081, 42.3519, -71.0552, future, 2, "Two bags", false)
+            RideFactory.newRideRequest("Back Bay", "South Station", 42.3503, -71.081, 42.3519, -71.0552, future, 2, "Two bags", false, "")
         )
         val posted = repo.getPassengerRequests("me").single()
         assertEquals("me", posted.riderId)
@@ -471,6 +472,7 @@ class SplitCruiserRepositoryTest {
         documents["trip_offers/offer_1"] = """
             {"fields":{"id":{"stringValue":"offer_1"},"hostId":{"stringValue":"bo"},
              "seatsLeft":{"integerValue":"3"},"costPerRider":{"doubleValue":10.0},
+             "departureTime":{"integerValue":"$future"},
              "status":{"stringValue":"active"}}}
         """.trimIndent()
         val repo = signedIn(repository(scriptedBackend()))
@@ -487,11 +489,13 @@ class SplitCruiserRepositoryTest {
         documents["trip_offers/offer_mine"] = """
             {"fields":{"id":{"stringValue":"offer_mine"},"hostId":{"stringValue":"me"},
              "seatsLeft":{"integerValue":"3"},"totalSeats":{"integerValue":"3"},
+             "departureTime":{"integerValue":"$future"},
              "costPerRider":{"doubleValue":10.0},"status":{"stringValue":"active"}}}
         """.trimIndent()
         documents["ride_requests/req_1"] = """
             {"fields":{"id":{"stringValue":"req_1"},"riderId":{"stringValue":"zo"},
              "riderName":{"stringValue":"Zo"},"seatsNeeded":{"integerValue":"1"},
+             "departureTime":{"integerValue":"$future"},
              "status":{"stringValue":"active"}}}
         """.trimIndent()
         val repo = signedIn(repository(scriptedBackend()))
@@ -554,11 +558,13 @@ class SplitCruiserRepositoryTest {
         documents["trip_offers/offer_mine"] = """
             {"fields":{"id":{"stringValue":"offer_mine"},"hostId":{"stringValue":"me"},
              "seatsLeft":{"integerValue":"3"},"totalSeats":{"integerValue":"3"},
+             "departureTime":{"integerValue":"$future"},
              "costPerRider":{"doubleValue":10.0},"status":{"stringValue":"active"}}}
         """.trimIndent()
         documents["ride_requests/req_1"] = """
             {"fields":{"id":{"stringValue":"req_1"},"riderId":{"stringValue":"zo"},
              "riderName":{"stringValue":"Zo"},"seatsNeeded":{"integerValue":"1"},
+             "departureTime":{"integerValue":"$future"},
              "status":{"stringValue":"active"}}}
         """.trimIndent()
         val repo = signedIn(repository(scriptedBackend()))
@@ -584,11 +590,13 @@ class SplitCruiserRepositoryTest {
         documents["trip_offers/offer_mine"] = """
             {"fields":{"id":{"stringValue":"offer_mine"},"hostId":{"stringValue":"me"},
              "seatsLeft":{"integerValue":"3"},"totalSeats":{"integerValue":"3"},
+             "departureTime":{"integerValue":"$future"},
              "costPerRider":{"doubleValue":10.0},"status":{"stringValue":"active"}}}
         """.trimIndent()
         documents["ride_requests/req_1"] = """
             {"fields":{"id":{"stringValue":"req_1"},"riderId":{"stringValue":"zo"},
              "riderName":{"stringValue":"Zo"},"seatsNeeded":{"integerValue":"1"},
+             "departureTime":{"integerValue":"$future"},
              "status":{"stringValue":"active"}}}
         """.trimIndent()
         val repo = signedIn(repository(scriptedBackend()))
@@ -619,6 +627,7 @@ class SplitCruiserRepositoryTest {
                     HttpStatusCode.OK to """
                     {"fields":{"id":{"stringValue":"offer_1"},"hostId":{"stringValue":"bo"},
                      "seatsLeft":{"integerValue":"3"},"costPerRider":{"doubleValue":10.0},
+                     "departureTime":{"integerValue":"$future"},
                      "status":{"stringValue":"active"}}}
                     """.trimIndent()
                 url.contains("/documents/ride_requests/") && request.method.value == "GET" ->
@@ -645,6 +654,7 @@ class SplitCruiserRepositoryTest {
                     HttpStatusCode.OK to """
                     {"fields":{"id":{"stringValue":"offer_1"},"hostId":{"stringValue":"bo"},
                      "seatsLeft":{"integerValue":"3"},"costPerRider":{"doubleValue":10.0},
+                     "departureTime":{"integerValue":"$future"},
                      "status":{"stringValue":"active"}}}
                     """.trimIndent()
                 url.contains("/documents/ride_requests/") && request.method.value == "GET" ->
@@ -688,6 +698,7 @@ class SplitCruiserRepositoryTest {
         documents["trip_offers/offer_1"] = """
             {"fields":{"id":{"stringValue":"offer_1"},"hostId":{"stringValue":"bo"},
              "seatsLeft":{"integerValue":"3"},"costPerRider":{"doubleValue":10.0},
+             "departureTime":{"integerValue":"$future"},
              "status":{"stringValue":"active"}}}
         """.trimIndent()
         val repo = signedIn(repository(scriptedBackend()))
@@ -711,11 +722,13 @@ class SplitCruiserRepositoryTest {
         documents["trip_offers/offer_mine"] = """
             {"fields":{"id":{"stringValue":"offer_mine"},"hostId":{"stringValue":"me"},
              "seatsLeft":{"integerValue":"3"},"totalSeats":{"integerValue":"3"},
+             "departureTime":{"integerValue":"$future"},
              "costPerRider":{"doubleValue":10.0},"status":{"stringValue":"active"}}}
         """.trimIndent()
         documents["ride_requests/req_1"] = """
             {"fields":{"id":{"stringValue":"req_1"},"riderId":{"stringValue":"zo"},
              "riderName":{"stringValue":"Zo"},"seatsNeeded":{"integerValue":"1"},
+             "departureTime":{"integerValue":"$future"},
              "status":{"stringValue":"active"}}}
         """.trimIndent()
         val repo = signedIn(repository(scriptedBackend()))
@@ -760,11 +773,11 @@ class SplitCruiserRepositoryTest {
                 originLat = 42.3383, originLng = -71.0881,
                 destLat = 42.3656, destLng = -71.0096,
                 departureTime = future, totalSeats = 3, costPerRider = 12.0,
-                womenOnly = false, vehicleInfo = "",
+                womenOnly = false, vehicleInfo = "", exitLocation = "",
             )
         )
         val matches = repo.findMatchingOffers(
-            RideFactory.newRideRequest("Snell Library", "Logan Airport", 1.0, 1.0, 2.0, 2.0, future, 1, "", false)
+            RideFactory.newRideRequest("Snell Library", "Logan Airport", 1.0, 1.0, 2.0, 2.0, future, 1, "", false, "")
         )
         assertEquals(1, matches.size)
     }

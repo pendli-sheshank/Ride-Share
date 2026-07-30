@@ -571,6 +571,8 @@ fun RouteIndicator(
  */
 fun statusColor(status: String): Color = when (status.lowercase(Locale.US)) {
     "active" -> SplitCruiserSuccess
+    "full" -> SplitCruiserWarning
+    "closed" -> SplitCruiserTextSecondary
     "completed" -> SplitCruiserInfo
     "matched" -> SplitCruiserInfo
     "cancelled", "declined" -> SplitCruiserDanger
@@ -2155,11 +2157,12 @@ fun HostDashboard(viewModel: MainViewModel, navController: NavController) {
     val context = LocalContext.current
     val hostedRides by viewModel.hostedRides.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
-    var filterStatus by remember { mutableStateOf("all") } // all, active, completed, cancelled
+    var filterStatus by remember { mutableStateOf("all") } // all, active, closed, completed, cancelled
 
     val filteredRides = remember(hostedRides, filterStatus) {
         when (filterStatus) {
-            "active" -> hostedRides.filter { it.status == "active" }
+            "active" -> hostedRides.filter { it.status == "active" || it.status == "full" }
+            "closed" -> hostedRides.filter { it.status == "closed" }
             "completed" -> hostedRides.filter { it.status == "completed" }
             "cancelled" -> hostedRides.filter { it.status == "cancelled" }
             else -> hostedRides
@@ -2260,7 +2263,7 @@ fun HostDashboard(viewModel: MainViewModel, navController: NavController) {
                         .padding(bottom = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    listOf("all" to "All Rides", "active" to "Active", "completed" to "Completed", "cancelled" to "Cancelled").forEach { (status, label) ->
+                    listOf("all" to "All Rides", "active" to "Active", "closed" to "Closed", "completed" to "Completed", "cancelled" to "Cancelled").forEach { (status, label) ->
                         FilterChip(
                             selected = filterStatus == status,
                             onClick = { filterStatus = status },
@@ -2560,34 +2563,39 @@ fun HostedRideScheduleCard(
                 }
             }
 
-            if (offer.status == "active") {
+            val availability = HostControlsPolicy.availability(offer)
+            if (availability.canComplete || availability.canCancel) {
                 Spacer(modifier = Modifier.height(SplitCruiserSpacing.Lg))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(SplitCruiserSpacing.Sm)
                 ) {
-                    OutlinedButton(
-                        onClick = { onStatusChange("cancelled") },
-                        modifier = Modifier.weight(1f),
-                        border = BorderStroke(1.dp, SplitCruiserDanger),
-                        shape = RoundedCornerShape(SplitCruiserRadius.Md),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = SplitCruiserDanger)
-                    ) {
-                        Text("Cancel ride", fontSize = SplitCruiserTextSize.Caption, fontWeight = FontWeight.Bold)
+                    if (availability.canCancel) {
+                        OutlinedButton(
+                            onClick = { onStatusChange("cancelled") },
+                            modifier = Modifier.weight(1f),
+                            border = BorderStroke(1.dp, SplitCruiserDanger),
+                            shape = RoundedCornerShape(SplitCruiserRadius.Md),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = SplitCruiserDanger)
+                        ) {
+                            Text("Cancel ride", fontSize = SplitCruiserTextSize.Caption, fontWeight = FontWeight.Bold)
+                        }
                     }
 
-                    Button(
-                        onClick = { onStatusChange("completed") },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(SplitCruiserRadius.Md),
-                        colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserSuccess)
-                    ) {
-                        Text(
-                            "Complete ride",
-                            color = SplitCruiserOnPrimary,
-                            fontSize = SplitCruiserTextSize.Caption,
-                            fontWeight = FontWeight.Bold
-                        )
+                    if (availability.canComplete) {
+                        Button(
+                            onClick = { onStatusChange("completed") },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(SplitCruiserRadius.Md),
+                            colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserSuccess)
+                        ) {
+                            Text(
+                                "Complete ride",
+                                color = SplitCruiserOnPrimary,
+                                fontSize = SplitCruiserTextSize.Caption,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
             }
@@ -4034,15 +4042,16 @@ fun PostOfferScreen(viewModel: MainViewModel, navController: NavController) {
     val home by viewModel.contactDetails.collectAsState()
     var origin by remember(home) { mutableStateOf(home?.homeAddress.orEmpty()) }
     var destination by remember { mutableStateOf("") }
+    var exitLocation by remember { mutableStateOf("") }
     var originLat by remember(home) { mutableStateOf(home?.homeLat?.takeIf { it != 0.0 } ?: 42.34) }
     var originLng by remember(home) { mutableStateOf(home?.homeLng?.takeIf { it != 0.0 } ?: -71.10) }
     var destLat by remember { mutableStateOf(42.33) }
     var destLng by remember { mutableStateOf(-71.08) }
-    
+
     val calendar = remember { java.util.Calendar.getInstance().apply { add(java.util.Calendar.HOUR_OF_DAY, 4) } }
     val dateFormatter = remember { java.text.SimpleDateFormat("EEE, MMM d, yyyy", java.util.Locale.getDefault()) }
     val timeFormatter = remember { java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()) }
-    
+
     var dateInput by remember { mutableStateOf(dateFormatter.format(calendar.time)) }
     var timeInput by remember { mutableStateOf(timeFormatter.format(calendar.time)) }
     var departureEpoch by remember { mutableStateOf(calendar.timeInMillis) }
@@ -4144,6 +4153,22 @@ fun PostOfferScreen(viewModel: MainViewModel, navController: NavController) {
                             imageVector = Icons.Default.Place,
                             contentDescription = "Dropoff location icon",
                             tint = Color(0xFFF97316)
+                        )
+                    }
+                )
+
+                OutlinedTextField(
+                    value = exitLocation,
+                    onValueChange = { exitLocation = it },
+                    label = { Text("Exact Meeting Spot (optional)") },
+                    placeholder = { Text("e.g. North Gate, by the flagpole") },
+                    modifier = Modifier.fillMaxWidth().testTag("offer_exit_location_input"),
+                    shape = RoundedCornerShape(SplitCruiserRadius.Md),
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.PinDrop,
+                            contentDescription = "Exact meeting spot icon",
+                            tint = SplitCruiserTextSecondary
                         )
                     }
                 )
@@ -4352,7 +4377,8 @@ fun PostOfferScreen(viewModel: MainViewModel, navController: NavController) {
                             seatsLeft = seats,
                             departureTime = epoch,
                             womenOnly = womenOnly,
-                            vehicleInfo = vehicleLabel
+                            vehicleInfo = vehicleLabel,
+                            exitLocation = exitLocation
                         )
 
                         viewModel.postOffer(offer) {
@@ -4383,6 +4409,7 @@ fun PostRequestScreen(viewModel: MainViewModel, navController: NavController) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var origin by remember(home) { mutableStateOf(home?.homeAddress.orEmpty()) }
     var destination by remember { mutableStateOf("") }
+    var exitLocation by remember { mutableStateOf("") }
     var originLat by remember(home) { mutableStateOf(home?.homeLat?.takeIf { it != 0.0 } ?: 42.33) }
     var originLng by remember(home) { mutableStateOf(home?.homeLng?.takeIf { it != 0.0 } ?: -71.08) }
     var destLat by remember { mutableStateOf(42.36) }
@@ -4485,6 +4512,22 @@ fun PostRequestScreen(viewModel: MainViewModel, navController: NavController) {
                             imageVector = Icons.Default.Place,
                             contentDescription = "Dropoff location icon",
                             tint = Color(0xFFF97316)
+                        )
+                    }
+                )
+
+                OutlinedTextField(
+                    value = exitLocation,
+                    onValueChange = { exitLocation = it },
+                    label = { Text("Exact Meeting Spot (optional)") },
+                    placeholder = { Text("e.g. North Gate, by the flagpole") },
+                    modifier = Modifier.fillMaxWidth().testTag("request_exit_location_input"),
+                    shape = RoundedCornerShape(SplitCruiserRadius.Md),
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.PinDrop,
+                            contentDescription = "Exact meeting spot icon",
+                            tint = SplitCruiserTextSecondary
                         )
                     }
                 )
@@ -4619,7 +4662,8 @@ fun PostRequestScreen(viewModel: MainViewModel, navController: NavController) {
                             seatsNeeded = needed,
                             departureTime = epoch,
                             notes = notes,
-                            womenOnly = womenOnly
+                            womenOnly = womenOnly,
+                            exitLocation = exitLocation
                         )
 
                         viewModel.postRequest(request) {
@@ -4789,6 +4833,23 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                             originLabel = "PICKUP",
                             destinationLabel = "DROPOFF"
                         )
+                        if (offer.exitLocation.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.PinDrop,
+                                    contentDescription = "Exact meeting spot icon",
+                                    tint = SplitCruiserTextSecondary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = offer.exitLocation,
+                                    color = SplitCruiserTextSecondary,
+                                    fontSize = SplitCruiserTextSize.Caption
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -5084,79 +5145,65 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                 val isHost = (offer.hostId == currentUser?.id)
 
                 if (isHost) {
-                    Text("HOST CONTROLS", color = SplitCruiserPrimary, fontSize = 11.sp, fontWeight = FontWeight.Black)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .border(1.dp, SplitCruiserOutline, RoundedCornerShape(16.dp))
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("Manage ride status in Firestore:", color = SplitCruiserTextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                if (offer.status != "active") {
-                                    Button(
-                                        onClick = {
-                                            viewModel.updateTripOfferStatus(offer.id, "active") {
-                                                Toast.makeText(context, "Ride is now active!", Toast.LENGTH_SHORT).show()
-                                            }
-                                        },
-                                        colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserPrimary),
-                                        modifier = Modifier.weight(1f).testTag("host_status_active_btn")
-                                    ) {
-                                        Text("Set Active", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    // Seats and departure time now drive "active"/"full"/"closed" automatically —
+                    // the host is left with exactly two real decisions. HostControlsPolicy is the
+                    // single source of truth for when they still apply, shared with iOS.
+                    val availability = HostControlsPolicy.availability(offer)
+                    if (availability.canComplete || availability.canCancel) {
+                        Text("HOST CONTROLS", color = SplitCruiserPrimary, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(1.dp, SplitCruiserOutline, RoundedCornerShape(16.dp))
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    text = if (offer.status == "closed") {
+                                        "This ride's departure time has passed. Did it happen?"
+                                    } else {
+                                        "Manage this ride:"
+                                    },
+                                    color = SplitCruiserTextPrimary,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    if (availability.canComplete) {
+                                        Button(
+                                            onClick = {
+                                                completeButtonPressed = true
+                                                vibrate(context, 50)
+                                                viewModel.updateTripOfferStatus(offer.id, "completed") {
+                                                    completeButtonPressed = false
+                                                    vibrateSuccess(context)
+                                                    Toast.makeText(context, "Ride completed!", Toast.LENGTH_SHORT).show()
+                                                }
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserSuccess),
+                                            modifier = Modifier.weight(1f).testTag("host_status_completed_btn").withButtonScale(completeScale)
+                                        ) {
+                                            Text("Complete", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        }
                                     }
-                                }
-                                if (offer.status != "full" && offer.seatsLeft > 0) {
-                                    Button(
-                                        onClick = {
-                                            viewModel.updateTripOfferStatus(offer.id, "full") {
-                                                Toast.makeText(context, "Ride marked as full!", Toast.LENGTH_SHORT).show()
-                                            }
-                                        },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97706)),
-                                        modifier = Modifier.weight(1f).testTag("host_status_full_btn")
-                                    ) {
-                                        Text("Set Full", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                    }
-                                }
-                            }
-                            
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                if (offer.status != "completed") {
-                                    Button(
-                                        onClick = {
-                                            completeButtonPressed = true
-                                            vibrate(context, 50)
-                                            viewModel.updateTripOfferStatus(offer.id, "completed") {
-                                                completeButtonPressed = false
-                                                vibrateSuccess(context)
-                                                Toast.makeText(context, "Ride completed!", Toast.LENGTH_SHORT).show()
-                                            }
-                                        },
-                                        colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserSuccess),
-                                        modifier = Modifier.weight(1f).testTag("host_status_completed_btn").withButtonScale(completeScale)
-                                    ) {
-                                        Text("Complete", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                    }
-                                }
-                                if (offer.status != "cancelled") {
-                                    Button(
-                                        onClick = {
-                                            cancelButtonPressed = true
-                                            vibrate(context, 50)
-                                            viewModel.updateTripOfferStatus(offer.id, "cancelled") {
-                                                cancelButtonPressed = false
-                                                Toast.makeText(context, "Ride cancelled!", Toast.LENGTH_SHORT).show()
-                                            }
-                                        },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
-                                        modifier = Modifier.weight(1f).testTag("host_status_cancelled_btn").withButtonScale(cancelScale)
-                                    ) {
-                                        Text("Cancel", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    if (availability.canCancel) {
+                                        Button(
+                                            onClick = {
+                                                cancelButtonPressed = true
+                                                vibrate(context, 50)
+                                                viewModel.updateTripOfferStatus(offer.id, "cancelled") {
+                                                    cancelButtonPressed = false
+                                                    Toast.makeText(context, "Ride cancelled!", Toast.LENGTH_SHORT).show()
+                                                }
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
+                                            modifier = Modifier.weight(1f).testTag("host_status_cancelled_btn").withButtonScale(cancelScale)
+                                        ) {
+                                            Text("Cancel", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        }
                                     }
                                 }
                             }
@@ -5221,6 +5268,16 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                     colors = ButtonDefaults.buttonColors(disabledContainerColor = SplitCruiserOutline)
                                 ) {
                                     Text("This Trip is Cancelled", color = SplitCruiserTextSecondary, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            offer.status == "closed" -> {
+                                Button(
+                                    onClick = {},
+                                    enabled = false,
+                                    modifier = Modifier.fillMaxWidth().height(54.dp),
+                                    colors = ButtonDefaults.buttonColors(disabledContainerColor = SplitCruiserOutline)
+                                ) {
+                                    Text("This Trip's Window Has Closed", color = SplitCruiserTextSecondary, fontWeight = FontWeight.Bold)
                                 }
                             }
                             offer.status == "full" || offer.seatsLeft <= 0 -> {
@@ -5453,6 +5510,23 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                             originLabel = "RIDER PICKUP",
                             destinationLabel = "RIDER DROPOFF"
                         )
+                        if (request.exitLocation.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.PinDrop,
+                                    contentDescription = "Exact meeting spot icon",
+                                    tint = SplitCruiserTextSecondary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = request.exitLocation,
+                                    color = SplitCruiserTextSecondary,
+                                    fontSize = SplitCruiserTextSize.Caption
+                                )
+                            }
+                        }
                     }
                 }
 

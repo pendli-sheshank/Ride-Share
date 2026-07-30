@@ -1064,7 +1064,7 @@ class SplitCruiserRepository internal constructor(
     @Throws(Exception::class)
     suspend fun fetchMyTrips(): MyTrips {
         val uid = tokens.uid ?: throw SplitCruiserException("You need to be logged in.")
-        val hosted = firestore.runQuery(
+        val hostedRaw = firestore.runQuery(
             StructuredQuery(
                 collection = "trip_offers",
                 filters = listOf(FieldFilter("hostId", FilterOp.Equal, stringValue(uid))),
@@ -1073,7 +1073,7 @@ class SplitCruiserRepository internal constructor(
             ),
             serializer<TripOffer>(),
         )
-        val joined = firestore.runQuery(
+        val joinedRaw = firestore.runQuery(
             StructuredQuery(
                 collection = "trip_offers",
                 filters = listOf(FieldFilter("passengers", FilterOp.ArrayContains, stringValue(uid))),
@@ -1082,6 +1082,8 @@ class SplitCruiserRepository internal constructor(
             ),
             serializer<TripOffer>(),
         )
+        val hosted = hostedRaw.map { closeIfExpired(it) }
+        val joined = joinedRaw.map { closeIfExpired(it) }
         offers.value = offers.value + (hosted + joined).associateBy { it.id }
         recomputeFeeds()
         return MyTrips(hosted, joined)
@@ -1342,9 +1344,10 @@ class SplitCruiserRepository internal constructor(
      */
     @Throws(Exception::class)
     suspend fun fetchTripOffer(offerId: String): TripOffer {
-        val offer = offers.value[offerId]
+        val fetched = offers.value[offerId]
             ?: firestore.getDocument("trip_offers", offerId, serializer<TripOffer>())
             ?: throw SplitCruiserException("Trip offer not found.")
+        val offer = closeIfExpired(fetched)
         offers.value = offers.value + (offerId to offer)
         return offer
     }
@@ -1352,12 +1355,35 @@ class SplitCruiserRepository internal constructor(
     /** [fetchTripOffer]'s counterpart for ride requests. */
     @Throws(Exception::class)
     suspend fun fetchRideRequest(requestId: String): RideRequest {
-        val request = requests.value[requestId]
+        val fetched = requests.value[requestId]
             ?: runCatching { firestore.getDocument("ride_requests", requestId, serializer<RideRequest>()) }
                 .getOrNull()
             ?: throw SplitCruiserException("That ride request no longer exists.")
+        val request = closeIfExpired(fetched)
         requests.value = requests.value + (requestId to request)
         return request
+    }
+
+    /**
+     * Lazy fallback for the scheduled auto-close: a ride nobody revisits stays stale until the
+     * Cloud Function catches it, but a ride someone actually opens gets the correct status right
+     * away. Only `active`/`full` flip, and only once departure has passed — `completed` and
+     * `cancelled` are deliberate host/rider outcomes and are never overwritten.
+     */
+    private suspend fun closeIfExpired(offer: TripOffer): TripOffer {
+        if (offer.status !in AUTO_CLOSEABLE_OFFER_STATUSES || offer.departureTime > nowMs()) return offer
+        runCatching {
+            firestore.updateFields("trip_offers", offer.id, buildFields("status" to stringValue("closed")))
+        }.onFailure { logWarn(LOG_TAG, "Could not auto-close expired trip offer ${offer.id}", it) }
+        return offer.copy(status = "closed")
+    }
+
+    private suspend fun closeIfExpired(request: RideRequest): RideRequest {
+        if (request.status !in AUTO_CLOSEABLE_REQUEST_STATUSES || request.departureTime > nowMs()) return request
+        runCatching {
+            firestore.updateFields("ride_requests", request.id, buildFields("status" to stringValue("closed")))
+        }.onFailure { logWarn(LOG_TAG, "Could not auto-close expired ride request ${request.id}", it) }
+        return request.copy(status = "closed")
     }
 
     fun getHostedRides(userId: String): List<TripOffer> =
@@ -1540,6 +1566,10 @@ class SplitCruiserRepository internal constructor(
     private companion object {
         /** The single document under `users/{uid}/private` that onboarding writes. */
         const val CONTACT_DOC = "profile"
+
+        /** System-set statuses [closeIfExpired] may overwrite once departure has passed. */
+        val AUTO_CLOSEABLE_OFFER_STATUSES = setOf("active", "full")
+        val AUTO_CLOSEABLE_REQUEST_STATUSES = setOf("active")
     }
 }
 

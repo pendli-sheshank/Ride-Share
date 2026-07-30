@@ -83,6 +83,8 @@ struct StatusBadge: View {
     private var color: Color {
         switch status.lowercased() {
         case "active": return Brand.success
+        case "full": return Brand.warning
+        case "closed": return Brand.textSecondary
         case "completed", "matched": return Brand.primary
         case "cancelled", "declined": return Brand.danger
         case "pending": return Brand.warning

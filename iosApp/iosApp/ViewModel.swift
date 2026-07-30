@@ -150,7 +150,8 @@ final class AppViewModel: ObservableObject {
         totalSeats: Int,
         costPerRider: Double,
         womenOnly: Bool,
-        vehicleInfo: String
+        vehicleInfo: String,
+        exitLocation: String = ""
     ) async -> Bool {
         await perform {
             let offer = RideFactory.shared.newTripOffer(
@@ -164,7 +165,8 @@ final class AppViewModel: ObservableObject {
                 totalSeats: Int32(totalSeats),
                 costPerRider: costPerRider,
                 womenOnly: womenOnly,
-                vehicleInfo: vehicleInfo
+                vehicleInfo: vehicleInfo,
+                exitLocation: exitLocation
             )
             try await self.repository.postTripOffer(offer: offer)
         }
@@ -180,7 +182,8 @@ final class AppViewModel: ObservableObject {
         departureTime: Date,
         seatsNeeded: Int,
         notes: String,
-        womenOnly: Bool
+        womenOnly: Bool,
+        exitLocation: String = ""
     ) async -> Bool {
         await perform {
             let request = RideFactory.shared.newRideRequest(
@@ -193,7 +196,8 @@ final class AppViewModel: ObservableObject {
                 departureTime: departureTime.epochMillis,
                 seatsNeeded: Int32(seatsNeeded),
                 notes: notes,
-                womenOnly: womenOnly
+                womenOnly: womenOnly,
+                exitLocation: exitLocation
             )
             try await self.repository.postRideRequest(request: request)
         }
@@ -230,6 +234,12 @@ final class AppViewModel: ObservableObject {
     func vehicle(userId: String) async -> Vehicle? {
         if let cached = repository.getVehicleInfo(userId: userId) { return cached }
         return try? await repository.fetchVehicleInfo(userId: userId)
+    }
+
+    /// The host's two real decisions — see `HostControlsPolicy` in `:shared` for which statuses
+    /// still allow them.
+    func updateOfferStatus(offerId: String, newStatus: String) async -> Bool {
+        await perform { try await self.repository.updateTripOfferStatus(offerId: offerId, newStatus: newStatus) }
     }
 
     // MARK: - Chat

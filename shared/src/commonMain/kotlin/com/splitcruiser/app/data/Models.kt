@@ -84,11 +84,16 @@ data class TripOffer(
     val vehicleInfo: String = "",
     val costPerRider: Double = 0.0,
     val womenOnly: Boolean = false,
-    val status: String = "active", // "active", "completed", "cancelled"
+    // "active", "full" and "closed" are all system-set (seats and departure time drive them);
+    // "completed" and "cancelled" are host decisions and, once set, are never overwritten by the
+    // system. See HostControlsPolicy for which statuses still allow a host action.
+    val status: String = "active",
     val routeSamplePoints: List<String> = emptyList(), // geohashes or locations
     val costEstimate: Double = 0.0,
     val passengers: List<String> = emptyList(),
-    val passengerNames: List<String> = emptyList()
+    val passengerNames: List<String> = emptyList(),
+    /** A precise spot within [destination], e.g. "North Gate, by the flagpole" — not free text in [routeSamplePoints]. */
+    val exitLocation: String = ""
 )
 
 @Serializable
@@ -109,7 +114,11 @@ data class RideRequest(
     val seatsNeeded: Int = 1,
     val notes: String = "",
     val womenOnly: Boolean = false,
-    val status: String = "active" // "active", "matched", "cancelled"
+    // "active" and "closed" (departure time passed, never matched) are system-set; "matched" and
+    // "cancelled" are set by a match forming or the rider calling it off, and are never overwritten.
+    val status: String = "active",
+    /** A precise spot within [destination] — see [TripOffer.exitLocation]. */
+    val exitLocation: String = ""
 )
 
 @Serializable

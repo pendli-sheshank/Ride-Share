@@ -343,6 +343,7 @@ struct PostOfferView: View {
 
     @State private var origin = PlaceSelection()
     @State private var destination = PlaceSelection()
+    @State private var exitLocation = ""
     @State private var departure = Date().addingTimeInterval(3600)
     @State private var seats = 3
     @State private var cost = "10"
@@ -359,6 +360,7 @@ struct PostOfferView: View {
                 Section("Route") {
                     PlaceField(title: "Pickup", selection: $origin, viewModel: viewModel)
                     PlaceField(title: "Dropoff", selection: $destination, viewModel: viewModel)
+                    TextField("Exact meeting spot (optional)", text: $exitLocation)
                 }
 
                 Section("Trip") {
@@ -406,7 +408,8 @@ struct PostOfferView: View {
                 totalSeats: seats,
                 costPerRider: Double(cost) ?? 0,
                 womenOnly: womenOnly,
-                vehicleInfo: vehicleInfo
+                vehicleInfo: vehicleInfo,
+                exitLocation: exitLocation
             )
             if posted { presentationMode.wrappedValue.dismiss() }
         }
@@ -421,6 +424,7 @@ struct PostRequestView: View {
 
     @State private var origin = PlaceSelection()
     @State private var destination = PlaceSelection()
+    @State private var exitLocation = ""
     @State private var departure = Date().addingTimeInterval(3600)
     @State private var seats = 1
     @State private var notes = ""
@@ -436,6 +440,7 @@ struct PostRequestView: View {
                 Section("Route") {
                     PlaceField(title: "Pickup", selection: $origin, viewModel: viewModel)
                     PlaceField(title: "Dropoff", selection: $destination, viewModel: viewModel)
+                    TextField("Exact meeting spot (optional)", text: $exitLocation)
                 }
 
                 Section("Trip") {
@@ -481,7 +486,8 @@ struct PostRequestView: View {
                 departureTime: departure,
                 seatsNeeded: seats,
                 notes: notes,
-                womenOnly: womenOnly
+                womenOnly: womenOnly,
+                exitLocation: exitLocation
             )
             if posted { presentationMode.wrappedValue.dismiss() }
         }

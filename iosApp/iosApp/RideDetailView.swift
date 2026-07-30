@@ -66,6 +66,10 @@ struct RideDetailView: View {
                 destinationLabel: "DROPOFF"
             )
 
+            if !offer.exitLocation.isEmpty {
+                DetailRow(label: "Meeting spot", value: offer.exitLocation)
+            }
+
             Divider()
 
             DetailRow(label: "Departs", value: Self.formatTime(offer.departureTime))
@@ -240,9 +244,7 @@ struct RideDetailView: View {
     @ViewBuilder
     private var actionButton: some View {
         if isOwnRide {
-            Text("This is your ride.")
-                .font(.callout)
-                .foregroundColor(Brand.textSecondary)
+            hostControls
         } else if alreadyAboard {
             Text("You've reserved a seat on this ride.")
                 .font(.callout)
@@ -260,6 +262,36 @@ struct RideDetailView: View {
             }
             .buttonStyle(BrandButtonStyle(isEnabled: !isFull))
             .disabled(isFull || viewModel.isLoading)
+        }
+    }
+
+    /// The two decisions left to a host once seats and departure time drive status automatically.
+    /// `closed` still shows both — it means time ran out and this still needs a human answer, not
+    /// that the ride is locked. Only `completed`/`cancelled` end it. See `HostControlsPolicy` in
+    /// `:shared`, which both platforms call for this.
+    @ViewBuilder
+    private var hostControls: some View {
+        let availability = HostControlsPolicy.shared.availability(offer: offer)
+        if availability.canComplete || availability.canCancel {
+            VStack(spacing: BrandScale.spaceSm) {
+                if availability.canComplete {
+                    Button("Complete") {
+                        Task { await viewModel.updateOfferStatus(offerId: offer.id, newStatus: "completed") }
+                    }
+                    .buttonStyle(BrandButtonStyle(isEnabled: !viewModel.isLoading))
+                }
+                if availability.canCancel {
+                    Button("Cancel ride") {
+                        Task { await viewModel.updateOfferStatus(offerId: offer.id, newStatus: "cancelled") }
+                    }
+                    .font(.callout)
+                    .foregroundColor(Brand.danger)
+                }
+            }
+        } else {
+            Text("This ride is \(offer.status).")
+                .font(.callout)
+                .foregroundColor(Brand.textSecondary)
         }
     }
 
