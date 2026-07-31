@@ -4133,7 +4133,9 @@ fun PostOfferScreen(viewModel: MainViewModel, navController: NavController) {
                             contentDescription = "Pickup location icon",
                             tint = SplitCruiserSuccess
                         )
-                    }
+                    },
+                    biasLat = home?.homeLat?.takeIf { it != 0.0 },
+                    biasLng = home?.homeLng?.takeIf { it != 0.0 }
                 )
 
                 // Destination AutoComplete
@@ -4154,7 +4156,9 @@ fun PostOfferScreen(viewModel: MainViewModel, navController: NavController) {
                             contentDescription = "Dropoff location icon",
                             tint = Color(0xFFF97316)
                         )
-                    }
+                    },
+                    biasLat = originLat,
+                    biasLng = originLng
                 )
 
                 OutlinedTextField(
@@ -4492,7 +4496,9 @@ fun PostRequestScreen(viewModel: MainViewModel, navController: NavController) {
                             contentDescription = "Pickup location icon",
                             tint = SplitCruiserSuccess
                         )
-                    }
+                    },
+                    biasLat = home?.homeLat?.takeIf { it != 0.0 },
+                    biasLng = home?.homeLng?.takeIf { it != 0.0 }
                 )
 
                 // Destination AutoComplete
@@ -4513,7 +4519,9 @@ fun PostRequestScreen(viewModel: MainViewModel, navController: NavController) {
                             contentDescription = "Dropoff location icon",
                             tint = Color(0xFFF97316)
                         )
-                    }
+                    },
+                    biasLat = originLat,
+                    biasLng = originLng
                 )
 
                 OutlinedTextField(
@@ -7400,7 +7408,15 @@ fun LocationAutoCompleteTextField(
     modifier: Modifier = Modifier,
     testTag: String = "",
     focusedBorderColor: Color = SplitCruiserSuccess,
-    leadingIcon: @Composable (() -> Unit)? = null
+    leadingIcon: @Composable (() -> Unit)? = null,
+    /**
+     * Ranks Photon results toward this point instead of matching purely on text — so searching
+     * "Maryland" from a St. Louis rider's home returns "Maryland Heights, MO" ahead of the state
+     * of Maryland. Callers pass the best anchor they have (home address, or an already-resolved
+     * origin when this field is the destination); null leaves results unranked by distance.
+     */
+    biasLat: Double? = null,
+    biasLng: Double? = null,
 ) {
     var expanded by remember { mutableStateOf(false) }
     var photonResults by remember { mutableStateOf<List<PhotonPlaceResult>>(emptyList()) }
@@ -7409,11 +7425,15 @@ fun LocationAutoCompleteTextField(
     val scope = rememberCoroutineScope()
 
     // Query Photon API with debounce when user types
-    LaunchedEffect(value) {
+    LaunchedEffect(value, biasLat, biasLng) {
         if (value.length >= 2) {
             isSearchingPhoton = true
             kotlinx.coroutines.delay(250) // Debounce
-            val results = OsmLocationService.autocompletePhoton(value)
+            val results = if (biasLat != null && biasLng != null) {
+                OsmLocationService.autocompletePhotonNear(value, 8, biasLat, biasLng)
+            } else {
+                OsmLocationService.autocompletePhoton(value)
+            }
             photonResults = results
             isSearchingPhoton = false
         } else {

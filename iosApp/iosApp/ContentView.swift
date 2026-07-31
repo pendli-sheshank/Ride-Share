@@ -354,12 +354,19 @@ struct PostOfferView: View {
         origin.isResolved && destination.isResolved && !viewModel.isLoading
     }
 
+    /// Ranks the pickup search toward home, the way Android's post-offer form does — see
+    /// `LocationAutoCompleteTextField`'s `biasLat`/`biasLng` there.
+    private var homeBias: PlaceSelection? {
+        guard let home = viewModel.contactDetails, home.hasHomeLocation else { return nil }
+        return PlaceSelection(name: home.homeAddress, lat: home.homeLat, lon: home.homeLng)
+    }
+
     var body: some View {
         NavigationView {
             Form {
                 Section("Route") {
-                    PlaceField(title: "Pickup", selection: $origin, viewModel: viewModel)
-                    PlaceField(title: "Dropoff", selection: $destination, viewModel: viewModel)
+                    PlaceField(title: "Pickup", selection: $origin, viewModel: viewModel, bias: homeBias)
+                    PlaceField(title: "Dropoff", selection: $destination, viewModel: viewModel, bias: origin)
                     TextField("Exact meeting spot (optional)", text: $exitLocation)
                 }
 
@@ -434,12 +441,19 @@ struct PostRequestView: View {
         origin.isResolved && destination.isResolved && !viewModel.isLoading
     }
 
+    /// See `PostOfferView.homeBias` — same reasoning, so a rider's pickup search is ranked toward
+    /// home too.
+    private var homeBias: PlaceSelection? {
+        guard let home = viewModel.contactDetails, home.hasHomeLocation else { return nil }
+        return PlaceSelection(name: home.homeAddress, lat: home.homeLat, lon: home.homeLng)
+    }
+
     var body: some View {
         NavigationView {
             Form {
                 Section("Route") {
-                    PlaceField(title: "Pickup", selection: $origin, viewModel: viewModel)
-                    PlaceField(title: "Dropoff", selection: $destination, viewModel: viewModel)
+                    PlaceField(title: "Pickup", selection: $origin, viewModel: viewModel, bias: homeBias)
+                    PlaceField(title: "Dropoff", selection: $destination, viewModel: viewModel, bias: origin)
                     TextField("Exact meeting spot (optional)", text: $exitLocation)
                 }
 
@@ -510,6 +524,9 @@ struct PlaceField: View {
     let title: String
     @Binding var selection: PlaceSelection
     @ObservedObject var viewModel: AppViewModel
+    /// The best known anchor for ranking results — a home address, or an already-resolved origin
+    /// when this field is the destination. Nil leaves results unranked by distance.
+    var bias: PlaceSelection? = nil
 
     @State private var query = ""
     @State private var results: [PhotonPlaceResult] = []
@@ -519,7 +536,13 @@ struct PlaceField: View {
             TextField(title, text: $query)
                 .onChange(of: query) { newValue in
                     selection = PlaceSelection()
-                    Task { results = await viewModel.searchPlaces(newValue) }
+                    Task {
+                        if let bias, bias.isResolved {
+                            results = await viewModel.searchPlaces(newValue, biasLat: bias.lat, biasLon: bias.lon)
+                        } else {
+                            results = await viewModel.searchPlaces(newValue)
+                        }
+                    }
                 }
 
             if selection.isResolved {
