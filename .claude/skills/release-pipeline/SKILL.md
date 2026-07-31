@@ -1227,6 +1227,67 @@ fails loudly on every push rather than silently skipping, which is intentional h
 Android's soft-skip) — the entire point of turning this on was to stop TestFlight silently going
 stale, so a silent skip would just recreate the same bug one layer down.
 
+### 2026-07-31 — the very first automatic run immediately failed: `RideFactory` had no member `newTripOffer`/`newRideRequest`
+
+Turning `ios-release.yml` on for every push to `main` (previous entry) did exactly what it was
+for — it surfaced a real, pre-existing break the moment it got its first automatic run. Both the
+push-triggered run and, checked afterward, the last `workflow_dispatch` run before it (commit
+`436f6275`, the merge that added `exitLocation` to `RideFactory`) failed identically at `Create
+Xcode archive`, `CompileSwift normal arm64`, with four errors in `ViewModel.swift`:
+
+```
+ViewModel.swift:157:44: error: value of type 'RideFactory' has no member 'newTripOffer'
+ViewModel.swift:189:46: error: value of type 'RideFactory' has no member 'newRideRequest'
+ViewModel.swift:302:22: error: call can throw, but it is not marked with 'try' and the error is not handled
+ViewModel.swift:309:22: error: call can throw, but it is not marked with 'try' and the error is not handled
+```
+
+**Cause 1 (the "no member" pair) — Objective-C ARC method-family inference.** Objective-C's ARC
+gives special meaning to methods whose selector begins with `alloc`, `new`, `copy`, `mutableCopy`
+or `init` — they're assumed to return an owned (+1) instance, the same family `+[NSObject new]`
+belongs to. Kotlin/Native's ObjC header generator does not rename around this, so a Kotlin member
+named `newTripOffer` or `newRideRequest` triggers Swift's Clang importer to apply init-family
+rules to it and it silently declines to expose the method as an ordinary Swift call — not a
+warning, not a diagnostic pointing at the declaration, just "no member" at every call site,
+arbitrarily far away. Confirmed by grepping the module for every other public `fun new*`: there
+were none, and every non-`new`-prefixed member in the same `object RideFactory` (and everywhere
+else in the exported API) was unaffected. This was not introduced by the `exitLocation` change —
+`RideFactory` has been named this way since it was first written, and this is simply **the first
+time an actual `xcodebuild archive` ever ran against a commit containing it.**
+`:shared:compileCommonMainKotlinMetadata`, the Linux-only proxy this project relies on, compiles
+common Kotlin but never generates the Objective-C header, so nothing on Linux could have caught
+this — same blind spot as every other "was on disk, committed, and never compiled" entry above.
+**Fix:** renamed to `makeTripOffer` / `makeRideRequest` in `FlowSubscription.kt`, updated the two
+Swift call sites in `ViewModel.swift` and the Kotlin test call sites in
+`SplitCruiserRepositoryTest.kt`. **Any future Kotlin member intended for Swift must avoid the
+`alloc`/`new`/`copy`/`mutableCopy`/`init` selector prefixes** — grep for `fun new[A-Z]`/`fun
+init[A-Z]`/etc. in `shared/commonMain` before adding one, since nothing else will catch it before
+an actual archive.
+
+**Cause 2 (the missing `try` pair) — every Kotlin `suspend fun` exports as `async throws` to
+Swift, always.** This is unconditional: the generated completion handler always carries an
+`NSError` slot, regardless of whether the Kotlin function is annotated `@Throws` — `@Throws` only
+controls which Kotlin exception types get mapped to a catchable Swift error instead of crashing
+the process (see the `kotlin.Result`/`Pair` entry above), it does not make an otherwise-`async`
+Swift signature non-throwing. `searchPlaces(_:)` called `OsmLocationService.companion
+.autocompletePhoton(...)` with a bare `await`, no `try`, and had apparently never been compiled
+either — same blind spot as cause 1. The new `searchPlaces(_:biasLat:biasLon:)` overload added in
+this session's location-bias work copied that same (already broken) pattern for its own
+`autocompletePhotonNear` call, so it reproduced the bug rather than introducing a new one.
+**Fix:** both call sites now read `(try? await ...) ?? []` — `try?` rather than propagating,
+since `searchPlaces` returns a plain `[PhotonPlaceResult]`, not an `Optional` or `throws`
+signature, and losing a search to a transient network error should degrade to "no suggestions"
+the same way `OsmLocationService`'s own internal `runCatching` already treats it, not crash the
+form. **Any Swift call into a Kotlin `suspend fun`, exported or not, needs `try`** — there is no
+such thing as a non-throwing one across this boundary.
+
+**Both bugs together are the whole reason turning on the push trigger mattered**: neither would
+ever have been caught by `build-ios.yml`'s "Validate Swift syntax" step, which runs `swiftc
+-parse` (syntax only, no type-checking, no symbol resolution against `Shared.xcframework`) and
+wraps the whole thing in `|| true` besides. The only thing that has ever exercised these lines
+for real is `xcodebuild archive`, and until this change that only ran when someone remembered to
+`workflow_dispatch` it.
+
 ---
 
 ## 8. Pre-flight checklist before merging to `main`
@@ -1246,6 +1307,12 @@ stale, so a silent skip would just recreate the same bug one layer down.
 - [ ] If `GOOGLE_WEB_CLIENT_ID` is set: it is the **Web** client ID, and this build's signing
       SHA-1 is registered on the Android app in the Firebase console (§4)
 - [ ] Nothing exported to Swift returns `Result` or `Pair`, or relies on a default argument
+- [ ] No public Kotlin member intended for Swift starts with `new`/`alloc`/`copy`/`mutableCopy`/
+      `init` — `grep -rn 'fun \(new\|alloc\|copy\|mutableCopy\|init\)[A-Z]' shared/src/commonMain`.
+      Objective-C ARC's method-family naming makes Swift silently drop these as ordinary methods;
+      the failure reads as "no member", pointing at the *call site*, not the declaration
+- [ ] Every new Swift call into a Kotlin `suspend fun` has `try` — it is always `async throws`
+      across this boundary, whether or not the Kotlin side is annotated `@Throws`
 - [ ] No `private companion object` on a `@Serializable` class — it compiles and then fails at
       runtime with `IllegalAccessError` on the generated `serializer()`
 - [ ] A new Swift file was added to `SWIFT_SOURCES` in `generate-project.py` and the project

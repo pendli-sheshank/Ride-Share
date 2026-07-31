@@ -154,7 +154,7 @@ final class AppViewModel: ObservableObject {
         exitLocation: String = ""
     ) async -> Bool {
         await perform {
-            let offer = RideFactory.shared.newTripOffer(
+            let offer = RideFactory.shared.makeTripOffer(
                 origin: origin,
                 destination: destination,
                 originLat: originLat,
@@ -186,7 +186,7 @@ final class AppViewModel: ObservableObject {
         exitLocation: String = ""
     ) async -> Bool {
         await perform {
-            let request = RideFactory.shared.newRideRequest(
+            let request = RideFactory.shared.makeRideRequest(
                 origin: origin,
                 destination: destination,
                 originLat: originLat,
@@ -297,18 +297,22 @@ final class AppViewModel: ObservableObject {
 
     // MARK: - Search
 
+    // Kotlin/Native exports every `suspend fun` as `async throws` to Swift regardless of whether
+    // the Kotlin side is annotated `@Throws` — the completion handler it bridges to always carries
+    // an NSError slot. `try` is therefore required here even though OsmLocationService itself
+    // never lets an exception escape (it wraps its network call in `runCatching`).
     func searchPlaces(_ query: String) async -> [PhotonPlaceResult] {
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
-        return await OsmLocationService.companion.autocompletePhoton(query: query, limit: 6)
+        return (try? await OsmLocationService.companion.autocompletePhoton(query: query, limit: 6)) ?? []
     }
 
     /// [searchPlaces], ranked toward `biasLat`/`biasLon` — see `OsmLocationService.autocompletePhotonNear`
     /// in `:shared` for why this surfaces "Maryland Heights" ahead of the state of Maryland.
     func searchPlaces(_ query: String, biasLat: Double, biasLon: Double) async -> [PhotonPlaceResult] {
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
-        return await OsmLocationService.companion.autocompletePhotonNear(
+        return (try? await OsmLocationService.companion.autocompletePhotonNear(
             query: query, limit: 6, biasLat: biasLat, biasLon: biasLon
-        )
+        )) ?? []
     }
 
     // MARK: - Error handling
