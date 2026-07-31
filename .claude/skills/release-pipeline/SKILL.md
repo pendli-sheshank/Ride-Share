@@ -61,7 +61,7 @@ Two pins that must be checked together before bumping either:
 | `.github/workflows/ci.yml` | PRs, non-`main` pushes | `ubuntu-latest` | assembleDebug, artifact class check, unit tests, `:shared:compileCommonMainKotlinMetadata` |
 | `.github/workflows/release-android.yml` | push to `main`, manual | `ubuntu-latest` | signed AAB → Play internal testing |
 | `.github/workflows/build-ios.yml` | push/PR to `main`, manual | `macos-15` | XCFramework + project/icon verifiers. **The free iOS gate — iterate here.** |
-| `.github/workflows/ios-release.yml` | manual only | `macos-15` | archive → IPA → TestFlight. Every run burns a build number permanently. |
+| `.github/workflows/ios-release.yml` | push to `main`, manual | `macos-15` | archive → IPA → TestFlight. Every run burns a build number permanently. Push runs always resolve `RELEASE_TYPE` to `beta`; `production` is a deliberate manual-dispatch choice. |
 
 Android and iOS are **separate workflow files on purpose**: independent re-runs, independent
 concurrency, and the iOS workflow can be disabled in the Actions UI without touching Android.
@@ -1187,6 +1187,45 @@ here, for whoever hits a red build afterwards:
 - **`Message` gained `type` / `pickupSpot` / `pickupTime`**, and `sendMessage` gained a 5-argument
   overload. Both overloads are exported to Swift; ObjC selectors differ by argument labels, so
   neither is mangled away.
+
+### 2026-07-31 — TestFlight silently stopped tracking `main`
+
+**Symptom:** reported by a user, not a red run — merges to `main` kept landing on Play internal
+testing (`release-android.yml` fires on every push) but TestFlight stayed on whatever build was
+last uploaded manually. No error anywhere, because nothing had failed: `ios-release.yml` was
+`workflow_dispatch`-only from the day it was written (see its original header comment, §2's
+table), so a push to `main` was never going to reach it. `build-ios.yml` *does* run on every push,
+but it only builds and verifies the XCFramework/Xcode project — it never archives, signs or
+uploads anything. Two workflows, doing two different jobs, and only the free one was wired to
+`main`.
+
+**Fix:** `ios-release.yml` now also triggers on `push: branches: [main]` (same `paths-ignore` as
+`release-android.yml`), with a `concurrency` block matching Android's. `workflow_dispatch` is kept
+for a deliberate release. Since a push event has no human to choose `beta` vs `production`,
+the job now computes `env.RELEASE_TYPE: ${{ github.event.inputs.release_type || 'beta' }}` and
+every step that used to read `github.event.inputs.release_type` (the two in the final Summary)
+reads `env.RELEASE_TYPE` instead — otherwise a push run left `release_type` empty and the
+Summary's `if [ "$release_type" = "beta" ]` fell into the `production`/App-Store-submission
+branch by accident, which is the wrong guidance for an unattended TestFlight-only run.
+`CFBundleVersion` was already `github.run_number`-based and needed no change: it is monotonic
+regardless of what triggered the run, which is what "correct build number for the build type"
+actually requires here — the version *string* (`CFBundleShortVersionString`) is deliberately
+static across a release cycle, same rationale Apple's own docs give, and only the build number
+increments per upload.
+
+**Left alone, deliberately:** `release_type` still has zero effect on behavior other than the
+Summary's wording — neither value calls any App Store Connect "submit for review" API, so
+`production` today only means "the human running this intends to submit manually afterward."
+Automating that submission was not asked for and is a materially different, higher-stakes change
+(it would need to pick which app version to attach the build to); flagged here rather than
+guessed at.
+
+**Check for it:** `actionlint` was run against the changed workflow before pushing (§ instructions
+in `CLAUDE.md`) — clean, no findings. The Apple secrets in §3 must already be configured for this
+to actually upload; if they are not, the existing "Check required secrets are configured" step
+fails loudly on every push rather than silently skipping, which is intentional here (contrast
+Android's soft-skip) — the entire point of turning this on was to stop TestFlight silently going
+stale, so a silent skip would just recreate the same bug one layer down.
 
 ---
 
