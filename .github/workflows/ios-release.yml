@@ -1,8 +1,19 @@
 name: iOS App Release Pipeline
 
-# Manual only. Uploading a build to App Store Connect is not reversible — a build number
-# can never be reused, even if the upload is later deleted — so this must not fire on push.
+# Runs on every push to main (mirroring release-android.yml) so TestFlight always reflects
+# main, plus manual dispatch for a deliberate release_type choice. Uploading a build to App
+# Store Connect is not reversible — a build number can never be reused, even if the upload is
+# later deleted — but that is true of every run regardless of trigger, and the alternative
+# (TestFlight silently going stale behind main) is the worse failure mode. An automatic push
+# run has no human to pick release_type, so it always resolves to 'beta' — see RELEASE_TYPE
+# below; 'production' stays a deliberate workflow_dispatch choice.
 on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - '.claude/**'
+      - 'docs/**'
   workflow_dispatch:
     inputs:
       release_type:
@@ -14,6 +25,11 @@ on:
           - beta
           - production
 
+concurrency:
+  # Never cancel a run mid-upload; queue instead. Same group shape as release-android.yml.
+  group: ios-release-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
@@ -21,6 +37,11 @@ jobs:
   release:
     name: Build, sign and upload iOS build
     runs-on: macos-15
+    # github.event.inputs.release_type only exists on workflow_dispatch; a push event leaves
+    # it empty, so this falls back to 'beta' — an automatic run must never resolve to
+    # 'production' by accident of an unset input.
+    env:
+      RELEASE_TYPE: ${{ github.event.inputs.release_type || 'beta' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -421,7 +442,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "## iOS release — ${{ github.event.inputs.release_type }}"
+            echo "## iOS release — ${{ env.RELEASE_TYPE }} (${{ github.event_name }})"
             echo ""
             echo "- Build number: \`${{ github.run_number }}\`"
             echo "- Commit: \`${{ github.sha }}\`"
@@ -429,7 +450,7 @@ jobs:
             if [ "${{ job.status }}" = "success" ]; then
               echo "Build uploaded to App Store Connect. Processing usually takes 10–30 minutes."
               echo ""
-              if [ "${{ github.event.inputs.release_type }}" = "beta" ]; then
+              if [ "${{ env.RELEASE_TYPE }}" = "beta" ]; then
                 echo "Next: assign the build to a TestFlight group in App Store Connect."
               else
                 echo "Next: attach the build to the App Store version and submit for review."
