@@ -36,10 +36,18 @@ internal fun <T> Flow<T>.subscribeOnMain(onEach: (T) -> Unit): FlowSubscription 
  *
  * An object rather than top-level functions: top-level Kotlin functions land in Swift on a synthetic
  * file class (`FlowSubscriptionKt`), which is not something a caller should have to know about.
+ *
+ * Named `make*`, not `new*`: a Kotlin/Native member whose Swift-exported selector starts with
+ * `new` collides with Objective-C ARC's method-family naming convention (same family as `alloc`/
+ * `init`/`copy`), and Swift's Clang importer silently declines to expose it as an ordinary method
+ * — Xcode fails with "value of type 'RideFactory' has no member 'newTripOffer'", not a warning
+ * about the naming. This was never caught locally: `:shared:compileCommonMainKotlinMetadata`
+ * compiles common code without ever generating the Objective-C header, so nothing on Linux can
+ * see this class of bug — only an actual `xcodebuild archive` on the macOS runner can.
  */
 object RideFactory {
 
-    fun newTripOffer(
+    fun makeTripOffer(
         origin: String,
         destination: String,
         originLat: Double,
@@ -68,7 +76,7 @@ object RideFactory {
         exitLocation = exitLocation,
     )
 
-    fun newRideRequest(
+    fun makeRideRequest(
         origin: String,
         destination: String,
         originLat: Double,
