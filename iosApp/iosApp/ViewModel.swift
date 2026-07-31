@@ -302,6 +302,15 @@ final class AppViewModel: ObservableObject {
         return await OsmLocationService.companion.autocompletePhoton(query: query, limit: 6)
     }
 
+    /// [searchPlaces], ranked toward `biasLat`/`biasLon` — see `OsmLocationService.autocompletePhotonNear`
+    /// in `:shared` for why this surfaces "Maryland Heights" ahead of the state of Maryland.
+    func searchPlaces(_ query: String, biasLat: Double, biasLon: Double) async -> [PhotonPlaceResult] {
+        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
+        return await OsmLocationService.companion.autocompletePhotonNear(
+            query: query, limit: 6, biasLat: biasLat, biasLon: biasLon
+        )
+    }
+
     // MARK: - Error handling
 
     func clearError() {

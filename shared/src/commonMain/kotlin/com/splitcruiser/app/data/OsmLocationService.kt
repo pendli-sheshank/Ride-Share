@@ -51,10 +51,28 @@ class OsmLocationService(engine: HttpClientEngine?) {
 
     private val http: HttpClient = createPlainHttpClient(engine)
 
-    suspend fun autocompletePhoton(query: String, limit: Int): List<PhotonPlaceResult> {
+    suspend fun autocompletePhoton(query: String, limit: Int): List<PhotonPlaceResult> =
+        fetchAutocomplete(query, limit, biasLat = null, biasLon = null)
+
+    /**
+     * [autocompletePhoton], ranked toward [biasLat]/[biasLon] — Photon's `lat`/`lon` params nudge
+     * ranking rather than filter results, so a query like "Maryland" from a St. Louis-area bias
+     * surfaces "Maryland Heights, MO" ahead of the state of Maryland, without hiding the state for
+     * someone who actually wants it.
+     */
+    suspend fun autocompletePhotonNear(query: String, limit: Int, biasLat: Double, biasLon: Double): List<PhotonPlaceResult> =
+        fetchAutocomplete(query, limit, biasLat = biasLat, biasLon = biasLon)
+
+    private suspend fun fetchAutocomplete(
+        query: String,
+        limit: Int,
+        biasLat: Double?,
+        biasLon: Double?,
+    ): List<PhotonPlaceResult> {
         if (query.isBlank()) return emptyList()
         return runCatching {
-            val url = "https://photon.komoot.io/api/?q=${query.trim().encodeURLParameter()}&limit=$limit"
+            val bias = if (biasLat != null && biasLon != null) "&lat=$biasLat&lon=$biasLon" else ""
+            val url = "https://photon.komoot.io/api/?q=${query.trim().encodeURLParameter()}&limit=$limit$bias"
             val response = http.get(url) { header("User-Agent", OSM_USER_AGENT) }
             if (!response.status.isSuccess()) return emptyList()
 
@@ -143,6 +161,13 @@ class OsmLocationService(engine: HttpClientEngine?) {
 
         suspend fun autocompletePhoton(query: String): List<PhotonPlaceResult> =
             shared.autocompletePhoton(query, 8)
+
+        suspend fun autocompletePhotonNear(
+            query: String,
+            limit: Int,
+            biasLat: Double,
+            biasLon: Double,
+        ): List<PhotonPlaceResult> = shared.autocompletePhotonNear(query, limit, biasLat, biasLon)
 
         suspend fun reverseGeocodeNominatim(lat: Double, lon: Double): NominatimReverseResult? =
             shared.reverseGeocodeNominatim(lat, lon)
