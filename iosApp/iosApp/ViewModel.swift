@@ -27,6 +27,14 @@ final class AppViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
 
+    /// The current user's own hosted/joined rides. `activeOffers` deliberately excludes a host's
+    /// own rides (`FeedProjector` filters `hostId != currentUserId` so a host doesn't see their own
+    /// ride in the browse feed), so deriving "my rides" from it — as this used to — always came up
+    /// empty. `fetchMyTrips()` reads the unfiltered `hostId`/`passengers` queries directly, the same
+    /// source Android's `MainViewModel.hostedRides`/`joinedRides` use.
+    @Published var hostedRides: [TripOffer] = []
+    @Published var joinedRides: [TripOffer] = []
+
     /// Where the user lives, so a ride request can prefill its pickup. iOS never collected this
     /// before, which is why its post-request form started blank while Android's arrived filled in.
     @Published var contactDetails: ContactDetails?
@@ -45,6 +53,11 @@ final class AppViewModel: ObservableObject {
 
         subscriptions.append(repository.observeCurrentUser { [weak self] user in
             self?.currentUser = user
+            // Mirrors Android's `currentUser.collect { ... refreshMyTrips() }` (MainViewModel.kt)
+            // so hosted/joined rides load right after login, not only on a manual pull-to-refresh.
+            if user != nil {
+                Task { await self?.refreshMyTrips() }
+            }
         })
         subscriptions.append(repository.observeActiveOffers { [weak self] offers in
             self?.activeOffers = offers
@@ -219,6 +232,16 @@ final class AppViewModel: ObservableObject {
 
     func refresh() async {
         await perform { try await self.repository.refreshNow() }
+    }
+
+    /// Populates `hostedRides`/`joinedRides` from the unfiltered `hostId`/`passengers` queries —
+    /// see the doc comment on those `@Published` properties for why `activeOffers` can't be used.
+    func refreshMyTrips() async {
+        await perform {
+            let trips = try await self.repository.fetchMyTrips()
+            self.hostedRides = trips.hosted
+            self.joinedRides = trips.joined
+        }
     }
 
     // MARK: - Ride detail

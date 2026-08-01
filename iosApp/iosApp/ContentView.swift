@@ -349,6 +349,7 @@ struct PostOfferView: View {
     @State private var cost = "10"
     @State private var vehicleInfo = ""
     @State private var womenOnly = false
+    @State private var validationError: String?
 
     private var canSubmit: Bool {
         origin.isResolved && destination.isResolved && !viewModel.isLoading
@@ -379,7 +380,7 @@ struct PostOfferView: View {
                     Toggle("Women only", isOn: $womenOnly)
                 }
 
-                if let error = viewModel.errorMessage {
+                if let error = validationError ?? viewModel.errorMessage {
                     Text(error).font(.caption).foregroundColor(Brand.danger)
                 }
 
@@ -403,6 +404,11 @@ struct PostOfferView: View {
     }
 
     private func submit() {
+        validationError = nil
+        guard let costPerRider = Double(cost), costPerRider > 0 else {
+            validationError = "Enter a valid cost per rider."
+            return
+        }
         Task {
             let posted = await viewModel.postRideOffer(
                 origin: origin.name,
@@ -413,7 +419,7 @@ struct PostOfferView: View {
                 destLng: destination.lon,
                 departureTime: departure,
                 totalSeats: seats,
-                costPerRider: Double(cost) ?? 0,
+                costPerRider: costPerRider,
                 womenOnly: womenOnly,
                 vehicleInfo: vehicleInfo,
                 exitLocation: exitLocation
@@ -530,20 +536,66 @@ struct PlaceField: View {
 
     @State private var query = ""
     @State private var results: [PhotonPlaceResult] = []
+    @State private var searchTask: Task<Void, Never>?
+    @State private var isSearching = false
+
+    /// Same shape as Android's `LocationAutoCompleteTextField`: a 2-char minimum and a 250ms
+    /// debounce before hitting Photon, so a fast typist fires one request per pause instead of
+    /// one per keystroke. A bare `Task` per keystroke (the previous implementation) had no
+    /// cancellation, so a slow response for an early, short query could overwrite a later,
+    /// more specific one — this cancels the in-flight task before starting a new one.
+    private func scheduleSearch(for newValue: String) {
+        selection = PlaceSelection()
+        searchTask?.cancel()
+        let trimmed = newValue.trimmingCharacters(in: .whitespaces)
+        guard trimmed.count >= 2 else {
+            results = defaultPlaces(matching: trimmed)
+            isSearching = false
+            return
+        }
+        searchTask = Task {
+            isSearching = true
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled else { return }
+            let fetched: [PhotonPlaceResult]
+            if let bias, bias.isResolved {
+                fetched = await viewModel.searchPlaces(newValue, biasLat: bias.lat, biasLon: bias.lon)
+            } else {
+                fetched = await viewModel.searchPlaces(newValue)
+            }
+            guard !Task.isCancelled else { return }
+            results = fetched.isEmpty ? defaultPlaces(matching: trimmed) : fetched
+            isSearching = false
+        }
+    }
+
+    /// Falls back to the same seed list Android shows for a blank query or no Photon results —
+    /// `DEFAULT_LOCATION_PLACES`, a top-level `val` in `shared/commonMain/.../Models.kt`, mapped
+    /// into `PhotonPlaceResult`'s shape so `results` stays one type.
+    private func defaultPlaces(matching query: String) -> [PhotonPlaceResult] {
+        let all = ModelsKt.DEFAULT_LOCATION_PLACES.map {
+            PhotonPlaceResult(
+                name: $0.name, formattedAddress: $0.address, city: nil, state: nil, country: nil,
+                lat: $0.lat, lon: $0.lng, type: $0.category
+            )
+        }
+        guard !query.isEmpty else { return Array(all.prefix(6)) }
+        return all.filter {
+            $0.name.localizedCaseInsensitiveContains(query) ||
+                $0.formattedAddress.localizedCaseInsensitiveContains(query) ||
+                $0.type.localizedCaseInsensitiveContains(query)
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: BrandScale.spaceXs) {
-            TextField(title, text: $query)
-                .onChange(of: query) { newValue in
-                    selection = PlaceSelection()
-                    Task {
-                        if let bias, bias.isResolved {
-                            results = await viewModel.searchPlaces(newValue, biasLat: bias.lat, biasLon: bias.lon)
-                        } else {
-                            results = await viewModel.searchPlaces(newValue)
-                        }
-                    }
+            HStack {
+                TextField(title, text: $query)
+                    .onChange(of: query) { newValue in scheduleSearch(for: newValue) }
+                if isSearching {
+                    ProgressView().scaleEffect(0.7)
                 }
+            }
 
             if selection.isResolved {
                 Text(selection.name)
@@ -551,7 +603,7 @@ struct PlaceField: View {
                     .foregroundColor(Brand.success)
             }
 
-            ForEach(results.prefix(4), id: \.formattedAddress) { place in
+            ForEach(results.prefix(6), id: \.formattedAddress) { place in
                 Button {
                     selection = PlaceSelection(name: place.name, lat: place.lat, lon: place.lon)
                     query = place.name
@@ -567,6 +619,7 @@ struct PlaceField: View {
         .onAppear {
             // A prefilled selection needs the field to show it, or the address looks lost.
             if query.isEmpty && selection.isResolved { query = selection.name }
+            if results.isEmpty { results = defaultPlaces(matching: "") }
         }
     }
 }
@@ -579,18 +632,8 @@ struct MyRidesTabView: View {
     @ObservedObject var viewModel: AppViewModel
     @State private var showPostRequest = false
 
-    private var hostedOffers: [TripOffer] {
-        guard let me = viewModel.currentUser?.id else { return [] }
-        return viewModel.activeOffers.filter { $0.hostId == me }
-    }
-
-    private var joinedOffers: [TripOffer] {
-        guard let me = viewModel.currentUser?.id else { return [] }
-        return viewModel.activeOffers.filter { $0.passengers.contains(me) }
-    }
-
     private var isEmpty: Bool {
-        hostedOffers.isEmpty && joinedOffers.isEmpty && viewModel.myRideRequests.isEmpty
+        viewModel.hostedRides.isEmpty && viewModel.joinedRides.isEmpty && viewModel.myRideRequests.isEmpty
     }
 
     private var emptyState: some View {
@@ -605,9 +648,9 @@ struct MyRidesTabView: View {
 
     private var ridesList: some View {
         List {
-            if !hostedOffers.isEmpty {
+            if !viewModel.hostedRides.isEmpty {
                 Section("Rides you're hosting") {
-                    ForEach(hostedOffers, id: \.id) { offer in
+                    ForEach(viewModel.hostedRides, id: \.id) { offer in
                         NavigationLink(destination: RideDetailView(viewModel: viewModel, offer: offer)) {
                             RideOfferRow(offer: offer)
                         }
@@ -615,9 +658,9 @@ struct MyRidesTabView: View {
                 }
             }
 
-            if !joinedOffers.isEmpty {
+            if !viewModel.joinedRides.isEmpty {
                 Section("Rides you've joined") {
-                    ForEach(joinedOffers, id: \.id) { offer in
+                    ForEach(viewModel.joinedRides, id: \.id) { offer in
                         NavigationLink(destination: RideDetailView(viewModel: viewModel, offer: offer)) {
                             RideOfferRow(offer: offer)
                         }
@@ -638,7 +681,10 @@ struct MyRidesTabView: View {
                 }
             }
         }
-        .refreshable { await viewModel.refresh() }
+        .refreshable {
+            await viewModel.refresh()
+            await viewModel.refreshMyTrips()
+        }
     }
 
     var body: some View {
@@ -659,6 +705,7 @@ struct MyRidesTabView: View {
             .sheet(isPresented: $showPostRequest) {
                 PostRequestView(viewModel: viewModel)
             }
+            .task { await viewModel.refreshMyTrips() }
         }
     }
 }
