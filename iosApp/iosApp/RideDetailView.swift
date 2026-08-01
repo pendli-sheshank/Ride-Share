@@ -19,6 +19,7 @@ struct RideDetailView: View {
     @State private var host: User?
     @State private var vehicle: Vehicle?
     @State private var isHostExpanded = false
+    @State private var didBlockHost = false
 
     private var isOwnRide: Bool { viewModel.currentUser?.id == offer.hostId }
     private var isFull: Bool { offer.seatsLeft <= 0 }
@@ -158,6 +159,24 @@ struct RideDetailView: View {
                 Text("No contact details shared yet — use the chat once you're matched.")
                     .font(.caption)
                     .foregroundColor(Brand.textSecondary)
+            }
+
+            // Host-side only — iOS has no `RideRequest` detail view today, so blocking a rider
+            // from a request isn't reachable regardless; that is a separate, larger gap.
+            if !isOwnRide {
+                if didBlockHost {
+                    Text("Blocked. Hidden from your feed and can't message you.")
+                        .font(.caption)
+                        .foregroundColor(Brand.textSecondary)
+                } else {
+                    Button(role: .destructive) {
+                        Task { if await viewModel.blockUser(offer.hostId) { didBlockHost = true } }
+                    } label: {
+                        Label("Block this host", systemImage: "hand.raised.slash.fill")
+                            .font(.caption)
+                    }
+                    .foregroundColor(Brand.danger)
+                }
             }
         }
     }

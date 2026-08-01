@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import Shared
 
 // MARK: - Brand palette
@@ -210,14 +211,29 @@ struct BrandAvatar: View {
     let name: String
     var size: CGFloat = 64
 
+    /// Matches Android's `StudentAvatar` preset mapping exactly (`SplitCruiserApp.kt:6374-6381`).
+    /// Without this, an avatarUrl someone picked from `EditProfileView`'s preset row rendered as
+    /// initials on their own phone — the value isn't a URL, so it fell through to the fallback.
+    static let presetEmoji: [String: String] = [
+        "preset_grad": "🎓",
+        "preset_driver": "🚗",
+        "preset_tech": "💻",
+        "preset_explorer": "🎒",
+        "preset_star": "⭐",
+        "preset_globe": "🌐",
+    ]
+
     var body: some View {
-        Group {
+        ZStack {
             if let url = URL(string: avatarUrl), avatarUrl.hasPrefix("http") {
                 AsyncImage(url: url) { image in
                     image.resizable().scaledToFill()
                 } placeholder: {
                     initials
                 }
+            } else if let emoji = Self.presetEmoji[avatarUrl] {
+                background
+                Text(emoji).font(.system(size: size * 0.5))
             } else {
                 initials
             }
@@ -226,13 +242,17 @@ struct BrandAvatar: View {
         .clipShape(Circle())
     }
 
+    private var background: some View {
+        LinearGradient(
+            colors: [Brand.primary, Brand.onPrimaryContainer],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
     private var initials: some View {
         ZStack {
-            LinearGradient(
-                colors: [Brand.primary, Brand.onPrimaryContainer],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            background
             Text(String(name.prefix(1)).uppercased())
                 .font(.system(size: size * 0.4, weight: .black))
                 .foregroundColor(Brand.onPrimary)
@@ -277,5 +297,25 @@ struct BrandEmptyState: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Shrinks a `PhotosPicker` selection to Android's `ProfileImages.kt` upload contract (512px max
+/// edge, preserving aspect ratio, JPEG quality 0.85), so both platforms store comparably-sized
+/// pictures in the same Storage bucket rather than iOS uploading a multi-megabyte original.
+enum ProfileImageResizer {
+    static func resizeToUploadContract(_ data: Data) -> Data? {
+        guard let image = UIImage(data: data) else { return nil }
+        let maxEdge: CGFloat = 512
+        let scale = min(maxEdge / image.size.width, maxEdge / image.size.height, 1)
+        let resized: UIImage
+        if scale < 1 {
+            let newSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+            let renderer = UIGraphicsImageRenderer(size: newSize)
+            resized = renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: newSize)) }
+        } else {
+            resized = image
+        }
+        return resized.jpegData(compressionQuality: 0.85)
     }
 }

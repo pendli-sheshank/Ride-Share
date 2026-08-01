@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 import Shared
 
 // Views are kept deliberately small and split into computed sub-views. Swift's type checker gives
@@ -200,6 +201,9 @@ struct ProfileSetupView: View {
     @State private var licensePlate = ""
     @State private var validationError: String?
 
+    @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var isUploadingPhoto = false
+
     private var canSubmit: Bool {
         !name.trimmingCharacters(in: .whitespaces).isEmpty
             && !lastInitial.trimmingCharacters(in: .whitespaces).isEmpty
@@ -210,6 +214,22 @@ struct ProfileSetupView: View {
     var body: some View {
         NavigationView {
             Form {
+                Section("Profile picture (optional)") {
+                    HStack {
+                        Spacer()
+                        BrandAvatar(avatarUrl: viewModel.currentUser?.avatarUrl ?? "", name: name.isEmpty ? "?" : name, size: 72)
+                        Spacer()
+                    }
+
+                    PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                        Label(isUploadingPhoto ? "Uploading…" : "Add a photo", systemImage: "camera.fill")
+                    }
+                    .disabled(isUploadingPhoto)
+                    .onChange(of: selectedPhotoItem) { newItem in
+                        Task { await uploadSelectedPhoto(newItem) }
+                    }
+                }
+
                 Section("About you") {
                     TextField("First name", text: $name)
                     TextField("Last initial", text: $lastInitial)
@@ -289,6 +309,21 @@ struct ProfileSetupView: View {
                 vehicle: vehicle
             )
         }
+    }
+
+    /// Matches Android's `ProfileSetupScreen` image picker (`SplitCruiserApp.kt:1104-1136`): the
+    /// Firebase Auth user already exists at this point, only its Firestore profile doc doesn't
+    /// yet, so `uploadProfilePicture` can run before `completeProfile` does.
+    private func uploadSelectedPhoto(_ item: PhotosPickerItem?) async {
+        guard let item, let userId = viewModel.currentUser?.id else { return }
+        isUploadingPhoto = true
+        defer { isUploadingPhoto = false }
+        guard let data = try? await item.loadTransferable(type: Data.self),
+              let jpegData = ProfileImageResizer.resizeToUploadContract(data) else {
+            validationError = "Couldn't read that photo. Try another one."
+            return
+        }
+        _ = await viewModel.uploadProfilePicture(userId: userId, imageData: jpegData)
     }
 }
 
@@ -715,6 +750,16 @@ struct MyRidesTabView: View {
             }
             .navigationTitle("My rides")
             .toolbar {
+                // No Android entry point to mirror here — `HostDashboard` is a registered but
+                // unreachable route there (no `navigate("host_dashboard")` call site exists).
+                // This is iOS's own new entry point, gated on having something to show.
+                if !viewModel.hostedRides.isEmpty {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        NavigationLink(destination: HostDashboardView(viewModel: viewModel)) {
+                            Image(systemName: "chart.bar.fill")
+                        }
+                    }
+                }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button { showPostRequest = true } label: { Image(systemName: "plus") }
                 }
@@ -800,51 +845,20 @@ struct MatchRow: View {
 
 struct ProfileTabView: View {
     @ObservedObject var viewModel: AppViewModel
+    @State private var showEditProfile = false
 
     var body: some View {
         NavigationView {
             ScrollView {
                 if let user = viewModel.currentUser {
                     VStack(spacing: BrandScale.spaceLg) {
-                        // The user's own picture, matching Android's `StudentAvatar`. This was a
-                        // generic SF Symbol even though `User` has always carried an avatarUrl.
-                        BrandAvatar(avatarUrl: user.avatarUrl, name: user.name, size: 88)
-
-                        Text(user.displayName)
-                            .font(.title2)
-                            .fontWeight(.bold)
-                            .foregroundColor(Brand.textPrimary)
-
-                        Text(user.email)
-                            .font(.callout)
-                            .foregroundColor(Brand.textSecondary)
-
-                        BrandCard(title: "Your record") {
-                            DetailRow(
-                                label: "Rating",
-                                value: user.ratingCount > 0
-                                    ? String(format: "⭐ %.1f", user.ratingAvg)
-                                    : "No ratings yet"
-                            )
-                            Divider()
-                            DetailRow(label: "Ratings received", value: "\(user.ratingCount)")
-
-                            if !user.phoneNumber.isEmpty {
-                                Divider()
-                                DetailRow(label: "Contact number", value: user.phoneNumber)
-                            }
-
-                            // Backend connectivity is developer instrumentation, not something a
-                            // rider needs next to their rating. Debug builds only, matching
-                            // Android's `FirebaseStatusPill`.
-                            #if DEBUG
-                            Divider()
-                            DetailRow(
-                                label: "Backend (debug)",
-                                value: viewModel.isConnected ? "Connected" : "Offline",
-                                valueColor: viewModel.isConnected ? Brand.success : Brand.warning
-                            )
-                            #endif
+                        header(user: user)
+                        recordCard(user: user)
+                        notificationPreferencesCard(user: user)
+                        alertsCard
+                        safetyCard(user: user)
+                        BrandCard(title: "Rate someone you rode with") {
+                            RatingSubmissionView(viewModel: viewModel)
                         }
 
                         Button("Log out") { viewModel.logOut() }
@@ -855,6 +869,287 @@ struct ProfileTabView: View {
             }
             .background(Brand.surface.ignoresSafeArea())
             .navigationTitle("Profile")
+            .sheet(isPresented: $showEditProfile) {
+                EditProfileView(viewModel: viewModel)
+            }
+        }
+    }
+
+    // The user's own picture, matching Android's `StudentAvatar`. This was a generic SF Symbol
+    // even though `User` has always carried an avatarUrl.
+    private func header(user: User) -> some View {
+        VStack(spacing: BrandScale.spaceMd) {
+            BrandAvatar(avatarUrl: user.avatarUrl, name: user.name, size: 88)
+
+            Text(user.displayName)
+                .font(.title2)
+                .fontWeight(.bold)
+                .foregroundColor(Brand.textPrimary)
+
+            Text(user.email)
+                .font(.callout)
+                .foregroundColor(Brand.textSecondary)
+
+            Button("Edit profile details") { showEditProfile = true }
+                .font(.callout)
+                .foregroundColor(Brand.primary)
+        }
+    }
+
+    private func recordCard(user: User) -> some View {
+        BrandCard(title: "Your record") {
+            DetailRow(
+                label: "Rating",
+                value: user.ratingCount > 0
+                    ? String(format: "⭐ %.1f", user.ratingAvg)
+                    : "No ratings yet"
+            )
+            Divider()
+            DetailRow(label: "Ratings received", value: "\(user.ratingCount)")
+
+            if !user.phoneNumber.isEmpty {
+                Divider()
+                DetailRow(label: "Contact number", value: user.phoneNumber)
+            }
+
+            // Backend connectivity is developer instrumentation, not something a
+            // rider needs next to their rating. Debug builds only, matching
+            // Android's `FirebaseStatusPill`.
+            #if DEBUG
+            Divider()
+            DetailRow(
+                label: "Backend (debug)",
+                value: viewModel.isConnected ? "Connected" : "Offline",
+                valueColor: viewModel.isConnected ? Brand.success : Brand.warning
+            )
+            #endif
+        }
+    }
+
+    /// Neither platform has real push (FCM/APNs) — these are in-app-alert preference flags, the
+    /// same ones Android's notification card toggles (`SplitCruiserApp.kt:6737-6800`).
+    private func notificationPreferencesCard(user: User) -> some View {
+        BrandCard(title: "Notification preferences") {
+            Text("Get alerts when another rider posts a trip that matches your active ride requests.")
+                .font(.caption)
+                .foregroundColor(Brand.textSecondary)
+
+            Toggle(isOn: Binding(
+                get: { user.emailNotificationsEnabled },
+                set: { newValue in Task { await viewModel.toggleEmailNotifications(newValue) } }
+            )) {
+                Label("Email notifications", systemImage: "envelope.fill")
+                    .foregroundColor(Brand.textPrimary)
+            }
+
+            Divider()
+
+            Toggle(isOn: Binding(
+                get: { user.pushNotificationsEnabled },
+                set: { newValue in Task { await viewModel.togglePushNotifications(newValue) } }
+            )) {
+                Label("Push notifications", systemImage: "bell.fill")
+                    .foregroundColor(Brand.textPrimary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var alertsCard: some View {
+        if !viewModel.notifications.isEmpty {
+            BrandCard(title: "Active trip alert matches") {
+                HStack {
+                    Spacer()
+                    Button("Clear all") { Task { await viewModel.clearNotifications() } }
+                        .font(.caption)
+                        .foregroundColor(Brand.danger)
+                }
+
+                ForEach(Array(viewModel.notifications.enumerated()), id: \.element.id) { index, alert in
+                    if index > 0 { Divider() }
+                    NotificationAlertRow(alert: alert, viewModel: viewModel)
+                }
+            }
+        }
+    }
+
+    private func safetyCard(user: User) -> some View {
+        BrandCard(title: "Safety and privacy") {
+            Toggle(isOn: Binding(
+                get: { user.isWomenOnlyFilterEnabled },
+                set: { newValue in Task { await viewModel.toggleWomenOnlyFilter(newValue) } }
+            )) {
+                Label("Women-only filter", systemImage: "lock.shield.fill")
+                    .foregroundColor(Brand.textPrimary)
+            }
+            .tint(Brand.accent)
+
+            Divider()
+
+            NavigationLink(destination: BlockedListView(viewModel: viewModel)) {
+                HStack {
+                    Label("Manage blocked users", systemImage: "hand.raised.slash.fill")
+                        .foregroundColor(Brand.textPrimary)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .foregroundColor(Brand.textSecondary)
+                        .font(.caption)
+                }
+            }
+        }
+    }
+}
+
+/// One in-app alert row, matching Android's `ProfileScreen` alert card
+/// (`SplitCruiserApp.kt:6816-6871`): a read/unread visual state and a "Mark read" action.
+struct NotificationAlertRow: View {
+    let alert: NotificationAlert
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: BrandScale.spaceXs) {
+            HStack {
+                Image(systemName: alert.type == "email" ? "envelope.fill" : "bell.fill")
+                    .foregroundColor(alert.isRead ? Brand.textSecondary : Brand.primary)
+                Text(alert.title)
+                    .font(.callout)
+                    .fontWeight(.bold)
+                    .foregroundColor(alert.isRead ? Brand.textSecondary : Brand.textPrimary)
+                Spacer()
+                if !alert.isRead {
+                    Button("Mark read") { Task { await viewModel.markNotificationAsRead(alert.id) } }
+                        .font(.caption2)
+                        .foregroundColor(Brand.primary)
+                }
+            }
+            Text(alert.message)
+                .font(.caption)
+                .foregroundColor(Brand.textSecondary)
+        }
+        .opacity(alert.isRead ? 0.6 : 1)
+    }
+}
+
+/// One person to rate: derived client-side from `userMatches`, mirroring Android's
+/// filter/map/distinctBy chain (`SplitCruiserApp.kt:6591-6608`) rather than asking for a Firebase
+/// uid — nobody knows their own match's uid, and the rating form used to ask for exactly that.
+struct RatingCompanion: Identifiable {
+    let userId: String
+    let displayName: String
+    let wasHost: Bool
+    var id: String { userId }
+}
+
+struct RatingSubmissionView: View {
+    @ObservedObject var viewModel: AppViewModel
+    @State private var ratingTarget: RatingCompanion?
+    @State private var ratingValue: Double = 5
+    @State private var ratingComment = ""
+
+    private var rateableCompanions: [RatingCompanion] {
+        let me = viewModel.currentUser?.id ?? ""
+        var seen = Set<String>()
+        var result: [RatingCompanion] = []
+        for match in viewModel.userMatches where match.status == "accepted" || match.status == "completed" {
+            let otherId = match.hostId == me ? match.riderId : match.hostId
+            guard !otherId.isEmpty, otherId != me, !seen.contains(otherId) else { continue }
+            let name: String
+            if match.hostId == me {
+                name = match.riderName.isEmpty ? "Your rider" : match.riderName
+            } else {
+                name = viewModel.repository.getUserPublicProfile(userId: otherId)?.displayName
+                    ?? viewModel.offer(for: match)?.hostName
+                    ?? "Your host"
+            }
+            seen.insert(otherId)
+            result.append(RatingCompanion(userId: otherId, displayName: name, wasHost: match.hostId != me))
+        }
+        return result
+    }
+
+    var body: some View {
+        Group {
+            if rateableCompanions.isEmpty {
+                Text("Once you've shared a ride, whoever you rode with shows up here to rate.")
+                    .font(.caption)
+                    .foregroundColor(Brand.textSecondary)
+            } else {
+                VStack(alignment: .leading, spacing: BrandScale.spaceMd) {
+                    Text("Who did you ride with?")
+                        .font(.caption)
+                        .fontWeight(.bold)
+                        .foregroundColor(Brand.textPrimary)
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: BrandScale.spaceSm) {
+                            ForEach(rateableCompanions) { companion in
+                                companionChip(companion)
+                            }
+                        }
+                    }
+
+                    Text("How did it go?")
+                        .font(.caption)
+                        .fontWeight(.bold)
+                        .foregroundColor(Brand.textPrimary)
+
+                    HStack(spacing: BrandScale.spaceXs) {
+                        ForEach(1...5, id: \.self) { star in
+                            Image(systemName: star <= Int(ratingValue) ? "star.fill" : "star")
+                                .foregroundColor(Brand.warning)
+                                .onTapGesture { ratingValue = Double(star) }
+                        }
+                        Spacer()
+                        Text("\(Int(ratingValue)) of 5 stars")
+                            .font(.caption2)
+                            .fontWeight(.bold)
+                            .foregroundColor(Brand.primary)
+                    }
+
+                    TextField("Add a note (optional)", text: $ratingComment)
+                        .textFieldStyle(.roundedBorder)
+
+                    Button("Submit rating") { submit() }
+                        .buttonStyle(BrandButtonStyle(isEnabled: ratingTarget != nil))
+                        .disabled(ratingTarget == nil || viewModel.isLoading)
+                }
+            }
+        }
+        // A companion who leaves the list (e.g. the match was cancelled) must not stay selected —
+        // mirrors Android's `LaunchedEffect(rateableCompanions)` at `SplitCruiserApp.kt:6614-6616`.
+        .onChange(of: viewModel.userMatches.count) { _ in
+            if let target = ratingTarget, !rateableCompanions.contains(where: { $0.userId == target.userId }) {
+                ratingTarget = nil
+            }
+        }
+    }
+
+    private func companionChip(_ companion: RatingCompanion) -> some View {
+        let isSelected = companion.userId == ratingTarget?.userId
+        return Button {
+            ratingTarget = companion
+        } label: {
+            HStack(spacing: BrandScale.spaceXs) {
+                Image(systemName: companion.wasHost ? "car.fill" : "person.fill")
+                Text(companion.displayName).fontWeight(.bold)
+            }
+            .font(.caption)
+            .foregroundColor(isSelected ? Brand.onPrimary : Brand.textPrimary)
+            .padding(.horizontal, BrandScale.spaceMd)
+            .padding(.vertical, BrandScale.spaceSm)
+            .background(isSelected ? Brand.primary : Brand.primaryContainer.opacity(0.4))
+            .cornerRadius(BrandScale.radiusLg)
+        }
+    }
+
+    private func submit() {
+        guard let target = ratingTarget else { return }
+        Task {
+            if await viewModel.submitRating(toUserId: target.userId, rating: Float(ratingValue), comment: ratingComment) {
+                ratingTarget = nil
+                ratingComment = ""
+                ratingValue = 5
+            }
         }
     }
 }

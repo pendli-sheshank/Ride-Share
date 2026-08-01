@@ -32,6 +32,9 @@ SWIFT_SOURCES = [
     "RideDetailView.swift",
     "ChatView.swift",
     "ViewModel.swift",
+    "EditProfileView.swift",
+    "BlockedListView.swift",
+    "HostDashboardView.swift",
 ]
 
 

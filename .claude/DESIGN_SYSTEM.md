@@ -161,8 +161,11 @@ Not everything is at parity, and that is fine as long as it is deliberate:
 - **Google sign-in is Android-only.** The token exchange is shared, but only Android acquires a
   Google ID token (Credential Manager). iOS would need `ASWebAuthenticationSession` and a URL
   scheme in the generated Xcode project.
-- **Host analytics (`HostDashboard`) is Android-only.** Whether iOS hosts need it is an open
-  product question, not an oversight.
-- **Blocked-user management is Android-only.**
-- **Profile editing and picture upload are Android-only.** `uploadProfilePicture` is in `:shared`
-  and takes bytes precisely so iOS can hand it a UIImage's JPEG data when someone builds the UI.
+- **Blocking a rider from a ride request is Android-only.** iOS has no `RideRequest` detail view at
+  all today (only the posting form), so there is nowhere to reach that action from; blocking a
+  *host* is at parity (`RideDetailView`'s host card, `BlockedListView`).
+- **iOS's Host Dashboard has no Android screen to mirror pixel-for-pixel.** Android's own
+  `HostDashboard` route is registered but has zero `navigate("host_dashboard")` call sites, so it
+  was already unreachable there; iOS's `HostDashboardView` is a new entry point off
+  `MyRidesTabView`, built to match the composable's stats/filters in spirit rather than an
+  Android screen someone can actually open.
