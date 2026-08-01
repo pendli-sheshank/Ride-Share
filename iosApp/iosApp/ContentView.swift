@@ -538,6 +538,16 @@ struct PlaceField: View {
     @State private var results: [PhotonPlaceResult] = []
     @State private var searchTask: Task<Void, Never>?
     @State private var isSearching = false
+    /// `query` is also set programmatically — tapping a result, and the `onAppear` prefill — and
+    /// `.onChange(of:)` fires for those writes exactly like a keystroke. Without this flag,
+    /// setting `query` right after setting `selection` immediately wiped `selection` back out and
+    /// re-triggered a search, making it impossible to ever keep a chosen place.
+    @State private var suppressNextChange = false
+
+    private func setQueryProgrammatically(_ newValue: String) {
+        suppressNextChange = true
+        query = newValue
+    }
 
     /// Same shape as Android's `LocationAutoCompleteTextField`: a 2-char minimum and a 250ms
     /// debounce before hitting Photon, so a fast typist fires one request per pause instead of
@@ -559,9 +569,9 @@ struct PlaceField: View {
             guard !Task.isCancelled else { return }
             let fetched: [PhotonPlaceResult]
             if let bias, bias.isResolved {
-                fetched = await viewModel.searchPlaces(newValue, biasLat: bias.lat, biasLon: bias.lon)
+                fetched = await viewModel.searchPlaces(trimmed, biasLat: bias.lat, biasLon: bias.lon)
             } else {
-                fetched = await viewModel.searchPlaces(newValue)
+                fetched = await viewModel.searchPlaces(trimmed)
             }
             guard !Task.isCancelled else { return }
             results = fetched.isEmpty ? defaultPlaces(matching: trimmed) : fetched
@@ -591,7 +601,13 @@ struct PlaceField: View {
         VStack(alignment: .leading, spacing: BrandScale.spaceXs) {
             HStack {
                 TextField(title, text: $query)
-                    .onChange(of: query) { newValue in scheduleSearch(for: newValue) }
+                    .onChange(of: query) { newValue in
+                        if suppressNextChange {
+                            suppressNextChange = false
+                            return
+                        }
+                        scheduleSearch(for: newValue)
+                    }
                 if isSearching {
                     ProgressView().scaleEffect(0.7)
                 }
@@ -605,8 +621,9 @@ struct PlaceField: View {
 
             ForEach(results.prefix(6), id: \.formattedAddress) { place in
                 Button {
+                    searchTask?.cancel()
                     selection = PlaceSelection(name: place.name, lat: place.lat, lon: place.lon)
-                    query = place.name
+                    setQueryProgrammatically(place.name)
                     results = []
                 } label: {
                     VStack(alignment: .leading) {
@@ -618,7 +635,7 @@ struct PlaceField: View {
         }
         .onAppear {
             // A prefilled selection needs the field to show it, or the address looks lost.
-            if query.isEmpty && selection.isResolved { query = selection.name }
+            if query.isEmpty && selection.isResolved { setQueryProgrammatically(selection.name) }
             if results.isEmpty { results = defaultPlaces(matching: "") }
         }
     }
