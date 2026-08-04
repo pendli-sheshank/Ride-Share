@@ -1,82 +1,145 @@
 # Split Cruiser 🚗💨
 
-**Split Cruiser** is a modern, cost-sharing carpool and ride-sharing application designed to empower riders and communities to travel safely, affordably, and sustainably.
+**Split Cruiser** is a cost-sharing carpool and ride-sharing app, open to anyone booking a ride —
+no invite codes, no affiliation required. Hosts post rides with a seat count and a cost split;
+riders browse the feed, reserve a seat, and chat with the host to coordinate pickup.
 
-With a highly polished Material 3 visual interface, robust local offline support, and flexible user registration flows, Split Cruiser makes coordinating rides a seamless experience.
+The app ships on **both Android and iOS** from one repository: a Kotlin Multiplatform `:shared`
+module holds the entire backend, with a Jetpack Compose UI on Android and a SwiftUI UI on iOS.
 
 ---
 
 ## 🌟 Key Features
 
-### 🔐 1. Seamless Authentication & Onboarding
-*   **Flexible Access:** Supports standard email and password authentication (with strict validation checks ensuring a clean, well-formatted email address structure), plus Google sign-in on Android.
-*   **Simple Onboarding:** Collects a name, contact number, and home address so ride requests can prefill their own pickup — open to anyone, not gated on any affiliation.
+### 🔐 Authentication & Onboarding
+*   **Email & password sign-in** on both platforms, with clear, specific error messages for
+    misconfiguration and bad credentials.
+*   **Google sign-in on Android** via Credential Manager — the token exchange lives in the shared
+    module, so iOS can adopt it later with an `ASWebAuthenticationSession` flow.
+*   **Open onboarding:** collects a name, contact number, and home address (used to prefill your
+    pickup point). Signup is not gated on an invite code or any affiliation.
+*   The home address is stored in a private Firestore subcollection, separate from the
+    world-readable public profile.
 
-### 🚗 2. Host a Split Cruiser (Offer a Ride)
-*   **Comprehensive Details:** Drivers can set up a ride offer by specifying pick-up points, destinations, exact date/time (with elegant native pickers), available seats, and split-cost parameters.
-*   **Vehicle Logging:** Link exact vehicle make, model, license details, and status so passengers know exactly what car to expect.
-*   **Rider Dashboard:** Manage hosted rides, view joined passengers, and coordinate departure times.
+### 🚗 Host a Split Cruiser (Offer a Ride)
+*   Post an offer with pickup, destination, date/time, available seats, and cost-split parameters.
+*   **Vehicle logging:** make, model, and license details so passengers know what car to expect.
+*   **Host controls:** accept or decline seat requests, close a ride, and set an exit location.
+*   **Automatic matching notifications:** hosts are notified of matching ride requests, and riders
+    of matching offers.
 
-### 👥 3. Join a Split Cruiser (Find a Ride)
-*   **Explore Tab:** Browse through active rides on an intuitive card-based feed styled with clean typography and crisp icons.
-*   **Propose Pick-up Dialog:** Coordinate pick-up locations dynamically before booking.
-*   **Direct Communication:** Quick action triggers to call or email the host driver directly from their public profile.
+### 👥 Join a Split Cruiser (Find a Ride)
+*   **Explore feed** of active offers and requests on a card-based layout.
+*   **Ride detail screen** with the host's public profile, vehicle info, and rating.
+*   **Reserve a seat** on an offer, or **post a ride request** and let hosts come to you.
+*   **In-app chat** per match to coordinate pickup, plus quick actions to call or email the host.
 
-### 🎨 4. Aesthetic & Visual Design (Material 3)
-*   **Split Cruiser Visual Palette:** Employs Split Cruiser Saffron, Deep Indigo, Emerald Status accents, and clean Light Gray contrasts on a gorgeous, accessible slate layout.
-*   **Accessible Components:** Fully compliant touch targets ($\ge$ 48dp), clear vector iconography, and high-contrast dialogue states to prevent color blending and maximize readability.
-*   **Adaptive Transitions:** Designed with edge-to-edge system navigation and dynamic layouts suited for compact mobile devices.
+### 📍 Location & Routing
+*   **Location autocomplete** backed by OpenStreetMap, ranked toward a nearby anchor rather than
+    plain text match — searching "Main St" favors the one near you.
+*   **Route distance and duration** via OSRM, feeding the cost-split calculation.
 
----
-
-## 🛠️ Tech Stack
-
-*   **Platform:** Android (Kotlin)
-*   **UI Framework:** Jetpack Compose (Material Design 3)
-*   **Architecture:** Clean Architecture with **MVVM** (Model-View-ViewModel) pattern
-*   **Concurrency:** Kotlin Coroutines & Kotlin StateFlow for asynchronous, reactive UI updates
-*   **Database & Local Cache:** SQLite via **Room Database** for high-performance offline caching, user profile persistence, and state tracking
-*   **Authentication:** Firebase Authentication (with robust, simulated fallback architectures when Firebase services are offline or not configured)
-*   **Asset Management:** Coil & Android Vector Drawables for crisp, scalable visual illustrations
-
----
-
-## 🔥 Firebase Integration & Setup
-
-Split Cruiser includes built-in support for **Firebase Authentication**, **Cloud Firestore** real-time snapshot synchronization, and **Firebase Storage**:
-
-*   **Real-time Firestore Sync:** Automatically synchronizes `users`, `trip_offers`, `ride_requests`, `trip_matches`, and `messages` in real time when connected.
-*   **Firebase Authentication:** Handles secure user sign-up, email/password login, and verification flows.
-*   **Automatic Fallback Engine:** If Firebase credentials are not provided, Split Cruiser automatically runs in **Sandbox Mode** using local persistent state without crashing.
-*   **Firebase Setup Options:**
-    1.  **Option A (google-services.json):** Place your `google-services.json` file inside the `/app` directory.
-    2.  **Option B (Secrets Panel / .env):** Configure `FIREBASE_API_KEY`, `FIREBASE_APP_ID`, `FIREBASE_PROJECT_ID`, and `FIREBASE_STORAGE_BUCKET` in the **Secrets Panel** in AI Studio.
+### 🎨 Design System
+*   **Shared design tokens:** colors, spacing, and radii live once in
+    `shared/.../ui/theme/Color.kt`; both the Compose theme and `Theme.swift` wrap them, so the two
+    apps stay visually in sync.
+*   Material 3 on Android, native SwiftUI styling on iOS, with a cross-platform parity checklist
+    in `.claude/DESIGN_SYSTEM.md`.
 
 ---
 
-## 📈 User Journeys & Uses
+## 📱 Platform Parity
 
-### Scenario A: The Commuting Host
-1. **Sign Up / Log In** to Split Cruiser.
-2. Complete your **Profile Setup** including your vehicle's make/model and profile picture.
-3. Tap **Create Ride**, specify your starting point, destination, date/time, and select available passenger seats.
-4. Save the ride, allowing passengers to see and join your commute.
+The backend is 100% shared; each screen is implemented per platform. Current coverage:
 
-### Scenario B: The Ride-Seeker (Passenger)
-1. Log in and browse the **Explore feed** of active trips.
-2. Filter or select a ride to view the driver's public profile, vehicle information, and verified tier rating.
-3. Tap **Join Ride** or **Propose Pick-up** to reserve your seat and coordinate directly with the driver.
+| Feature | Android | iOS |
+|---|:---:|:---:|
+| Email/password auth | ✅ | ✅ |
+| Google sign-in | ✅ | — |
+| Onboarding (phone, address, vehicle) | ✅ | ✅ |
+| Browse feed & ride detail | ✅ | ✅ |
+| Post an offer / post a request | ✅ | ✅ |
+| Reserve a seat, accept/decline | ✅ | ✅ |
+| Chat | ✅ | ✅ |
+| Host analytics | ✅ | — |
+| Blocked-user management | ✅ | — |
+| Profile editing & picture upload | ✅ | — |
+| Ratings | ✅ | — |
 
 ---
 
-## ⚙️ Development & Verification
+## 🛠️ Tech Stack & Architecture
 
-To compile and verify the Android application successfully:
+*   **Shared backend:** Kotlin Multiplatform (`:shared`, targeting Android + three iOS targets).
+    One `SplitCruiserRepository` serves both apps.
+*   **Firebase over REST, not the native SDKs:** Identity Toolkit (auth), Firestore v1, and
+    Storage v0, all through **Ktor**. This keeps iOS free of CocoaPods/SPM dependencies —
+    `ktor-client-darwin` is plain Kotlin/Native.
+*   **Polling instead of snapshot listeners:** Firestore's realtime channel is gRPC-only, so the
+    repository polls — feeds at 20s, chat at 3s while open, backing off in the background.
+*   **Swift-friendly API surface:** the shared public API throws instead of returning `Result`
+    (which Kotlin/Native cannot export); `androidMain/ResultShims.kt` restores the `Result` shape
+    for the Android ViewModel.
+*   **Android UI:** Jetpack Compose, Material 3, MVVM with Coroutines + StateFlow.
+*   **iOS UI:** SwiftUI, with an `AppViewModel` wrapper over the shared repository and an Xcode
+    project generated by `iosApp/generate-project.py`.
+*   **Firestore rules & indexes** are deployable via `firebase.json`.
+
+---
+
+## 🚀 CI & Releases
+
+GitHub Actions builds and publishes both apps:
+
+*   **Android** → Google Play internal testing (`release-android.yml`)
+*   **iOS** → Apple TestFlight (`ios-release.yml`, triggered on every push to `main`)
+*   `ci.yml` runs the shared and Android test suites on PRs.
+
+Setup runbooks, the secret inventory, and a log of known CI failures live in
+`.claude/skills/release-pipeline/SKILL.md` — read it before touching anything under `.github/`,
+signing config, or version numbers.
+
+---
+
+## ⚙️ Building Locally
 
 ```bash
-# Run unit tests and JVM checks
-gradle :app:testDebugUnitTest
+# Android app
+./gradlew :app:assembleDebug
 
-# Compile the application project
-compile_applet
+# Android unit tests
+./gradlew :app:testDebugUnitTest
+
+# Shared module tests (142 tests: codec, REST clients, token refresh, feed rules, repository, chat)
+./gradlew :shared:allTests
+
+# Proxy for "will this compile for iOS?" (works without a Mac)
+./gradlew :shared:compileCommonMainKotlinMetadata
 ```
+
+The iOS app itself requires a Mac; regenerate the Xcode project with
+`iosApp/generate-project.py` after changing the project structure.
+
+---
+
+## 📁 Project Layout
+
+| Path | What |
+|---|---|
+| `app/` | Android application (Jetpack Compose). `ui/SplitCruiserApp.kt` holds nearly all the Android UI. |
+| `shared/` | Kotlin Multiplatform library — the whole backend, models, matching/feed logic, and design tokens. |
+| `iosApp/` | SwiftUI app, shipping to TestFlight, with a generated Xcode project. |
+| `firebase.json` | Firestore rules and indexes. |
+| `.claude/` | Design system, release-pipeline runbook, and historical feature guides. |
+
+---
+
+## ⚠️ Known Limitations
+
+*   **The UI is not shared** — every screen exists twice (Compose + SwiftUI). Design tokens are
+    shared; the parity table above is kept honest manually.
+*   **iOS stores the refresh token in `NSUserDefaults`**, not the Keychain, pending a
+    `KeychainStore` implementation.
+*   **Rating aggregation is client-written** and spoofable; the real fix is a Cloud Function.
+*   Firebase is the only data store — an unconfigured build fails loudly rather than falling back
+    to local data.
