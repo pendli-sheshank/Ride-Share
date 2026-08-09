@@ -8,10 +8,21 @@
 /* Begin PBXBuildFile section */
 		ADDBC3DFFBF25EEFB82A1B3D /* iOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C635C5E2CDDD511A937B1BE4 /* iOSApp.swift */; };
 		1CFC2AA8149752C5BF6F58F4 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 409940227D65583E855B95E9 /* Theme.swift */; };
+		87C3A0B9FE825AEFAB519AC4 /* DesignPrimitives.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88A103CE7ABB510A948F8AD7 /* DesignPrimitives.swift */; };
+		12CF37E7513955BEA6F72112 /* LoadingViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED4B6BF6AB4E57F584A900BF /* LoadingViews.swift */; };
+		0DDFEDD2D1C85389B3236ADA /* AppRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB51A995D126594E833C6517 /* AppRouter.swift */; };
+		136897E3F6FD5E1CA21CB28A /* ViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D3D2A92B3975171BBB525B1 /* ViewModel.swift */; };
+		7A96A302A995515E8B419FD8 /* LocationAutocompleteField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D74E8FBBBCF5E118164FF70 /* LocationAutocompleteField.swift */; };
+		3405091099EF5F7F8A4D0F2C /* TripCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1D84D980503594184843ACA /* TripCards.swift */; };
+		C74EBC44DB8854C78A5E7C94 /* ScheduleCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67BC6ECAE11A58B7B4E2D9FF /* ScheduleCards.swift */; };
 		00117EF9E3F752CC92FFC020 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3213C9ECB6B259AEA2B8D1BB /* ContentView.swift */; };
+		5377EE7D2E985D0289E8B375 /* ExploreFeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56AACB793050549C84054ADC /* ExploreFeed.swift */; };
+		B141B03A99615AE59A3EB140 /* AuthScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB6690D674E5505E93B796B0 /* AuthScreens.swift */; };
+		A5A162F595E35DCBA8DC0893 /* PostRideForms.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF3B5CC005D152569F835ABE /* PostRideForms.swift */; };
+		61B3E0EE19BF56EAAA75A55D /* DetailScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AAEB7030B4152E2803E68F3 /* DetailScreens.swift */; };
 		34EEAABF6EDA527EA28C82F8 /* RideDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6600575985875FD2B70BF20A /* RideDetailView.swift */; };
 		C2BF4953E2C15B7D873F29AF /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99E0516B807E58B8AC220614 /* ChatView.swift */; };
-		136897E3F6FD5E1CA21CB28A /* ViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D3D2A92B3975171BBB525B1 /* ViewModel.swift */; };
+		D3C2DD468A8450A6B7A390AE /* ProfileScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DEC67FA6F9E5EC5A293476D /* ProfileScreens.swift */; };
 		41842331DC585BB2A741E495 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3D8261F990D35581B391804F /* Assets.xcassets */; };
 		C184793FE5BA565897EAA63B /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = F65FD96E2BE4530ABB6CC5CC /* LaunchScreen.storyboard */; };
 		FE3CC1D9C1405115968A1DFD /* Shared.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4D78B6A376685539B5276587 /* Shared.xcframework */; };
@@ -21,10 +32,21 @@
 		6C71546D770452B782C55EC1 /* iosApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = iosApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C635C5E2CDDD511A937B1BE4 /* iOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp.swift; sourceTree = "<group>"; };
 		409940227D65583E855B95E9 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		88A103CE7ABB510A948F8AD7 /* DesignPrimitives.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignPrimitives.swift; sourceTree = "<group>"; };
+		ED4B6BF6AB4E57F584A900BF /* LoadingViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadingViews.swift; sourceTree = "<group>"; };
+		DB51A995D126594E833C6517 /* AppRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRouter.swift; sourceTree = "<group>"; };
+		3D3D2A92B3975171BBB525B1 /* ViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewModel.swift; sourceTree = "<group>"; };
+		0D74E8FBBBCF5E118164FF70 /* LocationAutocompleteField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationAutocompleteField.swift; sourceTree = "<group>"; };
+		B1D84D980503594184843ACA /* TripCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripCards.swift; sourceTree = "<group>"; };
+		67BC6ECAE11A58B7B4E2D9FF /* ScheduleCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleCards.swift; sourceTree = "<group>"; };
 		3213C9ECB6B259AEA2B8D1BB /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		56AACB793050549C84054ADC /* ExploreFeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExploreFeed.swift; sourceTree = "<group>"; };
+		BB6690D674E5505E93B796B0 /* AuthScreens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthScreens.swift; sourceTree = "<group>"; };
+		BF3B5CC005D152569F835ABE /* PostRideForms.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostRideForms.swift; sourceTree = "<group>"; };
+		6AAEB7030B4152E2803E68F3 /* DetailScreens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailScreens.swift; sourceTree = "<group>"; };
 		6600575985875FD2B70BF20A /* RideDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RideDetailView.swift; sourceTree = "<group>"; };
 		99E0516B807E58B8AC220614 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
-		3D3D2A92B3975171BBB525B1 /* ViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewModel.swift; sourceTree = "<group>"; };
+		1DEC67FA6F9E5EC5A293476D /* ProfileScreens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileScreens.swift; sourceTree = "<group>"; };
 		FD81299CF3F35F7D9D3BE2F2 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		3D8261F990D35581B391804F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F65FD96E2BE4530ABB6CC5CC /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
@@ -65,10 +87,21 @@
 			children = (
 				C635C5E2CDDD511A937B1BE4 /* iOSApp.swift */,
 				409940227D65583E855B95E9 /* Theme.swift */,
+				88A103CE7ABB510A948F8AD7 /* DesignPrimitives.swift */,
+				ED4B6BF6AB4E57F584A900BF /* LoadingViews.swift */,
+				DB51A995D126594E833C6517 /* AppRouter.swift */,
+				3D3D2A92B3975171BBB525B1 /* ViewModel.swift */,
+				0D74E8FBBBCF5E118164FF70 /* LocationAutocompleteField.swift */,
+				B1D84D980503594184843ACA /* TripCards.swift */,
+				67BC6ECAE11A58B7B4E2D9FF /* ScheduleCards.swift */,
 				3213C9ECB6B259AEA2B8D1BB /* ContentView.swift */,
+				56AACB793050549C84054ADC /* ExploreFeed.swift */,
+				BB6690D674E5505E93B796B0 /* AuthScreens.swift */,
+				BF3B5CC005D152569F835ABE /* PostRideForms.swift */,
+				6AAEB7030B4152E2803E68F3 /* DetailScreens.swift */,
 				6600575985875FD2B70BF20A /* RideDetailView.swift */,
 				99E0516B807E58B8AC220614 /* ChatView.swift */,
-				3D3D2A92B3975171BBB525B1 /* ViewModel.swift */,
+				1DEC67FA6F9E5EC5A293476D /* ProfileScreens.swift */,
 				FA323A44D82D57B182964EE0 /* Resources */,
 			);
 			path = iosApp;
@@ -165,10 +198,21 @@
 			files = (
 				ADDBC3DFFBF25EEFB82A1B3D /* iOSApp.swift in Sources */,
 				1CFC2AA8149752C5BF6F58F4 /* Theme.swift in Sources */,
+				87C3A0B9FE825AEFAB519AC4 /* DesignPrimitives.swift in Sources */,
+				12CF37E7513955BEA6F72112 /* LoadingViews.swift in Sources */,
+				0DDFEDD2D1C85389B3236ADA /* AppRouter.swift in Sources */,
+				136897E3F6FD5E1CA21CB28A /* ViewModel.swift in Sources */,
+				7A96A302A995515E8B419FD8 /* LocationAutocompleteField.swift in Sources */,
+				3405091099EF5F7F8A4D0F2C /* TripCards.swift in Sources */,
+				C74EBC44DB8854C78A5E7C94 /* ScheduleCards.swift in Sources */,
 				00117EF9E3F752CC92FFC020 /* ContentView.swift in Sources */,
+				5377EE7D2E985D0289E8B375 /* ExploreFeed.swift in Sources */,
+				B141B03A99615AE59A3EB140 /* AuthScreens.swift in Sources */,
+				A5A162F595E35DCBA8DC0893 /* PostRideForms.swift in Sources */,
+				61B3E0EE19BF56EAAA75A55D /* DetailScreens.swift in Sources */,
 				34EEAABF6EDA527EA28C82F8 /* RideDetailView.swift in Sources */,
 				C2BF4953E2C15B7D873F29AF /* ChatView.swift in Sources */,
-				136897E3F6FD5E1CA21CB28A /* ViewModel.swift in Sources */,
+				D3C2DD468A8450A6B7A390AE /* ProfileScreens.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

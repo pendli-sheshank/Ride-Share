@@ -89,16 +89,20 @@ not evidence. Verify against a build.
 ## Known gaps
 
 - **The UI is not shared.** The backend is, but Android is Jetpack Compose in `:app` and iOS is
-  SwiftUI in `iosApp/`, so every screen exists twice. Design *tokens* are now shared, and iOS
-  covers auth, onboarding (including phone/address/vehicle), browse, a full ride-detail screen,
-  post an offer, post a request, reserve a seat, accept/decline, and chat. Still Android-only:
-  host analytics, blocked-user management, profile editing and picture upload, and ratings.
-  **Google sign-in is Android-only** — the token exchange is in `:shared`, but only Android
-  acquires a Google ID token (Credential Manager); iOS would need an `ASWebAuthenticationSession`
-  flow and a URL scheme in the generated Xcode project. Sharing the UI itself would mean Compose
-  Multiplatform and moving `SplitCruiserApp.kt` into `commonMain`.
+  SwiftUI in `iosApp/`, so every screen exists twice. Design *tokens* are shared, and iOS now
+  covers every screen Android has: auth, onboarding, browse, ride detail, post an offer, post a
+  request, reserve a seat, accept/decline, chat, profile editing and picture upload, ratings,
+  blocked-user management, and host analytics.
+  **Google sign-in is the one remaining Android-only feature** — the token exchange is in
+  `:shared`, but only Android acquires a Google ID token (Credential Manager); iOS would need an
+  `ASWebAuthenticationSession` flow and a URL scheme in the generated Xcode project. Sharing the
+  UI itself would mean Compose Multiplatform and moving `SplitCruiserApp.kt` into `commonMain`.
   **Nothing keeps the two in sync automatically** — use the parity checklist in
   `.claude/DESIGN_SYSTEM.md` at PR time.
+- **Adding a Swift file takes two steps.** `iosApp/generate-project.py` holds a hardcoded
+  `SWIFT_SOURCES` list; a file on disk is not enough. Add the filename, re-run the generator, and
+  commit the regenerated `project.pbxproj`. CI checks both halves, and `swiftc` does not exist on
+  Linux — the PR job's simulator build is the only thing that compiles Swift before merge.
 - **iOS keeps the refresh token in `NSUserDefaults`, not the Keychain.** It is a long-lived
   credential sitting in a plaintext plist that is included in unencrypted backups. `KeychainStore`
   is the fix; it was deferred because Keychain cinterop cannot be compile-checked on Linux.

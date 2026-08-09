@@ -131,15 +131,26 @@ it, so until that changes this checklist is the mechanism.
 
 | Screen | Android | iOS |
 |---|---|---|
-| Login / sign up | `EmailPasswordLoginScreen` | `LoginView` |
-| Onboarding | `ProfileSetupScreen` | `ProfileSetupView` |
-| Browse rides | `DashboardScreen` (Explore) | `HomeTabView` |
-| Ride detail | `TripDetailScreen` | `RideDetailView` |
-| Post offer / request | `PostOfferScreen` / `PostRequestScreen` | `PostOfferView` / `PostRequestView` |
-| My rides | `DashboardScreen` (Trips) | `MyRidesTabView` |
-| Matches | Explore's "Active Trip Coordination" | `MatchesTabView` |
+| Login / sign up | `EmailPasswordLoginScreen` | `LoginScreen` (`AuthScreens.swift`) |
+| Onboarding | `ProfileSetupScreen` | `ProfileSetupScreen` (`AuthScreens.swift`) |
+| Browse rides | `DashboardScreen` (Explore) | `ExploreFeed` |
+| Ride detail | `TripDetailScreen` | `TripDetailScreen` (`DetailScreens.swift`) |
+| Post offer / request | `PostOfferScreen` / `PostRequestScreen` | `PostOfferScreen` / `PostRequestScreen` (`PostRideForms.swift`) |
+| My rides | `DashboardScreen` (Trips) | `TripsTab` (`ExploreFeed.swift`) |
+| Matches | Explore's "Active Trip Coordination" | `MatchesScreen` (`DetailScreens.swift`) |
 | Chat | `ChatScreen` | `ChatView` |
-| Profile | `ProfileScreen` | `ProfileTabView` |
+| Profile | `ProfileScreen` | `ProfileScreen` (`ProfileScreens.swift`) |
+| Ratings | `ProfileScreen`'s rating card | `RatingsCard` (`ProfileScreens.swift`) |
+| Profile editing | `EditProfileDialog` | `EditProfileSheet` (`ProfileScreens.swift`) |
+| Blocked users | `BlockedListScreen` | `BlockedListScreen` (`ProfileScreens.swift`) |
+| Host analytics | `HostDashboard` | `HostDashboardScreen` (`ProfileScreens.swift`) |
+
+**Two deliberate structural differences**, both recorded rather than accidental:
+
+- Android's bottom bar sends "Chats" straight into `userMatches.first()` and has no list behind
+  it, so every other conversation is unreachable from the bar. iOS keeps a `MatchesScreen` list.
+- Android registers a `host_dashboard` route that nothing navigates to. On iOS the screen is
+  reachable, from the Profile screen's safety section.
 
 ### Questions to answer before merging
 
@@ -161,8 +172,11 @@ Not everything is at parity, and that is fine as long as it is deliberate:
 - **Google sign-in is Android-only.** The token exchange is shared, but only Android acquires a
   Google ID token (Credential Manager). iOS would need `ASWebAuthenticationSession` and a URL
   scheme in the generated Xcode project.
-- **Host analytics (`HostDashboard`) is Android-only.** Whether iOS hosts need it is an open
-  product question, not an oversight.
-- **Blocked-user management is Android-only.**
-- **Profile editing and picture upload are Android-only.** `uploadProfilePicture` is in `:shared`
-  and takes bytes precisely so iOS can hand it a UIImage's JPEG data when someone builds the UI.
+- **The "use my location" chip in the address dropdown is Android-only, and should not be
+  ported as-is.** Android's version has the coordinates hardcoded to Northeastern's campus
+  (42.3383, -71.0881) — it is styled as a location button but reads no location. iOS omits it.
+  The fix is real `CoreLocation` feeding the existing shared `reverseGeocodeNominatim`, then
+  porting that back to Android.
+
+Host analytics, blocked-user management, profile editing, picture upload and ratings **used to be
+listed here** and are now on both platforms.

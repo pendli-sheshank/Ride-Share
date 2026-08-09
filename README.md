@@ -61,10 +61,10 @@ The backend is 100% shared; each screen is implemented per platform. Current cov
 | Post an offer / post a request | ✅ | ✅ |
 | Reserve a seat, accept/decline | ✅ | ✅ |
 | Chat | ✅ | ✅ |
-| Host analytics | ✅ | — |
-| Blocked-user management | ✅ | — |
-| Profile editing & picture upload | ✅ | — |
-| Ratings | ✅ | — |
+| Host analytics | ✅ | ✅ |
+| Blocked-user management | ✅ | ✅ |
+| Profile editing & picture upload | ✅ | ✅ |
+| Ratings | ✅ | ✅ |
 
 ---
 
@@ -137,7 +137,8 @@ The iOS app itself requires a Mac; regenerate the Xcode project with
 ## ⚠️ Known Limitations
 
 *   **The UI is not shared** — every screen exists twice (Compose + SwiftUI). Design tokens are
-    shared; the parity table above is kept honest manually.
+    shared; the parity table above is kept honest manually, via the checklist in
+    `.claude/DESIGN_SYSTEM.md`.
 *   **iOS stores the refresh token in `NSUserDefaults`**, not the Keychain, pending a
     `KeychainStore` implementation.
 *   **Rating aggregation is client-written** and spoofable; the real fix is a Cloud Function.

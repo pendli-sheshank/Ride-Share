@@ -307,6 +307,29 @@ account state.
 
 Append-only log. Format: symptom as logged → cause → fix.
 
+### 2026-08-09 — a Swift type error reached `main` because no PR job compiled Swift
+**Cause:** `build-ios.yml`'s "Validate Swift syntax" step ran `swiftc -parse` per file and ended
+in `|| true`, so it could never fail. It could not have worked regardless: parsing one file at a
+time cannot resolve `import Shared`, which is presumably why the `|| true` was there. The only
+real compile was `ios-release.yml`'s `xcodebuild archive`, gated on push to `main` — the same
+workflow that uploads to TestFlight, where a build number can never be reused. So the first
+signal that iOS did not build was a broken release.
+**Fix:** replaced it with a real `xcodebuild build -destination 'generic/platform=iOS Simulator'`.
+Debug, not Release: `-Onone` typechecks far faster than `wholemodule -O`, and the gate wants type
+errors, not an optimised binary. A simulator destination needs no signing, so it still runs on
+fork PRs with no secrets.
+**Check for it:** any CI step whose purpose is to fail should be tested by making it fail once.
+
+### 2026-08-09 — `no such module 'Shared'` on any Debug build
+**Cause:** `generate-project.py` set Debug's `FRAMEWORK_SEARCH_PATHS` to
+`shared/build/XCFrameworks/debug`, but neither workflow ever builds a debug XCFramework — both run
+`:shared:assembleSharedReleaseXCFramework`, which writes to `.../release`. This was latent for as
+long as nothing built Debug in CI, and also bit anyone who built the release framework locally and
+then hit Run in Xcode.
+**Fix:** list both directories in Debug's search paths; Xcode ignores one that does not exist.
+**Check for it:** `ls shared/build/XCFrameworks` and compare against the `FRAMEWORK_SEARCH_PATHS`
+of the configuration you are actually building.
+
 ### 2026-07-24 — `BUILD SUCCESSFUL` but the app crashes instantly on launch
 **Cause:** `:app` never applied `org.jetbrains.kotlin.android`. AGP 9.x compiles Kotlin
 natively; when the project was downgraded to AGP 8.8.0 the plugin was never added, so no

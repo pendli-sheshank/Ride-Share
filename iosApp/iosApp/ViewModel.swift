@@ -27,6 +27,27 @@ final class AppViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
 
+    /// Whether a pull-to-refresh is in flight.
+    ///
+    /// Kept separate from `isLoading` because they drive different things: `isLoading` raises a
+    /// modal full-screen overlay, and routing a background refresh through it meant a pull-to-
+    /// refresh dimmed the whole app and — since `perform` clears `errorMessage` on entry — could
+    /// erase an error the user had not read yet. Android has always split these
+    /// (`_isRefreshing` vs `_isLoading`).
+    @Published var isRefreshing = false
+
+    /// What the loading overlay says it is doing. Android parameterises the same string.
+    /// "Securing your ride…" belongs to reserving a seat, not to logging in.
+    @Published var loadingMessage = AppViewModel.defaultLoadingMessage
+
+    /// The transient confirmation shown by `ToastHost`, standing in for Android's `Toast`.
+    @Published var transientMessage: String?
+
+    /// Which side of the marketplace Explore is showing. Android's `currentMode`.
+    @Published var mode: RideMode = .rider
+
+    static let defaultLoadingMessage = "Just a moment…"
+
     /// The current user's own hosted/joined rides. `activeOffers` deliberately excludes a host's
     /// own rides (`FeedProjector` filters `hostId != currentUserId` so a host doesn't see their own
     /// ride in the browse feed), so deriving "my rides" from it — as this used to — always came up
@@ -130,7 +151,7 @@ final class AppViewModel: ObservableObject {
         homeLng: Double,
         vehicle: Vehicle?
     ) async {
-        await perform {
+        await perform("Setting up your profile…") {
             try await self.repository.createUserProfile(
                 name: name,
                 lastInitial: lastInitial,
@@ -172,7 +193,7 @@ final class AppViewModel: ObservableObject {
         vehicleInfo: String,
         exitLocation: String = ""
     ) async -> Bool {
-        await perform {
+        await perform("Posting your ride offer…") {
             let offer = RideFactory.shared.makeTripOffer(
                 origin: origin,
                 destination: destination,
@@ -204,7 +225,7 @@ final class AppViewModel: ObservableObject {
         womenOnly: Bool,
         exitLocation: String = ""
     ) async -> Bool {
-        await perform {
+        await perform("Posting your ride request…") {
             let request = RideFactory.shared.makeRideRequest(
                 origin: origin,
                 destination: destination,
@@ -225,25 +246,57 @@ final class AppViewModel: ObservableObject {
     // MARK: - Joining and matching
 
     func joinRide(offerId: String) async -> Bool {
-        await perform { try await self.repository.joinTripOfferDirect(offerId: offerId) }
+        await perform("Securing your ride…") {
+            try await self.repository.joinTripOfferDirect(offerId: offerId)
+        }
     }
 
     func acceptMatch(matchId: String) async {
-        await perform { try await self.repository.acceptMatch(matchId: matchId) }
+        await perform("Securing your ride…") {
+            try await self.repository.acceptMatch(matchId: matchId)
+        }
     }
 
     func declineMatch(matchId: String) async {
         await perform { try await self.repository.declineMatch(matchId: matchId) }
     }
 
+    /// A host offering one of their own rides to an open request. Auto-accepts on the shared side,
+    /// so the returned match can be opened straight into chat.
+    ///
+    /// Returns the match rather than a `Bool` because the caller navigates to it; `perform` can't
+    /// carry a value out, so this handles its own loading and error state.
+    func offerSeat(requestId: String, offerId: String, contribution: Double) async -> TripMatch? {
+        loadingMessage = "Offering the seat…"
+        isLoading = true
+        errorMessage = nil
+        defer {
+            isLoading = false
+            loadingMessage = AppViewModel.defaultLoadingMessage
+        }
+        do {
+            return try await repository.offerSeatForRequest(
+                requestId: requestId, offerId: offerId, contribution: contribution
+            )
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// Switches the Explore feed between rider and host. Android's `switchMode`.
+    func switchMode(_ newMode: RideMode) {
+        mode = newMode
+    }
+
     func refresh() async {
-        await perform { try await self.repository.refreshNow() }
+        await performRefresh { try await self.repository.refreshNow() }
     }
 
     /// Populates `hostedRides`/`joinedRides` from the unfiltered `hostId`/`passengers` queries —
     /// see the doc comment on those `@Published` properties for why `activeOffers` can't be used.
     func refreshMyTrips() async {
-        await perform {
+        await performRefresh {
             let trips = try await self.repository.fetchMyTrips()
             self.hostedRides = trips.hosted
             self.joinedRides = trips.joined
@@ -265,10 +318,28 @@ final class AppViewModel: ObservableObject {
         return try? await repository.fetchVehicleInfo(userId: userId)
     }
 
+    /// The signed-in user's vehicle, if they have registered one. A synchronous cache read, used
+    /// to decide whether the post-offer form shows Android's "no vehicle set up" notice.
+    var vehicleForCurrentUser: Vehicle? {
+        guard let id = currentUser?.id else { return nil }
+        return repository.getVehicleInfo(userId: id)
+    }
+
+    /// Cancelling one of the current user's own open ride requests.
+    func updateRequestStatus(requestId: String, newStatus: String) async -> Bool {
+        await perform("Cancelling your request…") {
+            try await self.repository.updateRideRequestStatus(
+                requestId: requestId, newStatus: newStatus
+            )
+        }
+    }
+
     /// The host's two real decisions — see `HostControlsPolicy` in `:shared` for which statuses
     /// still allow them.
     func updateOfferStatus(offerId: String, newStatus: String) async -> Bool {
-        await perform { try await self.repository.updateTripOfferStatus(offerId: offerId, newStatus: newStatus) }
+        await perform("Updating the ride…") {
+            try await self.repository.updateTripOfferStatus(offerId: offerId, newStatus: newStatus)
+        }
     }
 
     // MARK: - Chat
@@ -315,7 +386,7 @@ final class AppViewModel: ObservableObject {
     // MARK: - Ratings
 
     func submitRating(toUserId: String, rating: Float, comment: String) async -> Bool {
-        await perform {
+        await perform("Submitting your rating…") {
             try await self.repository.submitRating(
                 toUserId: toUserId,
                 ratingValue: rating,
@@ -327,7 +398,7 @@ final class AppViewModel: ObservableObject {
     // MARK: - Profile management
 
     func updateProfile(name: String, lastInitial: String, avatarUrl: String) async -> Bool {
-        await perform {
+        await perform("Saving your profile…") {
             try await self.repository.updateUserProfileDetails(
                 name: name, lastInitial: lastInitial, avatarUrl: avatarUrl
             )
@@ -338,7 +409,7 @@ final class AppViewModel: ObservableObject {
     /// edge, quality 85) — see `ProfileImages.kt` on the Android side and the picker views that
     /// call this on iOS.
     func uploadProfilePicture(userId: String, imageData: Data) async -> Bool {
-        await perform {
+        await perform("Uploading your picture…") {
             _ = try await self.repository.uploadProfilePicture(userId: userId, bytes: imageData.toKotlinByteArray())
         }
     }
@@ -346,7 +417,9 @@ final class AppViewModel: ObservableObject {
     // MARK: - Blocking
 
     func blockUser(_ userId: String) async -> Bool {
-        await perform { try await self.repository.blockUser(blockedUserId: userId) }
+        await perform("Blocking this rider…") {
+            try await self.repository.blockUser(blockedUserId: userId)
+        }
     }
 
     func unblockUser(_ userId: String) async -> Bool {
@@ -411,12 +484,51 @@ final class AppViewModel: ObservableObject {
         errorMessage = nil
     }
 
+    /// Surfaces a message through the same alert an action failure would use, for the cases the
+    /// UI decides are errors before any call is made — a host with no eligible ride to offer, say.
+    func setError(_ message: String) {
+        errorMessage = message
+    }
+
+    /// Shows a transient confirmation, standing in for one of Android's `Toast` calls.
+    func notify(_ message: String) {
+        transientMessage = message
+    }
+
     /// The load/error dance every action repeated. Returns whether the block succeeded.
+    ///
+    /// `message` names the action for the overlay; it is reset afterwards so the next caller that
+    /// forgets to pass one gets the neutral default rather than the previous action's words.
     @discardableResult
-    private func perform(_ block: @escaping () async throws -> Void) async -> Bool {
+    private func perform(
+        _ message: String = AppViewModel.defaultLoadingMessage,
+        _ block: @escaping () async throws -> Void
+    ) async -> Bool {
+        loadingMessage = message
         isLoading = true
         errorMessage = nil
-        defer { isLoading = false }
+        defer {
+            isLoading = false
+            loadingMessage = AppViewModel.defaultLoadingMessage
+        }
+        do {
+            try await block()
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    /// The refresh counterpart of `perform`.
+    ///
+    /// Raises `isRefreshing` rather than `isLoading`, so a background or pull-to-refresh does not
+    /// throw up the modal overlay, does not disable every form's submit button, and does not wipe
+    /// an unread error.
+    @discardableResult
+    private func performRefresh(_ block: @escaping () async throws -> Void) async -> Bool {
+        isRefreshing = true
+        defer { isRefreshing = false }
         do {
             try await block()
             return true
