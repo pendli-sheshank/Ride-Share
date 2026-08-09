@@ -20,6 +20,7 @@ import com.splitcruiser.app.data.firebase.firebaseJson
 import com.splitcruiser.app.data.firebase.integerValue
 import com.splitcruiser.app.data.firebase.stringValue
 import io.ktor.client.engine.HttpClientEngine
+import kotlin.math.round
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -774,6 +775,101 @@ class SplitCruiserRepository internal constructor(
         }
 
     /**
+     * The host-side mirror of [findOrCreateBackingRequest]: the [TripOffer] a match needs when a
+     * driver takes a rider's request without having posted a ride of their own.
+     *
+     * A driver *is* the ride. Making them publish an offer, then come back and pair it with the
+     * request, is bookkeeping the app can do for them — so this mints the offer from the request's
+     * own route.
+     *
+     * `"active"`, where the request mirror uses `"pending"`: [applyAcceptedMatch] flips an offer to
+     * `"full"` the moment its last seat goes, and the seats here are sized to exactly this rider,
+     * so the offer is full before any feed can project it — [FeedProjector] keeps only `"active"`
+     * ones. `"pending"` would instead hide it from the host's *own* schedule, which reads plain
+     * status strings.
+     */
+    private suspend fun findOrCreateBackingOffer(
+        request: RideRequest,
+        host: User,
+        contribution: Double,
+    ): TripOffer =
+        offers.value.values.find {
+            it.hostId == host.id && it.status == "active" &&
+                it.departureTime == request.departureTime &&
+                it.origin == request.origin && it.destination == request.destination &&
+                it.seatsLeft >= request.seatsNeeded
+        } ?: TripOffer(
+            id = newId("offer"),
+            hostId = host.id,
+            hostName = host.displayName,
+            hostRating = host.ratingAvg,
+            origin = request.origin,
+            destination = request.destination,
+            originLat = request.originLat,
+            originLng = request.originLng,
+            destLat = request.destLat,
+            destLng = request.destLng,
+            originGeohash = request.originGeohash,
+            destGeohash = request.destGeohash,
+            departureTime = request.departureTime,
+            totalSeats = request.seatsNeeded,
+            seatsLeft = request.seatsNeeded,
+            costPerRider = contribution,
+            vehicleInfo = describeVehicle(vehicles.value[host.id]),
+            // A women-only request must not quietly become a mixed ride.
+            womenOnly = request.womenOnly,
+            exitLocation = request.exitLocation,
+            status = "active",
+        ).also {
+            firestore.setDocument("trip_offers", it.id, it, serializer<TripOffer>())
+            offers.value = offers.value + (it.id to it)
+        }
+
+    /** "Silver Toyota Camry", or the same stand-in the post-offer form uses when none is set. */
+    private fun describeVehicle(vehicle: Vehicle?): String {
+        val described = listOf(vehicle?.color, vehicle?.make, vehicle?.model)
+            .mapNotNull { it?.trim()?.takeIf(String::isNotEmpty) }
+            .joinToString(" ")
+        return described.ifEmpty { "Shared Sedan" }
+    }
+
+    /**
+     * A driver taking a rider's request without having posted a ride.
+     *
+     * [offerSeatForRequest] needs an offer id the caller already owns, so a driver with nothing
+     * posted had no id to pass and both screens showed "Post a ride first, then offer it here" — a
+     * dead end that asked the driver to do the app's bookkeeping before it would let them help.
+     * This mints the backing offer instead, exactly as [joinTripOfferDirect] mints a backing
+     * request for a rider coming the other way.
+     *
+     * As in [offerSeatForRequest], creating the match *is* the host accepting it, so the seat
+     * bookkeeping runs immediately rather than leaving a pending match only the host could approve.
+     */
+    @Throws(Exception::class)
+    suspend fun acceptRideRequestDirect(requestId: String, contribution: Double): TripMatch {
+        val host = requireUser()
+        val request = loadRequest(requestId)
+
+        if (request.riderId == host.id) {
+            throw SplitCruiserException("That is your own ride request.")
+        }
+        if (request.status != "active" && request.status != "pending") {
+            throw SplitCruiserException("That rider is no longer looking for a seat.")
+        }
+        val existing = matches.value.values.find {
+            it.requestId == request.id && it.hostId == host.id && it.status != "declined"
+        }
+        if (existing != null) {
+            throw SplitCruiserException("You have already offered this rider a seat.")
+        }
+
+        val offer = findOrCreateBackingOffer(request, host, contribution)
+        val match = createMatch(offer, request, contribution, notifyHost = false)
+        acceptMatch(match.id)
+        return matches.value[match.id] ?: match
+    }
+
+    /**
      * The host side of the same handshake: agreeing to carry a rider who posted a request.
      *
      * [offerId] must be one of the caller's own rides. The screen used to invent this id too —
@@ -1399,6 +1495,38 @@ class SplitCruiserRepository internal constructor(
     fun calculateCostSplit(totalCost: Double, riders: Int): Double =
         if (riders <= 0) totalCost else totalCost / riders
 
+    /**
+     * What to prefill the contribution field with when a driver accepts a request directly.
+     *
+     * A [RideRequest] carries no cost — riders say where and when, not what they will pay — so
+     * without a suggestion the driver would be typing into an empty box and guessing. Both
+     * platforms call this so they propose the same number for the same trip.
+     *
+     * Returns 0.0 rather than throwing when the route cannot be resolved: a missing suggestion
+     * should leave the field empty, not block the accept.
+     */
+    @Throws(Exception::class)
+    suspend fun suggestedContribution(request: RideRequest): Double {
+        val routed = OsrmRouteService.getRouteOrNull(
+            request.originLat,
+            request.originLng,
+            request.destLat,
+            request.destLng,
+        )?.distanceMiles
+        // The same straight-line fallback the route estimate card uses when OSRM is unreachable.
+        val miles = routed ?: GeoUtils.distanceInMiles(
+            request.originLat,
+            request.originLng,
+            request.destLat,
+            request.destLng,
+        )
+        if (miles <= 0.0) return 0.0
+
+        val estimate = (miles * SUGGESTED_COST_PER_MILE).coerceAtLeast(MIN_SUGGESTED_CONTRIBUTION)
+        // To the nearest 50c, so the app suggests a number someone would say out loud.
+        return round(estimate * 2.0) / 2.0
+    }
+
     fun findMatchingOffers(request: RideRequest): List<TripOffer> {
         val now = nowMs()
         return offers.value.values.filter { offer ->
@@ -1570,6 +1698,15 @@ class SplitCruiserRepository internal constructor(
         /** System-set statuses [closeIfExpired] may overwrite once departure has passed. */
         val AUTO_CLOSEABLE_OFFER_STATUSES = setOf("active", "full")
         val AUTO_CLOSEABLE_REQUEST_STATUSES = setOf("active")
+
+        /**
+         * Gas and wear per mile, for [suggestedContribution]. A starting point the driver types
+         * over, not a fare — the product is a cost split settled in cash, in person.
+         */
+        const val SUGGESTED_COST_PER_MILE = 0.35
+
+        /** Below this a split is not worth the arithmetic. */
+        const val MIN_SUGGESTED_CONTRIBUTION = 3.0
     }
 }
 

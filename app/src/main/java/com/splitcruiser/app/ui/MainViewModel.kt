@@ -21,6 +21,7 @@ import com.splitcruiser.app.data.TripMatch
 import com.splitcruiser.app.data.TripOffer
 import com.splitcruiser.app.data.User
 import com.splitcruiser.app.data.Vehicle
+import com.splitcruiser.app.data.acceptRideRequestDirectResult
 import com.splitcruiser.app.data.blockUserResult
 import com.splitcruiser.app.data.createUserProfileResult
 import com.splitcruiser.app.data.fetchMyTripsFromFirestore
@@ -35,6 +36,7 @@ import com.splitcruiser.app.data.sendMessageResult
 import com.splitcruiser.app.data.signInWithGoogleResult
 import com.splitcruiser.app.data.signUpWithEmailResult
 import com.splitcruiser.app.data.submitRatingResult
+import com.splitcruiser.app.data.suggestedContributionResult
 import com.splitcruiser.app.data.updateRideRequestStatusResult
 import com.splitcruiser.app.data.updateTripOfferStatusResult
 import com.splitcruiser.app.data.updateUserProfileDetailsResult
@@ -325,6 +327,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 onSuccess(match)
             },
         )
+    }
+
+    /**
+     * A driver taking a rider's request without having posted a ride of their own.
+     *
+     * [offerSeat] needs an offer id the caller already owns, so a driver with nothing posted was
+     * shown "Post a ride first, then offer it here" — a dead end asking them to do the app's
+     * bookkeeping. The shared side mints the backing offer instead.
+     */
+    fun acceptRequestDirect(requestId: String, contribution: Double, onSuccess: (TripMatch) -> Unit) {
+        runGuarded(
+            block = { repository.acceptRideRequestDirectResult(requestId, contribution) },
+            fallbackMessage = "Failed to accept the ride request.",
+            loadingMessage = "Offering the seat…",
+            onSuccess = { match ->
+                refreshMyTrips()
+                onSuccess(match)
+            },
+        )
+    }
+
+    /**
+     * What to prefill the contribution field with when accepting directly. Silent on failure — a
+     * missing suggestion means an empty field, not a blocked accept.
+     */
+    fun suggestedContribution(request: RideRequest, onResult: (Double) -> Unit) {
+        viewModelScope.launch {
+            onResult(repository.suggestedContributionResult(request).getOrDefault(0.0))
+        }
     }
 
     fun requestJoin(offerId: String, requestId: String, contribution: Double, onSuccess: () -> Unit) {

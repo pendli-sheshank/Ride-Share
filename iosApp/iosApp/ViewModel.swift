@@ -265,6 +265,39 @@ final class AppViewModel: ObservableObject {
         await perform { try await self.repository.declineMatch(matchId: matchId) }
     }
 
+    /// A driver taking a rider's request without having posted a ride of their own.
+    ///
+    /// The shared side mints the backing offer, which is what used to make this impossible: the
+    /// host entry point needed an offer id, so a driver with nothing posted was told to "post a
+    /// ride first" and left to do the app's bookkeeping.
+    ///
+    /// Returns the match rather than a `Bool` because the caller opens chat on it, so this manages
+    /// its own loading and error state the way `offerSeat` does.
+    func acceptRequestDirect(requestId: String, contribution: Double) async -> TripMatch? {
+        loadingMessage = "Offering the seat…"
+        isLoading = true
+        errorMessage = nil
+        defer {
+            isLoading = false
+            loadingMessage = AppViewModel.defaultLoadingMessage
+        }
+        do {
+            return try await repository.acceptRideRequestDirect(
+                requestId: requestId, contribution: contribution
+            )
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// What to prefill the contribution field with. Never throws out to the caller — a missing
+    /// suggestion leaves the field empty rather than blocking the accept.
+    func suggestedContribution(for request: RideRequest) async -> Double {
+        let suggested = try? await repository.suggestedContribution(request: request)
+        return suggested?.doubleValue ?? 0
+    }
+
     /// A host offering one of their own rides to an open request. Auto-accepts on the shared side,
     /// so the returned match can be opened straight into chat.
     ///
