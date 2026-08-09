@@ -46,7 +46,11 @@ final class AppViewModel: ObservableObject {
     /// Which side of the marketplace Explore is showing. Android's `currentMode`.
     @Published var mode: RideMode = .rider
 
-    static let defaultLoadingMessage = "Just a moment…"
+    /// `nonisolated` because it is used as a default argument value, and default arguments are
+    /// evaluated in the caller's context — which for a `@MainActor` class member is not
+    /// necessarily the main actor. Without this it is a warning today and an error under the
+    /// Swift 6 language mode.
+    nonisolated static let defaultLoadingMessage = "Just a moment…"
 
     /// The current user's own hosted/joined rides. `activeOffers` deliberately excludes a host's
     /// own rides (`FeedProjector` filters `hostId != currentUserId` so a host doesn't see their own

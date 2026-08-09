@@ -125,7 +125,7 @@ struct RideRequestDetailView: View {
             isPresented: $showsOfferPicker,
             titleVisibility: .visible
         ) {
-            ForEach(offerableRides) { ride in
+            ForEach(offerableRides, id: \.id) { ride in
                 Button("\(ride.origin) → \(ride.destination) (\(ride.seatsLeft) seats left)") {
                     offerSeat(on: ride)
                 }
@@ -262,7 +262,7 @@ struct MatchesScreen: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: BrandScale.spaceMd) {
-                        ForEach(viewModel.userMatches) { match in
+                        ForEach(viewModel.userMatches, id: \.id) { match in
                             MatchRow(match: match)
                         }
                     }

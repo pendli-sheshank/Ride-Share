@@ -1,12 +1,16 @@
 import SwiftUI
 import Shared
 
-// `.sheet(item:)` needs identity. The Kotlin models already carry a `String id`, which is all
-// `Identifiable` asks for.
-extension TripOffer: Identifiable {}
-extension RideRequest: Identifiable {}
-extension TripMatch: Identifiable {}
-extension NotificationAlert: Identifiable {}
+/// Carries a `TripOffer` into `.sheet(item:)`, which needs an `Identifiable` payload.
+///
+/// The obvious move is `extension TripOffer: Identifiable {}` — the Kotlin models all carry a
+/// `String id`. The compiler warns against it, and is right to: declaring a conformance of an
+/// imported type to an imported protocol silently changes meaning if `:shared` ever declares the
+/// same conformance itself. Every list keys off `id:` explicitly for the same reason.
+struct PresentedOffer: Identifiable {
+    let offer: TripOffer
+    var id: String { offer.id }
+}
 
 // MARK: - Explore
 
@@ -107,7 +111,7 @@ struct ExploreFeed: View {
                 .foregroundColor(Brand.textPrimary)
                 .padding(.top, BrandScale.spaceSm)
 
-            ForEach(live) { match in
+            ForEach(live, id: \.id) { match in
                 Button {
                     if match.status == "accepted" {
                         router.push(.chat(matchId: match.id))
@@ -188,7 +192,7 @@ struct ExploreFeed: View {
                 }
             )
         } else {
-            ForEach(offers) { offer in
+            ForEach(offers, id: \.id) { offer in
                 TripOfferCard(
                     offer: offer,
                     cta: cta(for: offer),
@@ -307,7 +311,7 @@ struct ExploreFeed: View {
                 action: { router.push(.postOffer) }
             )
         } else {
-            ForEach(viewModel.activeRequests) { request in
+            ForEach(viewModel.activeRequests, id: \.id) { request in
                 RideRequestCard(request: request) {
                     router.push(.tripDetail(id: request.id, kind: .request))
                 }
@@ -368,7 +372,7 @@ struct TripsTab: View {
                                 illustrationType: .hosted
                             )
                         } else {
-                            ForEach(upcomingHosted) { offer in
+                            ForEach(upcomingHosted, id: \.id) { offer in
                                 HostedRideScheduleCard(
                                     offer: offer,
                                     onTap: { router.push(.tripDetail(id: offer.id, kind: .offer)) },
@@ -390,7 +394,7 @@ struct TripsTab: View {
                                 illustrationType: .joined
                             )
                         } else {
-                            ForEach(upcomingJoined) { offer in
+                            ForEach(upcomingJoined, id: \.id) { offer in
                                 JoinedRideScheduleCard(offer: offer) {
                                     router.push(.tripDetail(id: offer.id, kind: .offer))
                                 }
@@ -400,7 +404,7 @@ struct TripsTab: View {
 
                     if !viewModel.myRideRequests.isEmpty {
                         TripsSectionHeader(title: "Your ride requests")
-                        ForEach(viewModel.myRideRequests) { request in
+                        ForEach(viewModel.myRideRequests, id: \.id) { request in
                             MyRideRequestCard(request: request) {
                                 cancelRequest(request)
                             }
@@ -409,7 +413,7 @@ struct TripsTab: View {
 
                     if !pastRides.isEmpty {
                         TripsSectionHeader(title: "Past rides")
-                        ForEach(pastRides) { offer in
+                        ForEach(pastRides, id: \.id) { offer in
                             PastRideCard(
                                 offer: offer,
                                 currentUserId: viewModel.currentUser?.id ?? ""

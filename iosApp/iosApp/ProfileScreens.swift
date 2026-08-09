@@ -198,7 +198,7 @@ struct ProfileScreen: View {
                     .foregroundColor(Brand.danger.opacity(0.8))
                 }
 
-                ForEach(viewModel.notifications) { alert in
+                ForEach(viewModel.notifications, id: \.id) { alert in
                     alertRow(alert)
                 }
             }
@@ -611,7 +611,7 @@ struct BlockedListScreen: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: BrandScale.spaceMd) {
-                        ForEach(blocked) { user in
+                        ForEach(blocked, id: \.id) { user in
                             row(user)
                         }
                     }
@@ -746,7 +746,7 @@ struct HostDashboardScreen: View {
                         illustrationType: .hosted
                     )
                 } else {
-                    ForEach(filteredRides) { offer in
+                    ForEach(filteredRides, id: \.id) { offer in
                         HostedRideScheduleCard(
                             offer: offer,
                             onTap: { router.push(.tripDetail(id: offer.id, kind: .offer)) },

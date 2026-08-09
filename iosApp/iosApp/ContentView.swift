@@ -100,7 +100,7 @@ struct DashboardScreen: View {
     @EnvironmentObject private var router: AppRouter
 
     @State private var selectedTab: DashboardTab = .explore
-    @State private var joinSucceededFor: TripOffer?
+    @State private var joinSucceededFor: PresentedOffer?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -110,7 +110,7 @@ struct DashboardScreen: View {
                 Group {
                     switch selectedTab {
                     case .explore:
-                        ExploreFeed(onJoined: { joinSucceededFor = $0 })
+                        ExploreFeed(onJoined: { joinSucceededFor = PresentedOffer(offer: $0) })
                     case .trips:
                         TripsTab(onFindARide: { selectedTab = .explore })
                     }
@@ -124,8 +124,8 @@ struct DashboardScreen: View {
         }
         .background(Brand.surface)
         .toolbar(.hidden, for: .navigationBar)
-        .sheet(item: $joinSucceededFor) { offer in
-            JoinSuccessSheet(offer: offer) {
+        .sheet(item: $joinSucceededFor) { presented in
+            JoinSuccessSheet(offer: presented.offer) {
                 joinSucceededFor = nil
                 selectedTab = .trips
             }
