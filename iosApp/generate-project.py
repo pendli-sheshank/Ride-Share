@@ -25,13 +25,30 @@ def generate_id(name, length=24):
 # change: the PBXBuildFile, PBXFileReference, group child and Sources build-phase entries are all
 # derived from this list. They used to be written out by hand in four places, which is how
 # ViewModel.swift ended up on disk, defining AppViewModel, and never compiled.
+# Ordered by dependency depth for readers only — Swift has no declaration-order requirement
+# within a module, so the order here does not affect the build.
 SWIFT_SOURCES = [
     "iOSApp.swift",
+    # Tokens, then the components built from them.
     "Theme.swift",
+    "DesignPrimitives.swift",
+    "LoadingViews.swift",
+    # Routing, state and shared formatting.
+    "AppRouter.swift",
+    "ViewModel.swift",
+    # Composite components.
+    "LocationAutocompleteField.swift",
+    "TripCards.swift",
+    "ScheduleCards.swift",
+    # Screens.
     "ContentView.swift",
+    "ExploreFeed.swift",
+    "AuthScreens.swift",
+    "PostRideForms.swift",
+    "DetailScreens.swift",
     "RideDetailView.swift",
     "ChatView.swift",
-    "ViewModel.swift",
+    "ProfileScreens.swift",
 ]
 
 
@@ -314,6 +331,7 @@ def create_xcode_project():
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(SRCROOT)/../shared/build/XCFrameworks/debug",
+					"$(SRCROOT)/../shared/build/XCFrameworks/release",
 				);
 				GCC_C_LANGUAGE_DIALECT = c99;
 				GCC_DYNAMIC_NO_PIC = NO;

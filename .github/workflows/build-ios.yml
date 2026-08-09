@@ -145,19 +145,35 @@ jobs:
             exit 1
           fi
 
-      # Step 4: Validate Swift code syntax
-      - name: Validate Swift syntax
+      # Step 4: Compile the app
+      #
+      # This used to be a per-file `swiftc -parse ... || true` loop, which could never fail and
+      # never resolved `import Shared` — so no PR job compiled the Swift at all. The only real
+      # compile was the `xcodebuild archive` in ios-release.yml, which runs on push to main,
+      # i.e. after merge, in the same workflow that uploads to TestFlight. A type error therefore
+      # could not be caught until it had already broken the release pipeline, and a build number
+      # can never be reused.
+      #
+      # Debug rather than Release: -Onone typechecks substantially faster than Release's
+      # wholemodule -O, and a PR gate wants type errors, not an optimised binary. ios-release.yml
+      # still builds Release on main. This needs Debug's FRAMEWORK_SEARCH_PATHS to include the
+      # release XCFramework directory — the only one either workflow builds — which is why
+      # generate-project.py lists both.
+      #
+      # A simulator destination needs no signing and no secrets, so this still works on fork PRs
+      # where the Firebase values are empty — the framework just reports itself unconfigured.
+      # 'generic/platform=iOS Simulator' avoids a simctl device lookup that would break whenever
+      # the runner image changes which simulators are preinstalled.
+      - name: Compile the app for the simulator
         run: |
-          cd iosApp
-          echo "📝 Checking Swift syntax..."
-
-          for swift_file in iosApp/*.swift; do
-            echo "  Checking $swift_file..."
-            # Try to compile (will fail if syntax is wrong)
-            swiftc -parse "$swift_file" -I. -F../shared/build/XCFrameworks/Shared.xcframework || true
-          done
-
-          echo "✅ Swift source files are syntactically valid"
+          xcodebuild build \
+            -project iosApp/iosApp.xcodeproj \
+            -scheme iosApp \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
 
       # Step 5: iOS Build Summary
       - name: iOS Build Summary
@@ -168,7 +184,7 @@ jobs:
           echo "  ✅ Step 1: Shared.framework built successfully"
           echo "  ✅ Step 2: iOS project structure verified"
           echo "  ✅ Step 3: Xcode project generated/validated"
-          echo "  ✅ Step 4: Swift code syntax validated"
+          echo "  ✅ Step 4: Swift compiled for the iOS Simulator"
           echo ""
           echo "Project includes:"
           echo "  • Valid Xcode project structure"
@@ -199,7 +215,7 @@ jobs:
           echo "✅ **Kotlin Multiplatform**: Shared.framework built for iOS" >> $GITHUB_STEP_SUMMARY
           echo "✅ **Project Structure**: Complete with all required files" >> $GITHUB_STEP_SUMMARY
           echo "✅ **Xcode Project**: Generated and valid" >> $GITHUB_STEP_SUMMARY
-          echo "✅ **Swift Code**: Syntax validated" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Swift Code**: Compiled for the iOS Simulator" >> $GITHUB_STEP_SUMMARY
           echo "✅ **Build Configuration**: Debug and Release configured" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Project Components" >> $GITHUB_STEP_SUMMARY

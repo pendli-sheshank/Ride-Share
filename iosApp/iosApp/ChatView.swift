@@ -308,22 +308,41 @@ struct ProposePickupSheet: View {
     let onPropose: (String, String) -> Void
 
     var body: some View {
-        NavigationView {
-            Form {
-                Section("Where") {
-                    TextField("e.g. the main entrance", text: $spot)
-                }
-                Section("When") {
-                    TextField("e.g. 8:15 am", text: $time)
-                }
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: BrandScale.spaceXl) {
+                    FormSection(title: "Where") {
+                        BrandTextField(
+                            title: "Meeting Spot",
+                            placeholder: "e.g. Science Library entrance",
+                            text: $spot,
+                            icon: "mappin.circle.fill",
+                            accessibilityID: "propose_location_input"
+                        )
+                    }
+                    FormSection(title: "When") {
+                        BrandTextField(
+                            title: "Proposed Time",
+                            placeholder: "e.g. 5:45 PM or in 10 mins",
+                            text: $time,
+                            icon: "clock.fill",
+                            accessibilityID: "propose_time_input"
+                        )
+                    }
 
-                Button("Send proposal") {
-                    onPropose(spot, time)
-                    presentationMode.wrappedValue.dismiss()
+                    Button("Send proposal") {
+                        onPropose(spot, time)
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                    .buttonStyle(BrandButtonStyle(isEnabled: !spot.isEmpty && !time.isEmpty))
+                    .disabled(spot.isEmpty || time.isEmpty)
                 }
-                .disabled(spot.isEmpty || time.isEmpty)
+                .padding(BrandScale.spaceXl)
             }
+            .background(Brand.surface)
+            .scrollContentBackground(.hidden)
             .navigationTitle("Propose a pickup")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button("Cancel") { presentationMode.wrappedValue.dismiss() }

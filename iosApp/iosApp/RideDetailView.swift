@@ -93,10 +93,11 @@ struct RideDetailView: View {
     private var hostCard: some View {
         BrandCard(title: "Your host") {
             HStack(spacing: BrandScale.spaceMd) {
-                BrandAvatar(
+                StudentAvatar(
                     avatarUrl: host?.avatarUrl ?? "",
                     name: host?.name ?? offer.hostName,
-                    size: 48
+                    size: 48,
+                    fontSize: 20
                 )
 
                 VStack(alignment: .leading, spacing: 2) {
