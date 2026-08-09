@@ -314,6 +314,7 @@ def create_xcode_project():
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(SRCROOT)/../shared/build/XCFrameworks/debug",
+					"$(SRCROOT)/../shared/build/XCFrameworks/release",
 				);
 				GCC_C_LANGUAGE_DIALECT = c99;
 				GCC_DYNAMIC_NO_PIC = NO;
