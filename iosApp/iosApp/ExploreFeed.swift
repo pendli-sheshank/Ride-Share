@@ -330,15 +330,15 @@ struct TripsTab: View {
     @EnvironmentObject private var router: AppRouter
 
     private var upcomingHosted: [TripOffer] {
-        viewModel.hostedRides.filter { $0.status == "active" || $0.status == "full" }
+        viewModel.hostedRides.filter { RideSchedule.shared.isCurrent(status: $0.status) }
     }
     private var upcomingJoined: [TripOffer] {
-        viewModel.joinedRides.filter { $0.status == "active" || $0.status == "full" }
+        viewModel.joinedRides.filter { RideSchedule.shared.isCurrent(status: $0.status) }
     }
     private var pastRides: [TripOffer] {
         var seen = Set<String>()
         return (viewModel.hostedRides + viewModel.joinedRides)
-            .filter { $0.status != "active" && $0.status != "full" }
+            .filter { RideSchedule.shared.isPast(status: $0.status) }
             .filter { seen.insert($0.id).inserted }
             .sorted { $0.departureTime > $1.departureTime }
     }

@@ -77,6 +77,14 @@ Extract before you copy. These already exist:
 | `CardEyebrow`, `CardStat` | `DetailRow` | every ride card |
 | `SplitCruiserEmptyState` | `BrandEmptyState` | — (already good) |
 | `FormSection` | SwiftUI `Section` | — |
+| `RideSchedule` (in `:shared`) | same object | 3 places, and two of them disagreed |
+
+`RideSchedule` answers "is this ride still on someone's schedule, or is it history?" — and `"full"`
+is the case that catches people out. A ride whose last seat has gone is still very much happening,
+but Android's trips tab filtered on `status == "active"` alone, so a fully-booked ride dropped out
+of "Rides you're hosting" and reappeared under "Past rides", while the host dashboard used its own
+copy of the rule and got it right. Every ride a driver accepts directly is `"full"` from the moment
+they accept it, so both platforms now read the one object.
 
 `statusColor` matters more than it looks: with five independent `when (status)` blocks, a status
 one card handled fell through another's `else`. One function means they cannot disagree.

@@ -391,6 +391,125 @@ class SplitCruiserRepositoryTest {
         assertFailsWith<SplitCruiserException> { repo.joinTripOfferDirect("offer_1") }
     }
 
+    // --- Accepting a request with no ride posted --------------------------------------------
+
+    /** The request every direct-accept test accepts, unless it overrides it. */
+    private fun openRequest(
+        riderId: String = "bo",
+        seatsNeeded: Int = 1,
+        womenOnly: Boolean = false,
+        status: String = "active",
+    ) = """
+        {"fields":{"id":{"stringValue":"request_1"},"riderId":{"stringValue":"$riderId"},
+         "riderName":{"stringValue":"Bo"},"origin":{"stringValue":"Snell"},
+         "destination":{"stringValue":"Logan"},"originLat":{"doubleValue":42.34},
+         "originLng":{"doubleValue":-71.09},"destLat":{"doubleValue":42.37},
+         "destLng":{"doubleValue":-71.02},"seatsNeeded":{"integerValue":"$seatsNeeded"},
+         "departureTime":{"integerValue":"$future"},"womenOnly":{"booleanValue":$womenOnly},
+         "status":{"stringValue":"$status"}}}
+    """.trimIndent()
+
+    /**
+     * A driver with nothing posted used to hit "Post a ride first, then offer it here" — the
+     * host-side entry point needed an offer id, and they had none. The backing offer is minted
+     * here now, mirroring the [findOrCreateBackingRequest] the rider side has always had.
+     */
+    @Test
+    fun acceptingARequestWithNoPostedRideMintsTheBackingOffer() = runTest {
+        documents["ride_requests/request_1"] = openRequest()
+        val repo = signedIn(repository(scriptedBackend()))
+
+        val match = repo.acceptRideRequestDirect("request_1", contribution = 12.0)
+
+        assertEquals("accepted", match.status)
+        assertEquals("me", match.hostId)
+        assertEquals("bo", match.riderId)
+
+        val minted = repo.getTripOfferById(match.offerId)
+        assertTrue(minted != null, "the accept should have created a backing offer")
+        assertEquals("me", minted.hostId)
+        assertEquals("Snell", minted.origin)
+        assertEquals("Logan", minted.destination)
+        assertEquals(12.0, minted.costPerRider)
+    }
+
+    /**
+     * The driver did not ask to advertise a ride, so the minted offer must never reach a feed.
+     * Seats are sized to exactly this rider, so accepting takes the last one and
+     * [applyAcceptedMatch] flips it to "full" — which [FeedProjector] filters out.
+     */
+    @Test
+    fun theMintedOfferIsFullAndNeverReachesTheBrowseFeed() = runTest {
+        documents["ride_requests/request_1"] = openRequest()
+        val repo = signedIn(repository(scriptedBackend()))
+
+        val match = repo.acceptRideRequestDirect("request_1", contribution = 8.0)
+
+        val minted = repo.getTripOfferById(match.offerId)!!
+        assertEquals("full", minted.status)
+        assertEquals(0, minted.seatsLeft)
+        assertTrue(
+            repo.activeOffers.value.none { it.id == minted.id },
+            "a ride the driver never posted must not appear in the feed",
+        )
+    }
+
+    /** A women-only request must not quietly become a mixed ride. */
+    @Test
+    fun aWomenOnlyRequestMintsAWomenOnlyOffer() = runTest {
+        documents["ride_requests/request_1"] = openRequest(womenOnly = true)
+        val repo = signedIn(repository(scriptedBackend()))
+
+        val match = repo.acceptRideRequestDirect("request_1", contribution = 6.0)
+
+        assertTrue(repo.getTripOfferById(match.offerId)!!.womenOnly)
+    }
+
+    /** The rider's own seat count decides the ride's size, not a default of one. */
+    @Test
+    fun theMintedOfferSeatsTheWholeParty() = runTest {
+        documents["ride_requests/request_1"] = openRequest(seatsNeeded = 3)
+        val repo = signedIn(repository(scriptedBackend()))
+
+        val match = repo.acceptRideRequestDirect("request_1", contribution = 5.0)
+
+        assertEquals(3, repo.getTripOfferById(match.offerId)!!.totalSeats)
+    }
+
+    @Test
+    fun youCannotAcceptYourOwnRideRequest() = runTest {
+        documents["ride_requests/request_1"] = openRequest(riderId = "me")
+        val repo = signedIn(repository(scriptedBackend()))
+
+        val failure = assertFailsWith<SplitCruiserException> {
+            repo.acceptRideRequestDirect("request_1", contribution = 5.0)
+        }
+        assertContains(failure.message!!, "your own ride request")
+    }
+
+    @Test
+    fun aRequestThatIsNoLongerOpenCannotBeAccepted() = runTest {
+        documents["ride_requests/request_1"] = openRequest(status = "cancelled")
+        val repo = signedIn(repository(scriptedBackend()))
+
+        val failure = assertFailsWith<SplitCruiserException> {
+            repo.acceptRideRequestDirect("request_1", contribution = 5.0)
+        }
+        assertContains(failure.message!!, "no longer looking")
+    }
+
+    /** Two taps on the same request must not carry the rider twice. */
+    @Test
+    fun acceptingTheSameRequestTwiceIsRejected() = runTest {
+        documents["ride_requests/request_1"] = openRequest()
+        val repo = signedIn(repository(scriptedBackend()))
+
+        repo.acceptRideRequestDirect("request_1", contribution = 9.0)
+        assertFailsWith<SplitCruiserException> {
+            repo.acceptRideRequestDirect("request_1", contribution = 9.0)
+        }
+    }
+
     /**
      * Instant-reserve used to mutate the offer directly and create no [TripMatch] at all, so a
      * rider who used this button had no `matchId` and no way to ever open chat with the host. It

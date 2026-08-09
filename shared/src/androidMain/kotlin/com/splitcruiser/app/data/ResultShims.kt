@@ -61,6 +61,15 @@ suspend fun SplitCruiserRepository.offerSeatForRequestResult(
     contribution: Double,
 ): Result<TripMatch> = runCatching { offerSeatForRequest(requestId, offerId, contribution) }
 
+suspend fun SplitCruiserRepository.acceptRideRequestDirectResult(
+    requestId: String,
+    contribution: Double,
+): Result<TripMatch> = runCatching { acceptRideRequestDirect(requestId, contribution) }
+
+suspend fun SplitCruiserRepository.suggestedContributionResult(
+    request: RideRequest,
+): Result<Double> = runCatching { suggestedContribution(request) }
+
 suspend fun SplitCruiserRepository.validateAndCreateMatchResult(
     offerId: String,
     requestId: String,

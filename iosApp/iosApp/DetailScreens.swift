@@ -69,6 +69,7 @@ struct RideRequestDetailView: View {
     @EnvironmentObject private var router: AppRouter
 
     @State private var showsOfferPicker = false
+    @State private var showsAcceptSheet = false
 
     private var existingMatch: TripMatch? {
         viewModel.userMatches.first { $0.requestId == request.id }
@@ -131,6 +132,13 @@ struct RideRequestDetailView: View {
                 }
             }
             Button("Cancel", role: .cancel) {}
+        }
+        .sheet(isPresented: $showsAcceptSheet) {
+            AcceptRequestSheet(request: request) { match in
+                showsAcceptSheet = false
+                viewModel.notify("You're giving this ride. Opening chat…")
+                router.push(.chat(matchId: match.id))
+            }
         }
     }
 
@@ -200,21 +208,22 @@ struct RideRequestDetailView: View {
                 }
             }
         } else {
-            Button("Accept & Offer Ride Share") { offerSeatFlow() }
-                .buttonStyle(BrandButtonStyle())
-        }
-    }
+            VStack(spacing: BrandScale.spaceSm) {
+                Button("Accept & give this ride") { showsAcceptSheet = true }
+                    .buttonStyle(BrandButtonStyle())
+                    .accessibilityIdentifier("accept_request_button")
 
-    private func offerSeatFlow() {
-        switch offerableRides.count {
-        case 0:
-            viewModel.setError(
-                "You have no upcoming ride with \(request.seatsNeeded) free seat(s). Post a ride first, then offer it here."
-            )
-        case 1:
-            offerSeat(on: offerableRides[0])
-        default:
-            showsOfferPicker = true
+                Text("You don't need a posted ride. Accepting creates one for this trip.")
+                    .font(BrandFont.eyebrow(.regular))
+                    .foregroundColor(Brand.textSecondary)
+                    .multilineTextAlignment(.center)
+
+                // Only worth offering when there is actually something to attach it to.
+                if !offerableRides.isEmpty {
+                    Button("Add to one of my posted rides") { showsOfferPicker = true }
+                        .buttonStyle(BrandOutlineButtonStyle())
+                }
+            }
         }
     }
 
@@ -235,6 +244,140 @@ struct RideRequestDetailView: View {
         Task {
             if await viewModel.blockUser(request.riderId) {
                 router.pop()
+            }
+        }
+    }
+}
+
+// MARK: - Accepting a request
+
+/// Confirms a driver taking a rider's request, and collects the one thing the request cannot
+/// carry: what each rider should chip in.
+///
+/// A `RideRequest` records where and when, never a price — so this is the only point in the flow
+/// where the cost split can be set. It is prefilled from `suggestedContribution` (distance-based,
+/// shared so both platforms propose the same number) rather than left blank, because a driver
+/// staring at an empty box has nothing to anchor on.
+struct AcceptRequestSheet: View {
+    let request: RideRequest
+    let onAccepted: (TripMatch) -> Void
+
+    @EnvironmentObject private var viewModel: AppViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var contribution = ""
+    @State private var isSuggesting = true
+    @State private var isSubmitting = false
+    @State private var formError: String?
+
+    private var parsedContribution: Double? {
+        Double(contribution.trimmingCharacters(in: .whitespaces))
+    }
+
+    private var canSubmit: Bool {
+        if isSubmitting { return false }
+        guard let value = parsedContribution else { return false }
+        return value >= 0
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: BrandScale.spaceXl) {
+                    BrandCard(title: "The trip", tint: Brand.primary) {
+                        RouteIndicator(
+                            origin: request.origin,
+                            destination: request.destination,
+                            originLabel: "PICKUP",
+                            destinationLabel: "DROPOFF",
+                            scale: .card,
+                            pins: true
+                        )
+                        Divider().background(Brand.outline)
+                        DetailRow(label: "Departs", value: TripFormat.detail(request.departureTime))
+                        DetailRow(
+                            label: "Seats",
+                            value: "\(request.seatsNeeded) seat\(request.seatsNeeded == 1 ? "" : "s")"
+                        )
+                        if request.womenOnly {
+                            DetailRow(label: "Women only", value: "Yes", valueColor: Brand.accent)
+                        }
+                    }
+
+                    FormSection(title: "Cost split") {
+                        HStack(spacing: BrandScale.spaceSm) {
+                            BrandTextField(
+                                title: "Each rider chips in ($)",
+                                placeholder: "0.00",
+                                text: $contribution,
+                                icon: "dollarsign.circle.fill",
+                                iconTint: Brand.warning,
+                                keyboard: .decimalPad,
+                                accessibilityID: "accept_contribution_input"
+                            )
+                            if isSuggesting {
+                                ProgressView().scaleEffect(0.7)
+                            }
+                        }
+                        // Say why, not just what: the number is a suggestion, and the money never
+                        // moves through the app.
+                        Text("Suggested from the distance. Cash is settled in person — you can agree something else in chat.")
+                            .font(BrandFont.eyebrow(.regular))
+                            .foregroundColor(Brand.textSecondary)
+                    }
+
+                    if let formError {
+                        Text(formError)
+                            .font(BrandFont.caption())
+                            .foregroundColor(Brand.danger)
+                    }
+
+                    Button("Accept & open chat") { submit() }
+                        .buttonStyle(BrandButtonStyle(isEnabled: canSubmit))
+                        .disabled(!canSubmit)
+                        .accessibilityIdentifier("confirm_accept_button")
+
+                    Spacer().frame(height: BrandScale.spaceXl)
+                }
+                .padding(BrandScale.spaceXl)
+            }
+            .background(Brand.surface)
+            .scrollContentBackground(.hidden)
+            .navigationTitle("Give this ride")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+        .task { await prefillSuggestion() }
+    }
+
+    private func prefillSuggestion() async {
+        defer { isSuggesting = false }
+        guard contribution.isEmpty else { return }
+        let suggested = await viewModel.suggestedContribution(for: request)
+        // Zero means the route could not be resolved; an empty field is better than a wrong number.
+        if suggested > 0 {
+            contribution = String(format: "%.2f", suggested)
+        }
+    }
+
+    private func submit() {
+        guard let value = parsedContribution else { return }
+        formError = nil
+        isSubmitting = true
+        Task {
+            let match = await viewModel.acceptRequestDirect(
+                requestId: request.id,
+                contribution: value
+            )
+            isSubmitting = false
+            if let match {
+                onAccepted(match)
+            } else {
+                formError = viewModel.errorMessage
             }
         }
     }

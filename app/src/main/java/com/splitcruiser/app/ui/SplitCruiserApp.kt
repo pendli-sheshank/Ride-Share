@@ -1549,18 +1549,20 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
     val isRefreshing by viewModel.isRefreshing.collectAsState()
     val currentUserId = currentUser?.id ?: ""
 
+    // RideSchedule, not `status == "active"`: a ride whose last seat has gone is "full" and still
+    // happening, but the old filter dropped it out of the schedule and into Past rides.
     val activeHosted = remember(hostedRides) {
-        hostedRides.filter { it.status == "active" }
+        hostedRides.filter { RideSchedule.isCurrent(it.status) }
     }
     val activeJoined = remember(joinedRides) {
-        joinedRides.filter { it.status == "active" }
+        joinedRides.filter { RideSchedule.isCurrent(it.status) }
     }
     val activeMyRequests = remember(myRideRequests) {
         myRideRequests.filter { it.status == "active" }
     }
     val pastRides = remember(hostedRides, joinedRides) {
-        val hostedPast = hostedRides.filter { it.status != "active" }
-        val joinedPast = joinedRides.filter { it.status != "active" }
+        val hostedPast = hostedRides.filter { RideSchedule.isPast(it.status) }
+        val joinedPast = joinedRides.filter { RideSchedule.isPast(it.status) }
         (hostedPast + joinedPast).distinctBy { it.id }.sortedByDescending { it.departureTime }
     }
 
@@ -2161,7 +2163,7 @@ fun HostDashboard(viewModel: MainViewModel, navController: NavController) {
 
     val filteredRides = remember(hostedRides, filterStatus) {
         when (filterStatus) {
-            "active" -> hostedRides.filter { it.status == "active" || it.status == "full" }
+            "active" -> hostedRides.filter { RideSchedule.isCurrent(it.status) }
             "closed" -> hostedRides.filter { it.status == "closed" }
             "completed" -> hostedRides.filter { it.status == "completed" }
             "cancelled" -> hostedRides.filter { it.status == "cancelled" }
@@ -5679,6 +5681,24 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                             it.seatsLeft >= request.seatsNeeded
                     }
                     var showOfferPicker by remember { mutableStateOf(false) }
+                    var showAcceptDialog by remember { mutableStateOf(false) }
+
+                    if (showAcceptDialog) {
+                        AcceptRequestDialog(
+                            request = request,
+                            viewModel = viewModel,
+                            onDismiss = { showAcceptDialog = false },
+                            onAccepted = { match ->
+                                showAcceptDialog = false
+                                Toast.makeText(
+                                    context,
+                                    "You're giving this ride. Opening chat with ${request.riderName}...",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                                navController.navigate("chat/${match.id}")
+                            },
+                        )
+                    }
 
                     if (showOfferPicker) {
                         AlertDialog(
@@ -5729,35 +5749,48 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                         )
                     }
 
+                    // Accepting no longer depends on having posted a ride: the shared repository
+                    // mints the backing offer, the same way instant-reserve mints a backing
+                    // request for a rider. Attaching it to an existing ride stays available for
+                    // hosts who do have one, but it is no longer the only way through.
                     Button(
-                        onClick = {
-                            when (offerable.size) {
-                                0 -> viewModel.setError(
-                                    "You have no upcoming ride with ${request.seatsNeeded} free " +
-                                        "seat(s). Post a ride first, then offer it here."
-                                )
-                                1 -> viewModel.offerSeat(
-                                    request.id,
-                                    offerable.first().id,
-                                    offerable.first().costPerRider * request.seatsNeeded,
-                                ) { match ->
-                                    Toast.makeText(
-                                        context,
-                                        "Ride offered! Opening chat with ${request.riderName}...",
-                                        Toast.LENGTH_LONG
-                                    ).show()
-                                    navController.navigate("chat/${match.id}")
-                                }
-                                else -> showOfferPicker = true
-                            }
-                        },
+                        onClick = { showAcceptDialog = true },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(54.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserPrimary),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text("Accept & Offer Ride Share", color = Color.White, fontWeight = FontWeight.Bold)
+                        Text("Accept & give this ride", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+
+                    Text(
+                        "You don't need a posted ride. Accepting creates one for this trip.",
+                        fontSize = SplitCruiserTextSize.Eyebrow,
+                        color = SplitCruiserTextSecondary,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = SplitCruiserSpacing.Sm),
+                        textAlign = TextAlign.Center
+                    )
+
+                    if (offerable.isNotEmpty()) {
+                        OutlinedButton(
+                            onClick = { showOfferPicker = true },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = SplitCruiserSpacing.Sm)
+                                .height(48.dp),
+                            shape = RoundedCornerShape(SplitCruiserRadius.Md),
+                            border = BorderStroke(1.dp, SplitCruiserPrimary.copy(alpha = 0.5f))
+                        ) {
+                            Text(
+                                "Add to one of my posted rides",
+                                color = SplitCruiserPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = SplitCruiserTextSize.Caption
+                            )
+                        }
                     }
                 }
             }
@@ -6257,6 +6290,123 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
             }
         )
     }
+}
+
+/**
+ * Confirms a driver taking a rider's request, and collects the one thing the request cannot
+ * carry: what each rider should chip in.
+ *
+ * A [RideRequest] records where and when, never a price, so this is the only point in the flow
+ * where the cost split can be set. It prefills from the shared `suggestedContribution` — distance
+ * based, and shared so both platforms propose the same number — because a driver looking at an
+ * empty box has nothing to anchor on.
+ */
+@Composable
+fun AcceptRequestDialog(
+    request: RideRequest,
+    viewModel: MainViewModel,
+    onDismiss: () -> Unit,
+    onAccepted: (TripMatch) -> Unit,
+) {
+    var contribution by remember { mutableStateOf("") }
+    var isSuggesting by remember { mutableStateOf(true) }
+
+    LaunchedEffect(request.id) {
+        viewModel.suggestedContribution(request) { suggested ->
+            // 0.0 means the route could not be resolved; an empty field beats a wrong number.
+            if (suggested > 0.0) contribution = String.format(Locale.US, "%.2f", suggested)
+            isSuggesting = false
+        }
+    }
+
+    val amount = contribution.trim().toDoubleOrNull()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = SplitCruiserSurfaceCard,
+        shape = RoundedCornerShape(SplitCruiserRadius.Lg),
+        title = {
+            Text(
+                "Give this ride",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = SplitCruiserTextPrimary
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(SplitCruiserSpacing.Md)) {
+                RouteIndicator(
+                    origin = request.origin,
+                    destination = request.destination,
+                    scale = RouteScale.Compact,
+                    pins = true,
+                    originLabel = "PICKUP",
+                    destinationLabel = "DROPOFF",
+                )
+                HorizontalDivider(color = SplitCruiserOutline)
+                CardStat(
+                    label = "DEPARTS",
+                    value = SimpleDateFormat("EEEE, d MMMM • h:mm a", Locale.US)
+                        .format(Date(request.departureTime)),
+                )
+                CardStat(
+                    label = "SEATS",
+                    value = "${request.seatsNeeded} seat${if (request.seatsNeeded == 1) "" else "s"}",
+                )
+
+                OutlinedTextField(
+                    value = contribution,
+                    onValueChange = { contribution = it },
+                    label = { Text("Each rider chips in ($)") },
+                    placeholder = { Text("0.00") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    leadingIcon = {
+                        Icon(Icons.Default.AttachMoney, null, tint = SplitCruiserWarning)
+                    },
+                    trailingIcon = {
+                        if (isSuggesting) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = SplitCruiserPrimary,
+                            )
+                        }
+                    },
+                    shape = RoundedCornerShape(SplitCruiserRadius.Md),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("accept_contribution_input"),
+                )
+
+                // Say why, not just what: the number is a suggestion, and no money moves in-app.
+                Text(
+                    "Suggested from the distance. Cash is settled in person — you can agree " +
+                        "something else in chat.",
+                    fontSize = SplitCruiserTextSize.Eyebrow,
+                    color = SplitCruiserTextSecondary,
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    amount?.let { viewModel.acceptRequestDirect(request.id, it, onAccepted) }
+                },
+                enabled = amount != null && amount >= 0.0,
+                colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserPrimary),
+                shape = RoundedCornerShape(SplitCruiserRadius.Md),
+                modifier = Modifier.testTag("confirm_accept_button"),
+            ) {
+                Text("Accept & open chat", color = Color.White, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = SplitCruiserTextSecondary)
+            }
+        },
+    )
 }
 
 @Composable
