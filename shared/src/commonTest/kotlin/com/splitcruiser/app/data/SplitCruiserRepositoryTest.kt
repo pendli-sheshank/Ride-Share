@@ -391,6 +391,54 @@ class SplitCruiserRepositoryTest {
         assertFailsWith<SplitCruiserException> { repo.joinTripOfferDirect("offer_1") }
     }
 
+    // --- Ratings -----------------------------------------------------------------------------
+
+    /**
+     * Ratings used to be write-only: they were read back only to compute an average, then
+     * discarded, so nothing could tell whether you had already rated someone and the rating form
+     * kept offering the same person forever.
+     */
+    @Test
+    fun submittingARatingRecordsWhoYouRated() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+        assertTrue(repo.getRatedUserIds().isEmpty())
+
+        repo.submitRating(toUserId = "bo", ratingValue = 5f, comment = "Easy to find")
+
+        assertEquals(listOf("bo"), repo.getRatedUserIds())
+    }
+
+    /**
+     * The id is derived from the pair, not random. With a random id a second rating created a
+     * second document, and the average counts documents — so rating someone twice moved their
+     * score by two ratings' worth.
+     */
+    @Test
+    fun ratingTheSamePersonTwiceOverwritesRatherThanCounting() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+
+        repo.submitRating(toUserId = "bo", ratingValue = 5f, comment = "first")
+        repo.submitRating(toUserId = "bo", ratingValue = 2f, comment = "second")
+
+        val writes = requests.filter {
+            it.url.toString().contains("/documents/ratings/") && it.method.value == "PATCH"
+        }
+        val ids = writes.map { it.url.toString().substringAfter("/documents/ratings/").substringBefore("?") }
+        assertEquals(1, ids.distinct().size, "both ratings must land on one document, got $ids")
+        assertEquals(listOf("bo"), repo.getRatedUserIds())
+    }
+
+    @Test
+    fun ratedUserIdsAreClearedOnLogout() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+        repo.submitRating(toUserId = "bo", ratingValue = 4f, comment = "")
+        assertEquals(listOf("bo"), repo.getRatedUserIds())
+
+        repo.logout()
+
+        assertTrue(repo.getRatedUserIds().isEmpty())
+    }
+
     // --- Accepting a request with no ride posted --------------------------------------------
 
     /** The request every direct-accept test accepts, unless it overrides it. */

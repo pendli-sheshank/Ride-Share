@@ -19,11 +19,17 @@ struct ProfileScreen: View {
         ScrollView {
             VStack(alignment: .leading, spacing: BrandScale.spaceXl) {
                 if let user = viewModel.currentUser {
+                    // Reputation first, then anything needing action, then settings, then the
+                    // destructive one. The rating you were given used to be a single number in
+                    // the identity stat row while the form for rating other people sat at the
+                    // bottom under the safety toggles — the two halves of the same idea, as far
+                    // apart as the screen allowed.
                     identityCard(user)
-                    notificationPreferences(user)
-                    alertsSection
-                    safetySection(user)
+                    yourRatingSection(user)
                     RatingsCard()
+                    alertsSection
+                    notificationPreferences(user)
+                    safetySection(user)
                     Button("Log Out") { viewModel.logOut() }
                         .buttonStyle(BrandButtonStyle(background: Brand.danger))
                 } else {
@@ -91,14 +97,11 @@ struct ProfileScreen: View {
 
             Divider().background(Brand.outline)
 
+            // The rating moved to its own section below; what is left here is what the identity
+            // card is actually for.
             HStack {
-                statColumn(
-                    value: user.ratingCount > 0 ? "\(TripFormat.rating(user.ratingAvg)) ★" : "N/A",
-                    label: "Rating Avg",
-                    tint: Brand.primary
-                )
-                statColumn(value: "\(user.ratingCount)", label: "Trips Shared", tint: Brand.textPrimary)
-                statColumn(value: "\(user.noShowCount)", label: "No Shows", tint: Brand.danger.opacity(0.8))
+                statColumn(value: "\(user.ratingCount)", label: "Trips shared", tint: Brand.textPrimary)
+                statColumn(value: "\(user.noShowCount)", label: "No-shows", tint: Brand.danger.opacity(0.8))
             }
         }
         .frame(maxWidth: .infinity)
@@ -121,6 +124,31 @@ struct ProfileScreen: View {
                 .foregroundColor(Brand.textSecondary)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    // MARK: Your rating
+
+    /// What other people have said about you — separate from the form for rating them.
+    private func yourRatingSection(_ user: User) -> some View {
+        BrandCard(title: "Your rating", tint: Brand.primary) {
+            if user.ratingCount > 0 {
+                HStack(alignment: .firstTextBaseline, spacing: BrandScale.spaceSm) {
+                    Text(TripFormat.rating(user.ratingAvg))
+                        .font(.system(size: 32, weight: .black))
+                        .foregroundColor(Brand.primary)
+                    Image(systemName: "star.fill")
+                        .foregroundColor(Brand.warning)
+                    Spacer()
+                    Text("from \(user.ratingCount) ride\(user.ratingCount == 1 ? "" : "s")")
+                        .font(BrandFont.caption())
+                        .foregroundColor(Brand.textSecondary)
+                }
+            } else {
+                Text("No ratings yet. Share a ride and whoever you travel with can rate you.")
+                    .font(BrandFont.caption())
+                    .foregroundColor(Brand.textSecondary)
+            }
+        }
     }
 
     // MARK: Notifications
@@ -303,6 +331,13 @@ struct RatingsCard: View {
     @State private var target: RatingCompanion?
     @State private var value: Double = 5
     @State private var comment = ""
+    /// Who this user has already rated.
+    ///
+    /// `@State` rather than reading `viewModel.ratedUserIds()` inline: `companions` below is a
+    /// computed property, and a synchronous cache read gives SwiftUI no dependency to invalidate,
+    /// so a just-rated person would stay on screen until something else redrew the view. Same
+    /// trap `BlockedListScreen` documents.
+    @State private var ratedIds: Set<String> = []
 
     /// The other party on every accepted or completed match, named without ever exposing an id.
     private var companions: [RatingCompanion] {
@@ -313,7 +348,9 @@ struct RatingsCard: View {
             .compactMap { match -> RatingCompanion? in
                 let wasHost = match.hostId != me
                 let otherId = wasHost ? match.hostId : match.riderId
-                guard !otherId.isEmpty, otherId != me, seen.insert(otherId).inserted else { return nil }
+                guard !otherId.isEmpty, otherId != me,
+                      !ratedIds.contains(otherId),
+                      seen.insert(otherId).inserted else { return nil }
 
                 let name: String
                 if !wasHost {
@@ -332,7 +369,9 @@ struct RatingsCard: View {
     var body: some View {
         BrandCard(title: "Rate someone you rode with", tint: Brand.primary) {
             if companions.isEmpty {
-                Text("Once you've shared a ride, whoever you rode with shows up here to rate.")
+                Text(ratedIds.isEmpty
+                     ? "Once you've shared a ride, whoever you rode with shows up here to rate."
+                     : "You've rated everyone you've ridden with. Share another ride to rate someone new.")
                     .font(BrandFont.caption())
                     .foregroundColor(Brand.textSecondary)
             } else {
@@ -376,6 +415,7 @@ struct RatingsCard: View {
             // If the selected companion drops out of the list, drop the selection with it.
             if let current = target, !ids.contains(current.id) { target = nil }
         }
+        .task { ratedIds = Set(viewModel.ratedUserIds()) }
     }
 
     private func companionChip(_ companion: RatingCompanion) -> some View {
@@ -409,6 +449,7 @@ struct RatingsCard: View {
                 comment: comment
             ) {
                 viewModel.notify("Thanks — your rating is in.")
+                ratedIds = Set(viewModel.ratedUserIds())
                 self.target = nil
                 comment = ""
                 value = 5
@@ -429,18 +470,12 @@ struct EditProfileSheet: View {
     @State private var name = ""
     @State private var lastInitial = ""
     @State private var avatarUrl = ""
-    @State private var customUrl = ""
     @State private var photoItem: PhotosPickerItem?
     @State private var isUploading = false
 
-    private let presetKeys = [
-        "preset_grad", "preset_driver", "preset_tech",
-        "preset_explorer", "preset_star", "preset_globe",
-    ]
+    /// The twelve avatars, from the one list both platforms read.
+    private var avatarKeys: [String] { SplitCruiserAvatars.shared.ALL }
 
-    private var resolvedAvatar: String {
-        customUrl.isEmpty ? avatarUrl : customUrl
-    }
 
     var body: some View {
         NavigationStack {
@@ -448,7 +483,7 @@ struct EditProfileSheet: View {
                 VStack(alignment: .leading, spacing: BrandScale.spaceXl) {
                     VStack(spacing: BrandScale.spaceMd) {
                         StudentAvatar(
-                            avatarUrl: resolvedAvatar,
+                            avatarUrl: avatarUrl,
                             name: name,
                             size: 72,
                             fontSize: 28
@@ -470,20 +505,21 @@ struct EditProfileSheet: View {
                     .frame(maxWidth: .infinity)
 
                     FormSection(title: "Profile picture") {
-                        Text("Select a preset avatar:")
+                        Text("Pick an avatar, or upload a photo above.")
                             .font(BrandFont.caption())
                             .foregroundColor(Brand.textSecondary)
-                        HStack(spacing: BrandScale.spaceSm) {
-                            ForEach(presetKeys, id: \.self) { key in
-                                presetButton(key)
+                        // A grid, not a row: twelve avatars do not fit across a phone.
+                        LazyVGrid(
+                            columns: Array(
+                                repeating: GridItem(.flexible(), spacing: BrandScale.spaceSm),
+                                count: 6
+                            ),
+                            spacing: BrandScale.spaceSm
+                        ) {
+                            ForEach(avatarKeys, id: \.self) { key in
+                                avatarButton(key)
                             }
                         }
-                        BrandTextField(
-                            title: "Or paste a custom image URL",
-                            placeholder: "https://…",
-                            text: $customUrl,
-                            icon: "link"
-                        )
                     }
 
                     FormSection(title: "Personal details") {
@@ -523,20 +559,22 @@ struct EditProfileSheet: View {
         }
     }
 
-    private func presetButton(_ key: String) -> some View {
-        let isSelected = resolvedAvatar == key
+    private func avatarButton(_ key: String) -> some View {
+        let isSelected = avatarUrl == key
         return Button {
-            customUrl = ""
             avatarUrl = key
         } label: {
-            ZStack {
-                Circle().fill(isSelected ? Brand.primary.opacity(0.25) : Brand.surface)
-                Circle().stroke(isSelected ? Brand.primary : .clear, lineWidth: 2)
-                Text(StudentAvatar.presets[key] ?? "🙂").font(.system(size: 20))
-            }
-            .frame(width: 40, height: 40)
+            StudentAvatar(avatarUrl: key, name: name, size: 44, fontSize: 18)
+                .overlay(
+                    Circle().stroke(
+                        isSelected ? Brand.primary : Brand.outline,
+                        lineWidth: isSelected ? 3 : 1
+                    )
+                )
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(SplitCruiserAvatars.shared.accessibilityLabel(avatarUrl: key))
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 
     /// Mirrors Android's `ProfileImages.readResizedJpeg` — a 512px max edge at quality 0.85 —
@@ -555,7 +593,6 @@ struct EditProfileSheet: View {
         }
 
         if await viewModel.uploadProfilePicture(userId: userId, imageData: jpeg) {
-            customUrl = ""
             avatarUrl = viewModel.currentUser?.avatarUrl ?? avatarUrl
             viewModel.notify("Profile picture updated")
         }
@@ -566,7 +603,7 @@ struct EditProfileSheet: View {
             if await viewModel.updateProfile(
                 name: name,
                 lastInitial: lastInitial,
-                avatarUrl: resolvedAvatar
+                avatarUrl: avatarUrl
             ) {
                 viewModel.notify("Profile saved")
                 dismiss()

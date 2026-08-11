@@ -432,6 +432,15 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    /// Who this user has already rated, so the rating form stops offering them.
+    ///
+    /// A synchronous cache read, like `blockedUsers()` — the shared side keeps the list warm from
+    /// `refreshNow()` and updates it optimistically on submit. Callers must hold the result in
+    /// `@State`; reading it inline from a computed property gives SwiftUI nothing to invalidate.
+    func ratedUserIds() -> [String] {
+        repository.getRatedUserIds()
+    }
+
     // MARK: - Profile management
 
     func updateProfile(name: String, lastInitial: String, avatarUrl: String) async -> Bool {

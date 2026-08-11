@@ -358,6 +358,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Who this user has already rated, so the rating form stops offering them.
+     *
+     * A plain cache read — the repository keeps the list warm from `refreshNow()` and updates it
+     * optimistically on submit. Callers must hold it in state and re-read after submitting, or
+     * Compose has nothing to recompose on.
+     */
+    fun ratedUserIds(): List<String> = repository.getRatedUserIds()
+
     fun requestJoin(offerId: String, requestId: String, contribution: Double, onSuccess: () -> Unit) {
         runGuarded(
             block = { repository.validateAndCreateMatchResult(offerId, requestId, contribution) },
