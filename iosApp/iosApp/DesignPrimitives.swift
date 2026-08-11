@@ -339,25 +339,26 @@ struct RouteIndicator: View {
 
 /// The user avatar, matching Android's `StudentAvatar`.
 ///
-/// Three branches, in Android's order: an http URL loads the image; one of the six preset keys
-/// renders its emoji; anything else falls back to the initial on a gradient. The preset branch is
-/// the one that was missing — a user who picked a preset on Android showed up as a bare letter
-/// here, because the key is stored *as* the avatarUrl string rather than as a separate field.
+/// Four branches, in the same order on both platforms: an http URL loads an uploaded photo; one
+/// of the twelve `avatar_NN` keys draws its vector portrait; a legacy `preset_*` key still draws
+/// its emoji; anything else falls back to the initial on a gradient.
+///
+/// The key is stored *as* the avatarUrl string rather than as a separate field, so the legacy
+/// branch cannot be dropped — anyone who picked one of the old object emoji still has that key on
+/// their user document, and removing it would turn their avatar into a bare letter.
+///
+/// The key list itself lives in `SplitCruiserAvatars` in `:shared`; it used to be written out
+/// three times across the two platforms.
 struct StudentAvatar: View {
     let avatarUrl: String
     let name: String
     var size: CGFloat = 64
     var fontSize: CGFloat = 24
 
-    /// Keys written by Android's `EditProfileDialog`, resolved the same way on both platforms.
-    static let presets: [String: String] = [
-        "preset_grad": "🎓",
-        "preset_driver": "🚗",
-        "preset_tech": "💻",
-        "preset_explorer": "🎒",
-        "preset_star": "⭐",
-        "preset_globe": "🌐",
-    ]
+    /// `avatar_07` → `Avatar07`, the imageset name the generator writes.
+    static func imageName(for key: String) -> String {
+        "Avatar" + key.replacingOccurrences(of: "avatar_", with: "")
+    }
 
     var body: some View {
         Group {
@@ -367,7 +368,11 @@ struct StudentAvatar: View {
                 } placeholder: {
                     fallback
                 }
-            } else if let emoji = Self.presets[avatarUrl] {
+            } else if SplitCruiserAvatars.shared.isAvatarKey(avatarUrl: avatarUrl) {
+                Image(Self.imageName(for: avatarUrl))
+                    .resizable()
+                    .scaledToFill()
+            } else if let emoji = SplitCruiserAvatars.shared.legacyEmoji(avatarUrl: avatarUrl) {
                 ZStack {
                     Brand.primaryContainer
                     Text(emoji).font(.system(size: size * 0.5))
@@ -378,6 +383,7 @@ struct StudentAvatar: View {
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
+        .accessibilityLabel(SplitCruiserAvatars.shared.accessibilityLabel(avatarUrl: avatarUrl))
     }
 
     private var fallback: some View {

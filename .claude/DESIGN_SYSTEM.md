@@ -78,6 +78,7 @@ Extract before you copy. These already exist:
 | `SplitCruiserEmptyState` | `BrandEmptyState` | — (already good) |
 | `FormSection` | SwiftUI `Section` | — |
 | `RideSchedule` (in `:shared`) | same object | 3 places, and two of them disagreed |
+| `SplitCruiserAvatars` (in `:shared`) | same object | 3 places — the key list was written out twice on Android alone |
 
 `RideSchedule` answers "is this ride still on someone's schedule, or is it history?" — and `"full"`
 is the case that catches people out. A ride whose last seat has gone is still very much happening,
@@ -153,12 +154,13 @@ it, so until that changes this checklist is the mechanism.
 | Blocked users | `BlockedListScreen` | `BlockedListScreen` (`ProfileScreens.swift`) |
 | Host analytics | `HostDashboard` | `HostDashboardScreen` (`ProfileScreens.swift`) |
 
-**Two deliberate structural differences**, both recorded rather than accidental:
+**One deliberate structural difference**, recorded rather than accidental:
 
 - Android's bottom bar sends "Chats" straight into `userMatches.first()` and has no list behind
   it, so every other conversation is unreachable from the bar. iOS keeps a `MatchesScreen` list.
-- Android registers a `host_dashboard` route that nothing navigates to. On iOS the screen is
-  reachable, from the Profile screen's safety section.
+
+(Android's dead `host_dashboard` route used to be the second entry here. The Profile screen's
+safety section now links to it on both platforms.)
 
 ### Questions to answer before merging
 
@@ -186,5 +188,9 @@ Not everything is at parity, and that is fine as long as it is deliberate:
   The fix is real `CoreLocation` feeding the existing shared `reverseGeocodeNominatim`, then
   porting that back to Android.
 
-Host analytics, blocked-user management, profile editing, picture upload and ratings **used to be
-listed here** and are now on both platforms.
+Host analytics, blocked-user management, profile editing and ratings **used to be listed here**
+and are now on both platforms.
+
+Photo upload is the loose one: it exists on both platforms but in different places — Android only
+during onboarding, iOS only in the edit sheet. Neither offers both. The avatar picker itself is at
+parity, drawing the twelve `SplitCruiserAvatars` on each.

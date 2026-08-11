@@ -84,6 +84,8 @@ class SplitCruiserRepository internal constructor(
     private val matches = MutableStateFlow<Map<String, TripMatch>>(emptyMap())
     private val messages = MutableStateFlow<Map<String, Message>>(emptyMap())
     private val blocks = MutableStateFlow<Map<String, Block>>(emptyMap())
+    /** Ratings the signed-in user has given, keyed by who they were about. */
+    private val myRatings = MutableStateFlow<Map<String, Rating>>(emptyMap())
     private val vehicles = MutableStateFlow<Map<String, Vehicle>>(emptyMap())
 
     // --- Public state -----------------------------------------------------------------------
@@ -293,6 +295,7 @@ class SplitCruiserRepository internal constructor(
     @Throws(Exception::class)
     suspend fun refreshNow() {
         refreshBlocks()
+        refreshMyRatings()
         refreshFeeds()
         refreshMatches()
         refreshNotifications()
@@ -442,6 +445,7 @@ class SplitCruiserRepository internal constructor(
         matches.value = emptyMap()
         messages.value = emptyMap()
         blocks.value = emptyMap()
+        myRatings.value = emptyMap()
         _notifications.value = emptyList()
         _allMessages.value = emptyList()
         recomputeFeeds()
@@ -1269,11 +1273,20 @@ class SplitCruiserRepository internal constructor(
 
     // --- Ratings, blocks, notifications ------------------------------------------------------
 
+    /**
+     * One person's verdict on another.
+     *
+     * The id is derived from the pair rather than random. With `newId("rating")` a second rating
+     * of the same person created a second document, and [recomputeUserRating] counts documents —
+     * so rating someone twice counted them twice and moved their average by two ratings' worth.
+     * A deterministic id makes a repeat an overwrite. The rules already permit it: `update` is
+     * allowed when `fromUserId == request.auth.uid`.
+     */
     @Throws(Exception::class)
     suspend fun submitRating(toUserId: String, ratingValue: Float, comment: String) {
         val user = requireUser()
         val rating = Rating(
-            id = newId("rating"),
+            id = ratingId(user.id, toUserId),
             fromUserId = user.id,
             toUserId = toUserId,
             rating = ratingValue,
@@ -1281,7 +1294,46 @@ class SplitCruiserRepository internal constructor(
             timestamp = nowMs(),
         )
         firestore.setDocument("ratings", rating.id, rating, serializer<Rating>())
+        // Optimistic, like blockUser: the rating list is used to hide people you have already
+        // rated, and waiting for the next refresh would leave them on offer in the meantime.
+        myRatings.value = myRatings.value + (toUserId to rating)
         recomputeUserRating(toUserId)
+    }
+
+    /**
+     * Who the signed-in user has already rated.
+     *
+     * Ratings used to be write-only — [recomputeUserRating] read them back filtered on `toUserId`
+     * purely to average them, then dropped them — so nothing could tell whether you had already
+     * rated somebody, and the rating screen kept offering the same person forever.
+     *
+     * A plain list rather than a `Set` or a `Flow`: neither exports usefully to Swift, and this
+     * mirrors [getBlockedUsers], which iOS already calls directly.
+     */
+    fun getRatedUserIds(): List<String> = myRatings.value.keys.toList()
+
+    /**
+     * One document per (rater, rated) pair, so a repeat rating replaces the first.
+     *
+     * Firestore ids may not contain `/`; uids never do, so joining with `_` is safe.
+     */
+    private fun ratingId(fromUserId: String, toUserId: String): String =
+        "rating_${fromUserId}_$toUserId"
+
+    /** Loaded during session restore and pull-to-refresh, alongside [refreshBlocks]. */
+    private suspend fun refreshMyRatings() {
+        val uid = tokens.uid ?: return
+        // No orderBy: a bare equality filter needs only the automatic single-field index, so this
+        // adds nothing to firestore.indexes.json.
+        val given = firestore.runQuery(
+            StructuredQuery(
+                collection = "ratings",
+                filters = listOf(FieldFilter("fromUserId", FilterOp.Equal, stringValue(uid))),
+                limit = 500,
+            ),
+            serializer<Rating>(),
+        )
+        myRatings.value = given.associateBy { it.toUserId }
     }
 
     private suspend fun recomputeUserRating(userId: String) {
