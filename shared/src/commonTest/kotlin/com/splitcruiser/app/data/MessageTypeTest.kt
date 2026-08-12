@@ -81,4 +81,42 @@ class MessageTypeTest {
 
         assertEquals(MessageType.TEXT, future.kind)
     }
+
+    @Test
+    fun aProposalCarriesBothAddressesTheTimeAndTheAmount() {
+        val message = Message(
+            type = MessageType.PICKUP_PROPOSAL,
+            pickupSpot = "360 Huntington Ave",
+            pickupTime = "5:45 PM",
+            dropoffSpot = "700 Comm Ave",
+            contribution = 14.5,
+        )
+
+        assertEquals("360 Huntington Ave", message.spot)
+        assertEquals("700 Comm Ave", message.dropoffSpot)
+        assertEquals(14.5, message.contribution)
+    }
+
+    @Test
+    fun aConfirmationPointsAtTheProposalItAnswers() {
+        val confirmation = Message(type = MessageType.PICKUP_CONFIRMED, proposalId = "msg_7")
+
+        assertEquals("msg_7", confirmation.proposalId)
+    }
+
+    @Test
+    fun aProposalStoredBeforeTheAddressAndPriceFieldsExistedStillReads() {
+        // The fields are all defaulted, so an older document decodes rather than failing — and the
+        // cards render the address and amount rows conditionally so it does not show blanks.
+        val old = Message(
+            type = MessageType.PICKUP_PROPOSAL,
+            pickupSpot = "Snell steps",
+            pickupTime = "7:45 am",
+        )
+
+        assertEquals("Snell steps", old.spot)
+        assertEquals("", old.dropoffSpot)
+        assertEquals(0.0, old.contribution)
+        assertEquals("", old.proposalId)
+    }
 }

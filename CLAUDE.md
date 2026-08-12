@@ -61,6 +61,12 @@ Consequences worth knowing before changing anything here:
   before bumping either version.
 - **No snapshot listeners.** Firestore's realtime channel is gRPC-only, so the repository polls —
   feeds at 20s, chat at 3s while open, backing off in the background.
+- **A query has to satisfy the rule on its own.** Firestore checks a query against the documents it
+  *could* match, not the ones it does, so a rule reading `resource.data.<field>` needs a matching
+  filter in every query or the whole query is denied. The chat poll was narrowed to `matchId` alone
+  while the `messages` rule tests `participants` — it had been failing on every tick since the first
+  chat was opened, and looked like "messages only arrive after an app restart". If you add a query,
+  check it against `firestore.rules` and add the composite index it needs.
 - **The public API throws and avoids `Result` and `Pair`.** Both are unusable from Swift
   (`Result` is an inline value class Kotlin/Native does not export). `androidMain/ResultShims.kt`
   restores the `Result` shape for the ViewModel; Swift never sees it.

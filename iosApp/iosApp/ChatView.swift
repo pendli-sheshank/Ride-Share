@@ -23,8 +23,21 @@ struct ChatView: View {
     @State private var subscription: FlowSubscription?
     @State private var showProposeSheet = false
 
+    @State private var confirmingProposalId: String?
+
     private var isHost: Bool { viewModel.currentUser?.id == match.hostId }
     private var offer: TripOffer? { viewModel.offer(for: match) }
+
+    /// Proposals that already have a confirmation. Without this the Accept button never went away,
+    /// so every extra tap posted another confirmation card.
+    private var confirmedProposalIds: Set<String> {
+        Set(
+            messages
+                .filter { $0.kind == MessageType.shared.PICKUP_CONFIRMED }
+                .map(\.proposalId)
+                .filter { !$0.isEmpty }
+        )
+    }
 
     private let quickReplies = [
         "I'm here! 📍",
@@ -49,13 +62,27 @@ struct ChatView: View {
         .navigationTitle(isHost ? "Ride with \(match.riderName)" : "Ride coordinator")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showProposeSheet) {
-            ProposePickupSheet { spot, time in
+            ProposePickupSheet(
+                viewModel: viewModel,
+                initialPickup: PlaceSelection(
+                    name: offer?.origin ?? "",
+                    lat: offer?.originLat ?? 0,
+                    lon: offer?.originLng ?? 0
+                ),
+                initialDropoff: PlaceSelection(
+                    name: offer?.destination ?? "",
+                    lat: offer?.destLat ?? 0,
+                    lon: offer?.destLng ?? 0
+                ),
+                initialContribution: match.contribution
+            ) { pickup, dropoff, time, contribution in
                 Task {
-                    await viewModel.sendPickupMessage(
+                    await viewModel.sendPickupProposal(
                         matchId: match.id,
-                        type: MessageType.shared.PICKUP_PROPOSAL,
-                        spot: spot,
-                        time: time
+                        pickupAddress: pickup,
+                        dropoffAddress: dropoff,
+                        pickupTime: time,
+                        contribution: contribution
                     )
                 }
             }
@@ -115,14 +142,13 @@ struct ChatView: View {
                         MessageBubble(
                             message: message,
                             isMine: message.senderId == viewModel.currentUser?.id,
-                            onConfirm: { spot, time in
+                            isConfirmed: confirmedProposalIds.contains(message.id),
+                            isConfirming: confirmingProposalId == message.id,
+                            onConfirm: {
+                                confirmingProposalId = message.id
                                 Task {
-                                    await viewModel.sendPickupMessage(
-                                        matchId: match.id,
-                                        type: MessageType.shared.PICKUP_CONFIRMED,
-                                        spot: spot,
-                                        time: time
-                                    )
+                                    await viewModel.confirmPickup(proposalMessageId: message.id)
+                                    confirmingProposalId = nil
                                 }
                             }
                         )
@@ -192,7 +218,11 @@ struct ChatView: View {
 struct MessageBubble: View {
     let message: Message
     let isMine: Bool
-    let onConfirm: (String, String) -> Void
+    /// Whether a confirmation already answers this proposal. Computed by the parent, which is the
+    /// only thing that can see the whole conversation.
+    let isConfirmed: Bool
+    let isConfirming: Bool
+    let onConfirm: () -> Void
 
     var body: some View {
         HStack {
@@ -243,6 +273,38 @@ struct MessageBubble: View {
         return isMine ? Brand.onPrimary : Brand.textPrimary
     }
 
+    /// The labelled lines shared by the proposal and the confirmation, so the two read identically
+    /// and the confirmation is visibly an agreement to the same terms.
+    private var pickupDetails: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            detailRow("Pick up", message.spot)
+            if !message.dropoffSpot.isEmpty {
+                detailRow("Drop off", message.dropoffSpot)
+            }
+            detailRow("Time", message.time)
+            if message.contribution > 0 {
+                detailRow(
+                    message.kind == MessageType.shared.PICKUP_CONFIRMED ? "Agreed share" : "Your share",
+                    String(format: "$%.2f", message.contribution)
+                )
+            }
+        }
+    }
+
+    private func detailRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .top, spacing: BrandScale.spaceSm) {
+            Text(label)
+                .font(BrandFont.eyebrow(.bold))
+                .foregroundColor(Brand.textSecondary)
+                .frame(width: 68, alignment: .leading)
+            Text(value)
+                .font(.caption)
+                .fontWeight(.medium)
+                .foregroundColor(Brand.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     private var proposal: some View {
         VStack(alignment: .leading, spacing: BrandScale.spaceSm) {
             Label("Proposed pickup", systemImage: "mappin.and.ellipse")
@@ -250,22 +312,27 @@ struct MessageBubble: View {
                 .fontWeight(.bold)
                 .foregroundColor(Brand.primary)
 
-            Text("📍 \(message.spot)").font(.callout).foregroundColor(Brand.textPrimary)
-            Text("⏰ \(message.time)").font(.callout).foregroundColor(Brand.textPrimary)
+            pickupDetails
 
-            if isMine {
+            if isConfirmed {
+                Text("Confirmed")
+                    .font(.caption2)
+                    .fontWeight(.bold)
+                    .foregroundColor(Brand.success)
+            } else if isMine {
                 Text("Awaiting confirmation…")
                     .font(.caption2)
                     .foregroundColor(Brand.textSecondary)
             } else {
-                Button("Accept & confirm") { onConfirm(message.spot, message.time) }
+                Button(isConfirming ? "Confirming…" : "Accept and confirm", action: onConfirm)
                     .font(.caption)
                     .fontWeight(.bold)
                     .foregroundColor(Brand.onPrimary)
                     .padding(.horizontal, BrandScale.spaceMd)
                     .padding(.vertical, BrandScale.spaceSm)
-                    .background(Brand.success)
+                    .background(Brand.success.opacity(isConfirming ? 0.5 : 1))
                     .cornerRadius(BrandScale.radiusSm)
+                    .disabled(isConfirming)
             }
         }
         .padding(BrandScale.spaceMd)
@@ -284,9 +351,13 @@ struct MessageBubble: View {
                 .fontWeight(.bold)
                 .foregroundColor(Brand.success)
 
-            Text("Meet at \(message.spot) at \(message.time)")
-                .font(.callout)
-                .foregroundColor(Brand.textPrimary)
+            pickupDetails
+
+            if message.contribution > 0 {
+                Text("Both of you have agreed to this amount. Pay in cash when you meet.")
+                    .font(BrandFont.eyebrow(.regular))
+                    .foregroundColor(Brand.textSecondary)
+            }
         }
         .padding(BrandScale.spaceMd)
         .background(Brand.success.opacity(0.12))
@@ -302,42 +373,111 @@ struct MessageBubble: View {
 
 struct ProposePickupSheet: View {
     @Environment(\.presentationMode) private var presentationMode
-    @State private var spot = ""
-    @State private var time = ""
+    @ObservedObject var viewModel: AppViewModel
 
-    let onPropose: (String, String) -> Void
+    /// Seeded with the ride's own coordinates, not just its text: `LocationAutocompleteField` only
+    /// shows a prefilled selection once `isResolved` is true, which needs a real lat/lon.
+    let initialPickup: PlaceSelection
+    let initialDropoff: PlaceSelection
+    let initialContribution: Double
+    let onPropose: (String, String, String, Double) -> Void
+
+    @State private var pickup = PlaceSelection()
+    @State private var dropoff = PlaceSelection()
+    @State private var time = ""
+    @State private var contribution = ""
+    @State private var didPrefill = false
+
+    private var amount: Double? { Double(contribution.trimmingCharacters(in: .whitespaces)) }
+
+    private var canSend: Bool {
+        !pickup.name.trimmingCharacters(in: .whitespaces).isEmpty
+            && !time.trimmingCharacters(in: .whitespaces).isEmpty
+            && (contribution.isEmpty || (amount ?? -1) >= 0)
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: BrandScale.spaceXl) {
+                    Text("Agree the exact addresses, the time, and what the ride costs. The other "
+                        + "person confirms it, and the amount becomes the ride's split.")
+                        .font(BrandFont.body())
+                        .foregroundColor(Brand.textSecondary)
+
                     FormSection(title: "Where") {
-                        BrandTextField(
-                            title: "Meeting Spot",
-                            placeholder: "e.g. Science Library entrance",
-                            text: $spot,
-                            icon: "mappin.circle.fill",
+                        LocationAutocompleteField(
+                            title: "Exact pickup address",
+                            placeholder: "e.g. 360 Huntington Ave, Boston",
+                            selection: $pickup,
+                            viewModel: viewModel,
+                            accent: Brand.primary,
+                            leadingSystemImage: "location.fill",
                             accessibilityID: "propose_location_input"
+                        )
+                        LocationAutocompleteField(
+                            title: "Exact drop-off address",
+                            placeholder: "e.g. 700 Commonwealth Ave, Boston",
+                            selection: $dropoff,
+                            viewModel: viewModel,
+                            bias: pickup,
+                            accent: Brand.primary,
+                            leadingSystemImage: "mappin.circle.fill",
+                            accessibilityID: "propose_dropoff_input"
                         )
                     }
                     FormSection(title: "When") {
                         BrandTextField(
-                            title: "Proposed Time",
+                            title: "Pickup time",
                             placeholder: "e.g. 5:45 PM or in 10 mins",
                             text: $time,
                             icon: "clock.fill",
                             accessibilityID: "propose_time_input"
                         )
                     }
+                    FormSection(title: "Cost") {
+                        BrandTextField(
+                            title: "Rider's share",
+                            placeholder: "0.00",
+                            text: $contribution,
+                            icon: "dollarsign.circle.fill",
+                            keyboard: .decimalPad,
+                            accessibilityID: "propose_contribution_input"
+                        )
+                        Text(contribution.isEmpty || amount != nil
+                            ? "Cash, settled in person when you meet"
+                            : "Enter an amount like 12.50")
+                            .font(BrandFont.eyebrow(.regular))
+                            .foregroundColor(amount == nil && !contribution.isEmpty
+                                ? Brand.danger
+                                : Brand.textSecondary)
+                    }
 
                     Button("Send proposal") {
-                        onPropose(spot, time)
+                        onPropose(
+                            pickup.name.trimmingCharacters(in: .whitespaces),
+                            dropoff.name.trimmingCharacters(in: .whitespaces),
+                            time.trimmingCharacters(in: .whitespaces),
+                            amount ?? 0
+                        )
                         presentationMode.wrappedValue.dismiss()
                     }
-                    .buttonStyle(BrandButtonStyle(isEnabled: !spot.isEmpty && !time.isEmpty))
-                    .disabled(spot.isEmpty || time.isEmpty)
+                    .buttonStyle(BrandButtonStyle(isEnabled: canSend))
+                    .disabled(!canSend)
                 }
                 .padding(BrandScale.spaceXl)
+            }
+            .onAppear {
+                // Once only: the sheet's body re-runs, and re-seeding would stamp on typing.
+                guard !didPrefill else { return }
+                didPrefill = true
+                // Only seed a selection the field will actually display. An unresolved one (a ride
+                // stored without coordinates) would leave a blank box above an enabled Send button.
+                if initialPickup.isResolved { pickup = initialPickup }
+                if initialDropoff.isResolved { dropoff = initialDropoff }
+                if initialContribution > 0 {
+                    contribution = String(format: "%.2f", initialContribution)
+                }
             }
             .background(Brand.surface)
             .scrollContentBackground(.hidden)

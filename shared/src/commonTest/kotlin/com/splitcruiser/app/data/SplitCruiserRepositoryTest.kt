@@ -930,6 +930,118 @@ class SplitCruiserRepositoryTest {
         assertEquals(100.0, repo.calculateCostSplit(100.0, 0))
     }
 
+    // --- Chat ------------------------------------------------------------------------------
+
+    /**
+     * The regression behind "messages only arrive after I restart the app".
+     *
+     * The `messages` read rule tests `uid in resource.data.participants`, and Firestore rejects a
+     * query it cannot prove only matches readable documents. A query narrowed to `matchId` alone
+     * was therefore denied on every poll — and because the app pins `openChatMatchId` on the first
+     * chat opened, that was the only query it ever issued again.
+     */
+    @Test
+    fun theOpenChatQueryIsNarrowedByParticipantsAndNotJustByMatchId() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+        repo.openChat("match_1")
+
+        repo.refreshNow()
+
+        val chatQuery = requests.last { it.url.toString().contains(":runQuery") }
+        val body = (chatQuery.body as TextContent).text
+        assertContains(body, "\"matchId\"")
+        assertContains(
+            body,
+            "ARRAY_CONTAINS",
+            message = "without a participants filter the rule rejects the whole query",
+        )
+        assertContains(body, "\"participants\"")
+    }
+
+    @Test
+    fun confirmingTheSameProposalTwiceWritesOneMessage() = runTest {
+        val repo = signedIn(repository(chatBackendServing(aProposalFrom = "bo")))
+        repo.openChat("match_1")
+        repo.refreshNow()
+
+        repo.confirmPickupProposal("msg_proposal")
+        repo.confirmPickupProposal("msg_proposal")
+
+        val confirmationWrites = requests.filter {
+            it.url.toString().contains("/documents/messages/msg_confirm_msg_proposal_me")
+        }
+        assertEquals(2, confirmationWrites.size, "both taps are sent")
+        val distinctIds = confirmationWrites.map { it.url.toString() }.toSet()
+        assertEquals(1, distinctIds.size, "but they address one document, so one card is rendered")
+    }
+
+    @Test
+    fun confirmingAProposalMakesItsAmountTheRidesContribution() = runTest {
+        val repo = signedIn(repository(chatBackendServing(aProposalFrom = "bo")))
+        repo.openChat("match_1")
+        repo.refreshNow()
+
+        repo.confirmPickupProposal("msg_proposal")
+
+        val matchWrite = requests.last { it.url.toString().contains("/documents/trip_matches/match_1") }
+        assertContains((matchWrite.body as TextContent).text, "\"contribution\"")
+        assertEquals(14.5, repo.getTripMatchById("match_1")?.contribution)
+    }
+
+    @Test
+    fun youCannotConfirmYourOwnProposal() = runTest {
+        val repo = signedIn(repository(chatBackendServing(aProposalFrom = "me")))
+        repo.openChat("match_1")
+        repo.refreshNow()
+
+        val failure = assertFailsWith<SplitCruiserException> { repo.confirmPickupProposal("msg_proposal") }
+        assertContains(failure.message!!, "your own")
+    }
+
+    @Test
+    fun aPickupProposalCarriesTheAddressesAndTheAmount() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+
+        repo.sendPickupProposal("match_1", "360 Huntington Ave", "700 Comm Ave", "5:45 PM", 14.5)
+
+        val write = requests.first {
+            it.url.toString().contains("/documents/messages/") && it.method.value == "PATCH"
+        }
+        val body = (write.body as TextContent).text
+        assertContains(body, "360 Huntington Ave")
+        assertContains(body, "700 Comm Ave")
+        assertContains(body, "\"contribution\"")
+        // The readable fallback, for a push notification or a client too old to know the fields.
+        assertContains(body, "for $14.50")
+    }
+
+    /** Serves one conversation containing a single pickup proposal sent by [aProposalFrom]. */
+    private fun chatBackendServing(aProposalFrom: String): (HttpRequestData) -> Pair<HttpStatusCode, String> {
+        documents["trip_matches/match_1"] = """
+            {"fields":{"id":{"stringValue":"match_1"},"hostId":{"stringValue":"bo"},
+             "riderId":{"stringValue":"me"},"contribution":{"doubleValue":9.0},
+             "status":{"stringValue":"accepted"}}}
+        """.trimIndent()
+        val proposal = """
+            {"document":{"fields":{"id":{"stringValue":"msg_proposal"},
+             "matchId":{"stringValue":"match_1"},"senderId":{"stringValue":"$aProposalFrom"},
+             "senderName":{"stringValue":"Bo"},"type":{"stringValue":"pickup_proposal"},
+             "pickupSpot":{"stringValue":"360 Huntington Ave"},
+             "dropoffSpot":{"stringValue":"700 Comm Ave"},
+             "pickupTime":{"stringValue":"5:45 PM"},
+             "contribution":{"doubleValue":14.5},
+             "participants":{"arrayValue":{"values":[{"stringValue":"me"},{"stringValue":"bo"}]}},
+             "timestamp":{"integerValue":"$now"}}},"readTime":"x"}
+        """.trimIndent()
+        val base = scriptedBackend()
+        return { request ->
+            val url = request.url.toString()
+            val isMessageQuery = url.contains(":runQuery") &&
+                ((request.body as? TextContent)?.text?.contains("\"messages\"") == true)
+            if (isMessageQuery) HttpStatusCode.OK to "[$proposal]" else base(request)
+        }
+    }
+
     @Test
     fun matchingOffersUseTheLooseOriginComparison() = runTest {
         val repo = signedIn(repository(scriptedBackend()))
