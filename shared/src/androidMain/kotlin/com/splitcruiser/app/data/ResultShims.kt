@@ -106,6 +106,20 @@ suspend fun SplitCruiserRepository.sendMessageResult(
     pickupTime: String = "",
 ): Result<Unit> = runCatching { sendMessage(matchId, text, type, pickupSpot, pickupTime) }
 
+suspend fun SplitCruiserRepository.sendPickupProposalResult(
+    matchId: String,
+    pickupAddress: String,
+    dropoffAddress: String,
+    pickupTime: String,
+    contribution: Double,
+): Result<Unit> = runCatching {
+    sendPickupProposal(matchId, pickupAddress, dropoffAddress, pickupTime, contribution)
+}
+
+suspend fun SplitCruiserRepository.confirmPickupProposalResult(
+    proposalMessageId: String,
+): Result<Unit> = runCatching { confirmPickupProposal(proposalMessageId) }
+
 suspend fun SplitCruiserRepository.uploadProfilePictureResult(
     userId: String,
     bytes: ByteArray,

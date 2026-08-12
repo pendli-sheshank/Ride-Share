@@ -61,6 +61,15 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "participants", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "matchId", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "messages",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "participants", "arrayConfig": "CONTAINS" },
         { "fieldPath": "timestamp", "order": "DESCENDING" }
       ]
     },

@@ -15,6 +15,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -5820,10 +5822,21 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
 @Composable
 fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavController) {
     val context = LocalContext.current
-    val messageList by viewModel.getChatMessages(matchId).collectAsState(initial = emptyList())
+    // remember(matchId), not a fresh call per recomposition: viewModel.getChatMessages builds a new
+    // Flow each time it is invoked, so an unremembered call restarts the collection on every frame.
+    val messageFlow = remember(matchId) { viewModel.getChatMessages(matchId) }
+    val messageList by messageFlow.collectAsState(initial = emptyList())
     var currentMsgText by remember { mutableStateOf("") }
     val currentUser by viewModel.currentUser.collectAsState()
     val matches by viewModel.userMatches.collectAsState()
+
+    // Opening the chat tightens the message poll to 3s; closing it must hand the tightening back.
+    // This used to happen as a side effect inside getChatMessages with no matching close, which
+    // left the repository polling a conversation the user had long since left.
+    DisposableEffect(matchId) {
+        viewModel.openChat(matchId)
+        onDispose { viewModel.closeChat() }
+    }
 
     val currentMatch = matches.find { it.id == matchId }
     val coroutineScope = rememberCoroutineScope()
@@ -5831,6 +5844,16 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
     val currentOffer = remember(currentMatch) { currentMatch?.let { viewModel.getTripOfferById(it.offerId) } }
     var isOfferDetailsExpanded by remember { mutableStateOf(false) }
     var showProposeDialog by remember { mutableStateOf(false) }
+
+    // Which proposals already have a confirmation. Without this the Accept button never went away,
+    // so every extra tap posted another "Pickup confirmed" card.
+    val confirmedProposalIds = remember(messageList) {
+        messageList.filter { it.kind == MessageType.PICKUP_CONFIRMED }
+            .map { it.proposalId }
+            .filter { it.isNotEmpty() }
+            .toSet()
+    }
+    var confirmingProposalId by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
         topBar = {
@@ -6152,30 +6175,31 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
                                         )
                                     }
                                     Spacer(modifier = Modifier.height(6.dp))
-                                    Text(
-                                        text = "📍 Spot: ${msg.spot}",
-                                        fontSize = SplitCruiserTextSize.Caption,
-                                        fontWeight = FontWeight.Medium,
-                                        color = SplitCruiserTextPrimary
-                                    )
-                                    Text(
-                                        text = "⏰ Time: ${msg.time}",
-                                        fontSize = SplitCruiserTextSize.Caption,
-                                        fontWeight = FontWeight.Medium,
-                                        color = SplitCruiserTextPrimary
-                                    )
+                                    PickupDetailRow(label = "Pick up", value = msg.spot)
+                                    if (msg.dropoffSpot.isNotEmpty()) {
+                                        PickupDetailRow(label = "Drop off", value = msg.dropoffSpot)
+                                    }
+                                    PickupDetailRow(label = "Time", value = msg.time)
+                                    if (msg.contribution > 0.0) {
+                                        PickupDetailRow(
+                                            label = "Your share",
+                                            value = formatContribution(msg.contribution),
+                                        )
+                                    }
                                     Spacer(modifier = Modifier.height(8.dp))
-                                    if (!isMe) {
+                                    val isAlreadyConfirmed = msg.id in confirmedProposalIds
+                                    if (!isMe && !isAlreadyConfirmed) {
+                                        val isConfirming = confirmingProposalId == msg.id
                                         Button(
                                             onClick = {
-                                                viewModel.sendPickupMessage(
-                                                    matchId = matchId,
-                                                    type = MessageType.PICKUP_CONFIRMED,
-                                                    spot = msg.spot,
-                                                    time = msg.time,
-                                                )
+                                                confirmingProposalId = msg.id
+                                                viewModel.confirmPickup(msg.id) { confirmingProposalId = null }
                                             },
-                                            colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserSuccess),
+                                            enabled = !isConfirming,
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = SplitCruiserSuccess,
+                                                disabledContainerColor = SplitCruiserSuccess.copy(alpha = 0.5f),
+                                            ),
                                             shape = RoundedCornerShape(8.dp),
                                             modifier = Modifier
                                                 .fillMaxWidth()
@@ -6183,7 +6207,28 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
                                         ) {
                                             Icon(imageVector = Icons.Default.Check, contentDescription = null, modifier = Modifier.size(12.dp), tint = Color.White)
                                             Spacer(modifier = Modifier.width(4.dp))
-                                            Text("Accept & Confirm", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                            Text(
+                                                text = if (isConfirming) "Confirming…" else "Accept and confirm",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White,
+                                            )
+                                        }
+                                    } else if (isAlreadyConfirmed) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(SplitCruiserSuccess.copy(alpha = 0.15f))
+                                                .padding(vertical = 4.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = "Confirmed",
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = SplitCruiserSuccess
+                                            )
                                         }
                                     } else {
                                         Box(
@@ -6225,20 +6270,31 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
                                         )
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text(
-                                            text = "Pickup Confirmed!",
+                                            text = "Pickup confirmed",
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 13.sp,
                                             color = SplitCruiserSuccess
                                         )
                                     }
                                     Spacer(modifier = Modifier.height(SplitCruiserSpacing.Xs))
-                                    Text(
-                                        text = "Meet at ${msg.spot} at ${msg.time}",
-                                        fontSize = SplitCruiserTextSize.Caption,
-                                        fontWeight = FontWeight.Medium,
-                                        color = SplitCruiserTextPrimary
-                                    )
-                                }
+                                    PickupDetailRow(label = "Pick up", value = msg.spot)
+                                    if (msg.dropoffSpot.isNotEmpty()) {
+                                        PickupDetailRow(label = "Drop off", value = msg.dropoffSpot)
+                                    }
+                                    PickupDetailRow(label = "Time", value = msg.time)
+                                    if (msg.contribution > 0.0) {
+                                        PickupDetailRow(
+                                            label = "Agreed share",
+                                            value = formatContribution(msg.contribution),
+                                        )
+                                        Spacer(modifier = Modifier.height(SplitCruiserSpacing.Xs))
+                                        Text(
+                                            text = "Both of you have agreed to this amount. Pay in cash when you meet.",
+                                            fontSize = SplitCruiserTextSize.Eyebrow,
+                                            color = SplitCruiserTextSecondary
+                                        )
+                                    }
+}
                             }
                         } else {
                             val bubbleShape = RoundedCornerShape(
@@ -6279,19 +6335,52 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
 
     if (showProposeDialog) {
         ProposePickupDialog(
+            initialPickup = currentOffer?.origin.orEmpty(),
+            initialDropoff = currentOffer?.destination.orEmpty(),
+            initialContribution = currentMatch?.contribution ?: 0.0,
+            // 0.0 is the model's default, not a location — passing it would rank results toward
+            // the Gulf of Guinea.
+            biasLat = currentOffer?.originLat?.takeIf { it != 0.0 },
+            biasLng = currentOffer?.originLng?.takeIf { it != 0.0 },
             onDismiss = { showProposeDialog = false },
-            onPropose = { location, time ->
-                viewModel.sendPickupMessage(
+            onPropose = { pickup, dropoff, time, contribution ->
+                viewModel.sendPickupProposal(
                     matchId = matchId,
-                    type = MessageType.PICKUP_PROPOSAL,
-                    spot = location,
-                    time = time,
+                    pickupAddress = pickup,
+                    dropoffAddress = dropoff,
+                    pickupTime = time,
+                    contribution = contribution,
                 )
                 showProposeDialog = false
             }
         )
     }
 }
+
+/** One labelled line inside a pickup card, so proposal and confirmation read identically. */
+@Composable
+private fun PickupDetailRow(label: String, value: String) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+        Text(
+            text = label,
+            fontSize = SplitCruiserTextSize.Eyebrow,
+            fontWeight = FontWeight.Bold,
+            color = SplitCruiserTextSecondary,
+            modifier = Modifier.width(72.dp)
+        )
+        Text(
+            text = value,
+            fontSize = SplitCruiserTextSize.Caption,
+            fontWeight = FontWeight.Medium,
+            color = SplitCruiserTextPrimary,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+/** `12.5` -> `"$12.50"`. */
+private fun formatContribution(amount: Double): String =
+    "$" + String.format(Locale.US, "%.2f", amount)
 
 /**
  * Confirms a driver taking a rider's request, and collects the one thing the request cannot
@@ -6412,40 +6501,84 @@ fun AcceptRequestDialog(
 
 @Composable
 fun ProposePickupDialog(
+    initialPickup: String,
+    initialDropoff: String,
+    initialContribution: Double,
+    biasLat: Double?,
+    biasLng: Double?,
     onDismiss: () -> Unit,
-    onPropose: (location: String, time: String) -> Unit
+    onPropose: (pickup: String, dropoff: String, time: String, contribution: Double) -> Unit
 ) {
-    var location by remember { mutableStateOf("") }
+    // Prefilled from the ride itself. A proposal usually only needs the addresses sharpened —
+    // "the Science Library entrance" rather than "Northeastern" — not typed from nothing.
+    var pickup by remember { mutableStateOf(initialPickup) }
+    var dropoff by remember { mutableStateOf(initialDropoff) }
     var time by remember { mutableStateOf("") }
+    var contribution by remember {
+        mutableStateOf(
+            if (initialContribution > 0.0) String.format(Locale.US, "%.2f", initialContribution) else ""
+        )
+    }
+
+    val amount = contribution.trim().toDoubleOrNull()
+    val canSend = pickup.trim().isNotEmpty() && time.trim().isNotEmpty() &&
+        (contribution.isBlank() || (amount != null && amount >= 0.0))
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(imageVector = Icons.Default.Place, contentDescription = null, tint = SplitCruiserPrimary)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Propose Pickup Spot", color = SplitCruiserTextPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Spacer(modifier = Modifier.width(SplitCruiserSpacing.Sm))
+                Text("Propose pickup details", color = SplitCruiserTextPrimary, fontWeight = FontWeight.Bold, fontSize = SplitCruiserTextSize.Headline)
             }
         },
         containerColor = SplitCruiserSurfaceCard,
         text = {
             Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(SplitCruiserSpacing.Md)
             ) {
                 Text(
-                    text = "Suggest a specific meeting spot and time for your carpool buddy.",
+                    text = "Agree the exact addresses, the time, and what the ride costs. The other " +
+                        "person confirms it, and the amount becomes the ride's split.",
                     color = SplitCruiserTextSecondary,
-                    fontSize = 13.sp
+                    fontSize = SplitCruiserTextSize.Body
+                )
+
+                LocationAutoCompleteTextField(
+                    value = pickup,
+                    onValueChange = { pickup = it },
+                    label = "Exact pickup address",
+                    placeholder = "e.g. 360 Huntington Ave, Boston",
+                    modifier = Modifier.fillMaxWidth(),
+                    testTag = "propose_location_input",
+                    focusedBorderColor = SplitCruiserPrimary,
+                    biasLat = biasLat,
+                    biasLng = biasLng,
+                )
+
+                LocationAutoCompleteTextField(
+                    value = dropoff,
+                    onValueChange = { dropoff = it },
+                    label = "Exact drop-off address",
+                    placeholder = "e.g. 700 Commonwealth Ave, Boston",
+                    modifier = Modifier.fillMaxWidth(),
+                    testTag = "propose_dropoff_input",
+                    focusedBorderColor = SplitCruiserPrimary,
+                    biasLat = biasLat,
+                    biasLng = biasLng,
                 )
 
                 OutlinedTextField(
-                    value = location,
-                    onValueChange = { location = it },
-                    label = { Text("Meeting Spot") },
-                    placeholder = { Text("e.g. Science Library entrance") },
+                    value = time,
+                    onValueChange = { time = it },
+                    label = { Text("Pickup time") },
+                    placeholder = { Text("e.g. 5:45 PM or in 10 mins") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth().testTag("propose_location_input"),
+                    modifier = Modifier.fillMaxWidth().testTag("propose_time_input"),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = SplitCruiserTextPrimary,
                         unfocusedTextColor = SplitCruiserTextPrimary,
@@ -6457,12 +6590,26 @@ fun ProposePickupDialog(
                 )
 
                 OutlinedTextField(
-                    value = time,
-                    onValueChange = { time = it },
-                    label = { Text("Proposed Time") },
-                    placeholder = { Text("e.g. 5:45 PM or in 10 mins") },
+                    value = contribution,
+                    onValueChange = { contribution = it },
+                    label = { Text("Rider's share") },
+                    placeholder = { Text("0.00") },
+                    prefix = { Text("$", color = SplitCruiserTextSecondary) },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth().testTag("propose_time_input"),
+                    isError = contribution.isNotBlank() && amount == null,
+                    supportingText = {
+                        Text(
+                            text = if (contribution.isNotBlank() && amount == null) {
+                                "Enter an amount like 12.50"
+                            } else {
+                                "Cash, settled in person when you meet"
+                            },
+                            fontSize = SplitCruiserTextSize.Eyebrow,
+                            color = SplitCruiserTextSecondary
+                        )
+                    },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth().testTag("propose_contribution_input"),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = SplitCruiserTextPrimary,
                         unfocusedTextColor = SplitCruiserTextPrimary,
@@ -6477,14 +6624,14 @@ fun ProposePickupDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    if (location.trim().isNotEmpty() && time.trim().isNotEmpty()) {
-                        onPropose(location.trim(), time.trim())
+                    if (canSend) {
+                        onPropose(pickup.trim(), dropoff.trim(), time.trim(), amount ?: 0.0)
                     }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserPrimary),
-                enabled = location.trim().isNotEmpty() && time.trim().isNotEmpty()
+                enabled = canSend
             ) {
-                Text("Send Proposal", color = Color.White, fontWeight = FontWeight.Bold)
+                Text("Send proposal", color = Color.White, fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {

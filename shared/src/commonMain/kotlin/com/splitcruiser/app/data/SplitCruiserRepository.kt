@@ -179,10 +179,15 @@ class SplitCruiserRepository internal constructor(
     private suspend fun pollLoop(tick: suspend () -> Unit, interval: () -> Long) {
         var backoff = 1_000L
         while (scope.isActive) {
-            val ok = runCatching { tick() }.isSuccess.also { succeeded ->
-                _isConnected.value = succeeded
-                if (succeeded) _lastSyncTime.value = nowMs()
-            }
+            // Log the failure. This used to discard it, so a poll that had been rejected on every
+            // tick since the app started looked identical to one that was simply quiet — the chat
+            // query was denied for months with nothing to show for it but a connection dot.
+            val ok = runCatching { tick() }
+                .onFailure { logWarn(LOG_TAG, "A background refresh failed; backing off", it) }
+                .isSuccess.also { succeeded ->
+                    _isConnected.value = succeeded
+                    if (succeeded) _lastSyncTime.value = nowMs()
+                }
             if (ok) {
                 backoff = 1_000L
                 delay(interval())
@@ -270,7 +275,19 @@ class SplitCruiserRepository internal constructor(
             firestore.runQuery(
                 StructuredQuery(
                     collection = "messages",
-                    filters = listOf(FieldFilter("matchId", FilterOp.Equal, stringValue(matchId))),
+                    // The participants filter is not redundant with matchId, and removing it breaks
+                    // the whole chat. Firestore checks a query against the documents it *could*
+                    // match, not the ones it does: with `allow read: if uid in
+                    // resource.data.participants`, a query constrained only on matchId could match
+                    // a document the caller cannot read, so the entire query is rejected. This poll
+                    // therefore failed on every 3s tick from the moment a chat was first opened,
+                    // which is why messages only appeared after an app restart — the one query that
+                    // succeeded was the participants-filtered branch below, and `openChatMatchId`
+                    // is only null before the first chat is opened.
+                    filters = listOf(
+                        FieldFilter("participants", FilterOp.ArrayContains, stringValue(uid)),
+                        FieldFilter("matchId", FilterOp.Equal, stringValue(matchId)),
+                    ),
                     orderBy = listOf(OrderBy("timestamp", descending = false)),
                     limit = 200,
                 ),
@@ -1222,35 +1239,188 @@ class SplitCruiserRepository internal constructor(
         pickupTime: String,
     ) {
         val user = requireUser()
-        val match = matches.value[matchId]
-        val participants = match?.participants?.takeIf { it.isNotEmpty() }
-            ?: listOfNotNull(match?.hostId, match?.riderId).ifEmpty { listOf(user.id) }
+        postMessage(
+            Message(
+                id = newId("msg"),
+                matchId = matchId,
+                senderId = user.id,
+                senderName = user.displayName,
+                text = text,
+                timestamp = nowMs(),
+                participants = participantsFor(matchId, user.id),
+                type = type,
+                pickupSpot = pickupSpot,
+                pickupTime = pickupTime,
+            ),
+        )
+    }
 
-        val message = Message(
-            id = newId("msg"),
-            matchId = matchId,
+    /**
+     * Proposes where to meet, where the ride ends, when, and what it costs.
+     *
+     * The amount is the piece that was missing: a [TripMatch] carries a contribution set when the
+     * ride was accepted, and the other side never had anywhere to agree to it. Confirming this
+     * proposal is what makes it binding — see [confirmPickupProposal].
+     *
+     * Separate arguments rather than a parameter object, and no default values: Kotlin's defaults
+     * do not survive into Swift.
+     */
+    @Throws(Exception::class)
+    suspend fun sendPickupProposal(
+        matchId: String,
+        pickupAddress: String,
+        dropoffAddress: String,
+        pickupTime: String,
+        contribution: Double,
+    ) {
+        val user = requireUser()
+        requireValid(pickupAddress.isNotBlank()) { "Enter the exact pickup address." }
+        requireValid(pickupTime.isNotBlank()) { "Enter a pickup time." }
+        requireValid(contribution >= 0.0) { "The contribution cannot be negative." }
+
+        postMessage(
+            Message(
+                id = newId("msg"),
+                matchId = matchId,
+                senderId = user.id,
+                senderName = user.displayName,
+                text = summarisePickup(MessageType.PICKUP_PROPOSAL, pickupAddress, dropoffAddress, pickupTime, contribution),
+                timestamp = nowMs(),
+                participants = participantsFor(matchId, user.id),
+                type = MessageType.PICKUP_PROPOSAL,
+                pickupSpot = pickupAddress.trim(),
+                pickupTime = pickupTime.trim(),
+                dropoffSpot = dropoffAddress.trim(),
+                contribution = contribution,
+            ),
+        )
+    }
+
+    /**
+     * Agrees to a proposal, once.
+     *
+     * The confirmation's document id is derived from the proposal and the confirming user rather
+     * than being random, so tapping the button repeatedly overwrites one document instead of
+     * posting a wall of "Pickup Confirmed!" bubbles. This is the same fix as the deterministic
+     * rating id, and for the same reason: the UI guard is a convenience, the id is the guarantee.
+     *
+     * Confirming also writes the agreed amount back to the match, so the price shown everywhere
+     * else in the app is the one both sides actually agreed to.
+     */
+    @Throws(Exception::class)
+    suspend fun confirmPickupProposal(proposalMessageId: String) {
+        val user = requireUser()
+        val proposal = messages.value[proposalMessageId]
+            ?: throw SplitCruiserException("That pickup proposal is no longer available.")
+        requireValid(proposal.senderId != user.id) { "You cannot confirm your own proposal." }
+
+        val confirmation = Message(
+            id = "msg_confirm_${proposalMessageId}_${user.id}",
+            matchId = proposal.matchId,
             senderId = user.id,
             senderName = user.displayName,
-            text = text,
+            text = summarisePickup(
+                MessageType.PICKUP_CONFIRMED,
+                proposal.spot,
+                proposal.dropoffSpot,
+                proposal.time,
+                proposal.contribution,
+            ),
             timestamp = nowMs(),
-            participants = participants,
-            type = type,
-            pickupSpot = pickupSpot,
-            pickupTime = pickupTime,
+            participants = participantsFor(proposal.matchId, user.id),
+            type = MessageType.PICKUP_CONFIRMED,
+            pickupSpot = proposal.spot,
+            pickupTime = proposal.time,
+            dropoffSpot = proposal.dropoffSpot,
+            contribution = proposal.contribution,
+            proposalId = proposalMessageId,
         )
+        postMessage(confirmation)
+
+        if (proposal.contribution > 0.0) {
+            applyAgreedContribution(proposal.matchId, proposal.contribution)
+        }
+    }
+
+    /** Makes the confirmed amount the ride's amount, so the chat and the rest of the app agree. */
+    private suspend fun applyAgreedContribution(matchId: String, contribution: Double) {
+        // Falls back to a read: confirming from a cold start, before the matches poll has run,
+        // would otherwise skip the price write and leave the two sides disagreeing on the amount.
+        val match = matches.value[matchId]
+            ?: firestore.getDocument("trip_matches", matchId, serializer<TripMatch>())
+            ?: return
+        if (match.contribution == contribution) return
+        firestore.updateFields(
+            "trip_matches",
+            matchId,
+            buildFields("contribution" to doubleValue(contribution)),
+        )
+        matches.value = matches.value + (matchId to match.copy(contribution = contribution))
+        recomputeFeeds()
+    }
+
+    /**
+     * Denormalised onto every message, because the `messages` read rule tests membership against
+     * this array rather than following [Message.matchId] to the match.
+     */
+    private fun participantsFor(matchId: String, userId: String): List<String> {
+        val match = matches.value[matchId]
+        return match?.participants?.takeIf { it.isNotEmpty() }
+            ?: listOfNotNull(match?.hostId, match?.riderId).ifEmpty { listOf(userId) }
+    }
+
+    /** Writes a message, caches it, and tells the other participant about it. */
+    private suspend fun postMessage(message: Message) {
         firestore.setDocument("messages", message.id, message, serializer<Message>())
         messages.value = messages.value + (message.id to message)
         publishMessages()
 
-        val recipient = participants.firstOrNull { it != user.id }.orEmpty()
+        val recipient = message.participants.firstOrNull { it != message.senderId }.orEmpty()
         if (recipient.isNotEmpty()) {
             sendNotificationAlert(
                 targetUserId = recipient,
-                title = "New Message from ${user.displayName} 💬",
-                message = text,
+                title = "New Message from ${message.senderName} 💬",
+                message = message.text,
                 type = "new_message",
             )
         }
+    }
+
+    /**
+     * The readable one-line form of a pickup message.
+     *
+     * [Message.text] is still filled in so a proposal degrades to a sensible sentence in a push
+     * notification, or in a client too old to know the structured fields.
+     */
+    private fun summarisePickup(
+        type: String,
+        pickupAddress: String,
+        dropoffAddress: String,
+        pickupTime: String,
+        contribution: Double,
+    ): String = buildString {
+        append(if (type == MessageType.PICKUP_CONFIRMED) "Confirmed: pickup at " else "Pickup proposal: ")
+        append(pickupAddress.trim())
+        if (dropoffAddress.isNotBlank()) {
+            append(", dropping at ")
+            append(dropoffAddress.trim())
+        }
+        append(" at ")
+        append(pickupTime.trim())
+        if (contribution > 0.0) {
+            append(" for $")
+            append(formatMoney(contribution))
+        }
+    }
+
+    /**
+     * Two decimal places. Hand-rolled because `String.format` is a JVM API and this is `commonMain`;
+     * both platforms format their own currency for display, so this only has to make [Message.text]
+     * readable in a notification.
+     */
+    private fun formatMoney(amount: Double): String {
+        val cents = round(amount * 100.0).toLong()
+        return "${cents / 100}.${(cents % 100).toString().padStart(2, '0')}"
     }
 
     private suspend fun sendSystemMessage(matchId: String, participants: List<String>, text: String) {

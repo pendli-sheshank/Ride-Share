@@ -23,6 +23,7 @@ import com.splitcruiser.app.data.User
 import com.splitcruiser.app.data.Vehicle
 import com.splitcruiser.app.data.acceptRideRequestDirectResult
 import com.splitcruiser.app.data.blockUserResult
+import com.splitcruiser.app.data.confirmPickupProposalResult
 import com.splitcruiser.app.data.createUserProfileResult
 import com.splitcruiser.app.data.fetchMyTripsFromFirestore
 import com.splitcruiser.app.data.firebase.SharedPreferencesStore
@@ -33,6 +34,7 @@ import com.splitcruiser.app.data.postRideRequestResult
 import com.splitcruiser.app.data.postTripOfferResult
 import com.splitcruiser.app.data.requestSeatOnOfferResult
 import com.splitcruiser.app.data.sendMessageResult
+import com.splitcruiser.app.data.sendPickupProposalResult
 import com.splitcruiser.app.data.signInWithGoogleResult
 import com.splitcruiser.app.data.signUpWithEmailResult
 import com.splitcruiser.app.data.submitRatingResult
@@ -418,10 +420,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- Messaging ---
 
-    fun getChatMessages(matchId: String): Flow<List<Message>> {
-        // Tells the refresher to poll this conversation quickly while it is on screen.
+    fun getChatMessages(matchId: String): Flow<List<Message>> = repository.getChatMessages(matchId)
+
+    /**
+     * Tells the refresher to poll this conversation quickly (3s) while it is on screen.
+     *
+     * Pair every call with [closeChat]. This used to be a side effect inside [getChatMessages],
+     * which meant it ran during composition and was never undone — so `openChatMatchId` stayed
+     * pinned to the first conversation ever opened, for the life of the process.
+     */
+    fun openChat(matchId: String) {
         repository.openChat(matchId)
-        return repository.getChatMessages(matchId)
     }
 
     fun closeChat() {
@@ -435,15 +444,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** A structured pickup proposal or confirmation — see [MessageType]. */
-    fun sendPickupMessage(matchId: String, type: String, spot: String, time: String) {
-        val summary = when (type) {
-            MessageType.PICKUP_CONFIRMED -> "Confirmed: meet at $spot at $time"
-            else -> "Pickup proposal: $spot at $time"
-        }
+    /** Proposes where to meet, where the ride ends, when, and what it costs. */
+    fun sendPickupProposal(
+        matchId: String,
+        pickupAddress: String,
+        dropoffAddress: String,
+        pickupTime: String,
+        contribution: Double,
+    ) {
         viewModelScope.launch {
-            repository.sendMessageResult(matchId, summary, type, spot, time)
-                .onFailure { _uiError.value = it.message ?: "Message failed to send." }
+            repository
+                .sendPickupProposalResult(matchId, pickupAddress, dropoffAddress, pickupTime, contribution)
+                .onFailure { _uiError.value = it.message ?: "Could not send that proposal." }
+        }
+    }
+
+    /**
+     * Agrees to a proposal.
+     *
+     * Safe to call twice: the confirmation's document id is derived from the proposal, so a second
+     * tap overwrites rather than posting another bubble. [onFinished] runs either way, so the card
+     * can re-enable its button if the write failed.
+     */
+    fun confirmPickup(proposalMessageId: String, onFinished: () -> Unit) {
+        viewModelScope.launch {
+            repository.confirmPickupProposalResult(proposalMessageId)
+                .onFailure { _uiError.value = it.message ?: "Could not confirm that pickup." }
+            onFinished()
         }
     }
 

@@ -399,19 +399,30 @@ final class AppViewModel: ObservableObject {
         await perform { try await self.repository.sendMessage(matchId: matchId, text: text) }
     }
 
-    /// A structured pickup proposal or confirmation — see `MessageType` in `:shared`.
-    func sendPickupMessage(matchId: String, type: String, spot: String, time: String) async {
-        let summary = type == MessageType.shared.PICKUP_CONFIRMED
-            ? "Confirmed: meet at \(spot) at \(time)"
-            : "Pickup proposal: \(spot) at \(time)"
+    /// Proposes where to meet, where the ride ends, when, and what it costs.
+    func sendPickupProposal(
+        matchId: String,
+        pickupAddress: String,
+        dropoffAddress: String,
+        pickupTime: String,
+        contribution: Double
+    ) async {
         await perform {
-            try await self.repository.sendMessage(
+            try await self.repository.sendPickupProposal(
                 matchId: matchId,
-                text: summary,
-                type: type,
-                pickupSpot: spot,
-                pickupTime: time
+                pickupAddress: pickupAddress,
+                dropoffAddress: dropoffAddress,
+                pickupTime: pickupTime,
+                contribution: contribution
             )
+        }
+    }
+
+    /// Agrees to a proposal. Safe to call twice — the confirmation's document id is derived from
+    /// the proposal, so a repeat overwrites instead of posting another card.
+    func confirmPickup(proposalMessageId: String) async {
+        await perform {
+            try await self.repository.confirmPickupProposal(proposalMessageId: proposalMessageId)
         }
     }
 

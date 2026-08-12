@@ -79,6 +79,7 @@ Extract before you copy. These already exist:
 | `FormSection` | SwiftUI `Section` | — |
 | `RideSchedule` (in `:shared`) | same object | 3 places, and two of them disagreed |
 | `SplitCruiserAvatars` (in `:shared`) | same object | 3 places — the key list was written out twice on Android alone |
+| `PickupDetailRow` | `detailRow` | proposal and confirmation cards, which described the same terms differently |
 
 `RideSchedule` answers "is this ride still on someone's schedule, or is it history?" — and `"full"`
 is the case that catches people out. A ride whose last seat has gone is still very much happening,
@@ -107,6 +108,7 @@ Three adjectives: **direct**, **warm**, **concrete**.
 | "You're in! Chat here to sort out the pickup spot." | "Trip request accepted by the host. You can now chat and coordinate the cash split in person." |
 | "Please enter a contact number so riders can reach you" | "This field is required" |
 | "Hidden from your feed and can't message you" | "User ID: aQ3xR9…" |
+| "Accept and confirm" | "Accept & Confirm" |
 
 Three rules that cover most of it:
 
@@ -125,6 +127,11 @@ in or blocking someone. The neutral default is "Just a moment…".
 
 It's a cost split. The host's total is "Chipped in", not "Revenue"; a rider's share is a
 "suggested contribution", paid in cash in person. Keep that framing everywhere the number appears.
+
+A pickup proposal is where the two sides actually settle on the number: the proposal labels it
+"Your share", the confirmation labels it "Agreed share" and adds "Both of you have agreed to this
+amount. Pay in cash when you meet." Confirming writes it to `TripMatch.contribution`, so the chat
+and the rest of the app cannot disagree about the price.
 
 ---
 
@@ -148,6 +155,7 @@ it, so until that changes this checklist is the mechanism.
 | My rides | `DashboardScreen` (Trips) | `TripsTab` (`ExploreFeed.swift`) |
 | Matches | Explore's "Active Trip Coordination" | `MatchesScreen` (`DetailScreens.swift`) |
 | Chat | `ChatScreen` | `ChatView` |
+| Propose a pickup | `ProposePickupDialog` | `ProposePickupSheet` (`ChatView.swift`) |
 | Profile | `ProfileScreen` | `ProfileScreen` (`ProfileScreens.swift`) |
 | Ratings | `ProfileScreen`'s rating card | `RatingsCard` (`ProfileScreens.swift`) |
 | Profile editing | `EditProfileDialog` | `EditProfileSheet` (`ProfileScreens.swift`) |

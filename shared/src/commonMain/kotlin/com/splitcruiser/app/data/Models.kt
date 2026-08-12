@@ -186,10 +186,30 @@ data class Message(
      * Read through [kind], never directly: messages written before this field existed have `""`.
      */
     val type: String = MessageType.TEXT,
-    /** Set on a [MessageType.PICKUP_PROPOSAL] or [MessageType.PICKUP_CONFIRMED]. */
+    /** The exact pickup address. Set on a [MessageType.PICKUP_PROPOSAL] or [MessageType.PICKUP_CONFIRMED]. */
     val pickupSpot: String = "",
     /** Set on a [MessageType.PICKUP_PROPOSAL] or [MessageType.PICKUP_CONFIRMED]. */
     val pickupTime: String = "",
+    /**
+     * The exact drop-off address. Empty on proposals written before this field existed, which is
+     * why the card renders it conditionally rather than showing a blank row.
+     */
+    val dropoffSpot: String = "",
+    /**
+     * What the rider chips in, in dollars, as proposed or as agreed.
+     *
+     * The amount lives on the message rather than only on [TripMatch] so that both sides can see
+     * the number they are agreeing to. Confirming a proposal writes it back to the match, which is
+     * the only point in the flow where the price is ever actually confirmed by the other side.
+     */
+    val contribution: Double = 0.0,
+    /**
+     * On a [MessageType.PICKUP_CONFIRMED], the id of the [MessageType.PICKUP_PROPOSAL] it answers.
+     *
+     * Without this a card could not tell whether it had been confirmed, so the button stayed on
+     * screen and every extra tap posted another confirmation.
+     */
+    val proposalId: String = "",
 ) {
     /**
      * The message's type, tolerating both a missing value and one this build does not know.
