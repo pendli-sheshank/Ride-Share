@@ -71,8 +71,17 @@ class OsmLocationService(engine: HttpClientEngine?) {
     ): List<PhotonPlaceResult> {
         if (query.isBlank()) return emptyList()
         return runCatching {
-            val bias = if (biasLat != null && biasLon != null) "&lat=$biasLat&lon=$biasLon" else ""
-            val url = "https://photon.komoot.io/api/?q=${query.trim().encodeURLParameter()}&limit=$limit$bias"
+            // `location_bias_scale` pulls Photon's own ranking toward the anchor rather than leaving
+            // it purely on OSM importance. It is a refinement — the client-side sort in
+            // [PlaceRanking] is what actually guarantees nearest-first — so nothing breaks if the
+            // parameter is ignored.
+            val bias = if (biasLat != null && biasLon != null) {
+                "&lat=$biasLat&lon=$biasLon&location_bias_scale=$LOCATION_BIAS_SCALE"
+            } else {
+                ""
+            }
+            val url = "https://photon.komoot.io/api/?q=${query.trim().encodeURLParameter()}" +
+                "&limit=$limit&lang=en$bias"
             val response = http.get(url) { header("User-Agent", OSM_USER_AGENT) }
             if (!response.status.isSuccess()) return emptyList()
 
@@ -120,7 +129,37 @@ class OsmLocationService(engine: HttpClientEngine?) {
 
     /** Overload without a limit — Kotlin default arguments do not reach Swift. */
     suspend fun autocompletePhoton(query: String): List<PhotonPlaceResult> =
-        autocompletePhoton(query, 8)
+        autocompletePhoton(query, DISPLAY_LIMIT)
+
+    /**
+     * Address suggestions ordered nearest-first from ([fromLat], [fromLon]).
+     *
+     * Fetches [CANDIDATE_LIMIT] rather than the [limit] actually shown, because Photon orders by OSM
+     * importance: asking for 8 and displaying 8 meant a house-number address lost its place to every
+     * city and county with a similar name, and the address the user was typing never arrived. The
+     * wide set is then ordered by real distance and cut back down.
+     *
+     * Pass `0.0, 0.0` for the anchor when there is no location fix; results come back in Photon's
+     * own order with no distance text, rather than sorted against a meaningless point.
+     */
+    suspend fun searchPlacesRanked(
+        query: String,
+        limit: Int,
+        fromLat: Double,
+        fromLon: Double,
+    ): List<RankedPlace> {
+        val anchored = fromLat != 0.0 || fromLon != 0.0
+        val candidates = if (anchored) {
+            fetchAutocomplete(query, CANDIDATE_LIMIT, fromLat, fromLon)
+        } else {
+            fetchAutocomplete(query, limit, null, null)
+        }
+        return if (anchored) {
+            PlaceRanking.rankByDistance(candidates, fromLat, fromLon, limit)
+        } else {
+            PlaceRanking.unranked(candidates, limit)
+        }
+    }
 
     suspend fun reverseGeocodeNominatim(lat: Double, lon: Double): NominatimReverseResult? =
         runCatching {
@@ -169,6 +208,20 @@ class OsmLocationService(engine: HttpClientEngine?) {
             biasLon: Double,
         ): List<PhotonPlaceResult> = shared.autocompletePhotonNear(query, limit, biasLat, biasLon)
 
+        suspend fun searchPlacesRanked(
+            query: String,
+            limit: Int,
+            fromLat: Double,
+            fromLon: Double,
+        ): List<RankedPlace> = shared.searchPlacesRanked(query, limit, fromLat, fromLon)
+
+        /** Overload without a limit — Kotlin default arguments do not reach Swift. */
+        suspend fun searchPlacesRanked(
+            query: String,
+            fromLat: Double,
+            fromLon: Double,
+        ): List<RankedPlace> = shared.searchPlacesRanked(query, DISPLAY_LIMIT, fromLat, fromLon)
+
         suspend fun reverseGeocodeNominatim(lat: Double, lon: Double): NominatimReverseResult? =
             shared.reverseGeocodeNominatim(lat, lon)
 
@@ -177,6 +230,19 @@ class OsmLocationService(engine: HttpClientEngine?) {
          * blocked. Keep this string meaningful if the app is ever renamed again.
          */
         internal const val OSM_USER_AGENT = "SplitCruiser/1.0 (student.carpool@app.com)"
+
+        /** How many suggestions a field shows. */
+        const val DISPLAY_LIMIT = 8
+
+        /**
+         * How many Photon is asked for before re-ranking. Wide enough that a residential address
+         * outranked by same-named cities still makes the candidate set; small enough to stay one
+         * quick request.
+         */
+        const val CANDIDATE_LIMIT = 25
+
+        /** Photon's 0..1 knob for how hard `lat`/`lon` pull on its own ranking. */
+        private const val LOCATION_BIAS_SCALE = 0.8
     }
 }
 

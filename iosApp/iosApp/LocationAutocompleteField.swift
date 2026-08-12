@@ -15,7 +15,7 @@ struct PlaceSelection: Equatable {
 /// Carries its own identity. The previous implementation keyed `ForEach` on `formattedAddress`,
 /// and Photon regularly returns two distinct points of interest sharing one address — duplicate
 /// `ForEach` IDs make SwiftUI drop rows and log animation warnings. `id: \.self` is not an option
-/// either: `PhotonPlaceResult` is a Kotlin/Native class whose hashing is object identity.
+/// either: `RankedPlace` is a Kotlin/Native class whose hashing is object identity.
 struct PlaceSuggestion: Identifiable {
     let id = UUID()
     let name: String
@@ -23,13 +23,16 @@ struct PlaceSuggestion: Identifiable {
     let category: String
     let lat: Double
     let lon: Double
+    /// "0.4 mi away", or empty when there was no location to measure from.
+    let distanceText: String
 
-    init(_ result: PhotonPlaceResult) {
-        name = result.name
-        address = result.formattedAddress
-        category = result.type
-        lat = result.lat
-        lon = result.lon
+    init(_ ranked: RankedPlace) {
+        name = ranked.name
+        address = ranked.formattedAddress
+        category = ranked.type
+        lat = ranked.lat
+        lon = ranked.lon
+        distanceText = ranked.distanceText
     }
 
     init(_ place: LocationPlace) {
@@ -38,6 +41,7 @@ struct PlaceSuggestion: Identifiable {
         category = place.category
         lat = place.lat
         lon = place.lng
+        distanceText = ""
     }
 
     /// The tile Android draws beside each result, by category.
@@ -81,13 +85,15 @@ struct LocationAutocompleteField: View {
     var placeholder: String = ""
     @Binding var selection: PlaceSelection
     @ObservedObject var viewModel: AppViewModel
-    /// The best known anchor for ranking results — a home address, or an already-resolved origin
-    /// when this field is the destination. Nil leaves results unranked by distance.
+    /// A fallback anchor, used only when there is no location fix — a home address, or an
+    /// already-resolved origin when this field is the destination.
     var bias: PlaceSelection? = nil
     var accent: Color = Brand.success
     var leadingSystemImage: String = "mappin.circle.fill"
     var accessibilityID: String?
 
+    @ObservedObject private var deviceLocation = DeviceLocationProvider.shared
+    @State private var isResolvingCurrentLocation = false
     @State private var query = ""
     @State private var results: [PlaceSuggestion] = []
     @State private var searchTask: Task<Void, Never>?
@@ -118,6 +124,9 @@ struct LocationAutocompleteField: View {
                             return
                         }
                         isShowingResults = true
+                        // Asked here rather than at launch, so the prompt lands with an address
+                        // box on screen explaining why it wants a location.
+                        deviceLocation.requestIfNeeded()
                         scheduleSearch(for: newValue)
                     }
                 if isSearching {
@@ -164,15 +173,69 @@ struct LocationAutocompleteField: View {
             if query.isEmpty && selection.isResolved { setQueryProgrammatically(selection.name) }
             if results.isEmpty { results = defaultSuggestions(matching: "") }
         }
+        // A fix arriving after the user has already typed re-runs the search, so the list reorders
+        // itself rather than staying in whatever order it had before location was granted.
+        .onChange(of: deviceLocation.coordinate?.latitude) { _ in
+            guard query.trimmingCharacters(in: .whitespaces).count >= 2 else { return }
+            scheduleSearch(for: query)
+        }
+    }
+
+    /// Fills the field with wherever the user is, reverse-geocoded to a street address.
+    ///
+    /// Android has had this chip the whole time with Northeastern's campus hardcoded into it; iOS
+    /// omitted it entirely. Both now read the real location.
+    private var currentLocationChip: some View {
+        Button {
+            guard !isResolvingCurrentLocation else { return }
+            guard let fix = deviceLocation.coordinate else {
+                deviceLocation.requestIfNeeded()
+                return
+            }
+            isResolvingCurrentLocation = true
+            Task {
+                let resolved = try? await OsmLocationService.companion.reverseGeocodeNominatim(
+                    lat: fix.latitude,
+                    lon: fix.longitude
+                )
+                let name = resolved?.road ?? resolved?.displayName ?? "My current location"
+                selection = PlaceSelection(name: name, lat: fix.latitude, lon: fix.longitude)
+                setQueryProgrammatically(name)
+                results = []
+                isShowingResults = false
+                isResolvingCurrentLocation = false
+            }
+        } label: {
+            HStack(spacing: 4) {
+                if isResolvingCurrentLocation {
+                    ProgressView().scaleEffect(0.5)
+                    Text("Finding you…")
+                } else {
+                    Image(systemName: "location.fill").font(.system(size: 10))
+                    Text("Use my location")
+                }
+            }
+            .font(BrandFont.fixed(10, .bold))
+            .foregroundColor(Brand.success)
+            .padding(.horizontal, BrandScale.spaceSm)
+            .padding(.vertical, 4)
+            .background(Brand.success.opacity(0.15))
+            .cornerRadius(BrandScale.radiusSm)
+        }
+        .buttonStyle(.plain)
     }
 
     private var dropdown: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(headerLabel)
-                .font(BrandFont.fixed(10, .bold))
-                .foregroundColor(headerTint)
-                .padding(.horizontal, BrandScale.spaceMd)
-                .padding(.vertical, BrandScale.spaceSm)
+            HStack {
+                Text(headerLabel)
+                    .font(BrandFont.fixed(10, .bold))
+                    .foregroundColor(headerTint)
+                Spacer(minLength: BrandScale.spaceSm)
+                currentLocationChip
+            }
+            .padding(.horizontal, BrandScale.spaceMd)
+            .padding(.vertical, BrandScale.spaceSm)
 
             Divider()
 
@@ -201,6 +264,14 @@ struct LocationAutocompleteField: View {
                         }
 
                         Spacer(minLength: 0)
+
+                        // Shown so the ordering is visibly justified rather than looking arbitrary.
+                        if !place.distanceText.isEmpty {
+                            Text(place.distanceText)
+                                .font(BrandFont.eyebrow(.semibold))
+                                .foregroundColor(Brand.textSecondary)
+                                .fixedSize()
+                        }
                     }
                     .padding(.horizontal, BrandScale.spaceMd)
                     .padding(.vertical, BrandScale.spaceSm)
@@ -223,8 +294,11 @@ struct LocationAutocompleteField: View {
         query.trimmingCharacters(in: .whitespaces).count < 2
     }
 
+    /// Names what the list is, not which vendor produced it — a rider has no use for the word
+    /// "Photon". Matches Android word for word.
     private var headerLabel: String {
-        isShowingDefaults ? "POPULAR CAMPUS & TRANSIT SPOTS" : "OPENSTREETMAP PHOTON SUGGESTIONS"
+        if isShowingDefaults { return "POPULAR CAMPUS & TRANSIT SPOTS" }
+        return deviceLocation.coordinate == nil ? "SEARCH RESULTS" : "NEAREST FIRST"
     }
 
     private var headerTint: Color {
@@ -259,16 +333,21 @@ struct LocationAutocompleteField: View {
             isSearching = false
             return
         }
+        // The device's own location wins; `bias` — an already-resolved origin, or the home address
+        // — is only the fallback. "Nearest first" means nearest to the person typing.
+        let anchor = deviceLocation.coordinate.map { ($0.latitude, $0.longitude) }
+            ?? bias.flatMap { $0.isResolved ? ($0.lat, $0.lon) : nil }
+            ?? (0.0, 0.0)
+
         searchTask = Task {
             isSearching = true
             try? await Task.sleep(nanoseconds: 250_000_000)
             guard !Task.isCancelled else { return }
-            let fetched: [PhotonPlaceResult]
-            if let bias, bias.isResolved {
-                fetched = await viewModel.searchPlaces(trimmed, biasLat: bias.lat, biasLon: bias.lon)
-            } else {
-                fetched = await viewModel.searchPlaces(trimmed)
-            }
+            let fetched = await viewModel.searchPlacesRanked(
+                trimmed,
+                fromLat: anchor.0,
+                fromLon: anchor.1
+            )
             guard !Task.isCancelled else { return }
             let mapped = fetched.map(PlaceSuggestion.init)
             results = mapped.isEmpty ? defaultSuggestions(matching: trimmed) : mapped

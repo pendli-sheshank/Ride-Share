@@ -70,4 +70,47 @@ class OsmLocationServiceTest {
         assertEquals(1, results.size)
         assertEquals("Maryland Heights", results.single().name)
     }
+
+    /**
+     * The reason a home address never showed up: Photon orders by OSM importance, so asking for 8
+     * and showing 8 meant a residential address lost its place to every city and county with a
+     * similar name. The ranked search asks for a wide candidate set and cuts it down after sorting.
+     */
+    @Test
+    fun theRankedSearchAsksForMoreCandidatesThanItShows() = runTest {
+        var url = ""
+        val service = service { url = it.url.toString() }
+
+        service.searchPlacesRanked("Maryland", 8, fromLat = 38.7107, fromLon = -90.3559)
+
+        assertTrue(
+            url.contains("limit=${OsmLocationService.CANDIDATE_LIMIT}"),
+            "the fetch limit must be the candidate limit, not the display limit — got $url",
+        )
+        assertTrue(url.contains("location_bias_scale="), "Photon's own ranking should pull the same way")
+    }
+
+    @Test
+    fun theRankedSearchWithNoFixSendsNoAnchor() = runTest {
+        var url = ""
+        val service = service { url = it.url.toString() }
+
+        val results = service.searchPlacesRanked("Maryland", 8, fromLat = 0.0, fromLon = 0.0)
+
+        assertFalse(url.contains("lat="), "0,0 is 'no location', not a place to sort against")
+        assertEquals(1, results.size)
+        assertEquals("", results.single().distanceText, "no anchor means no distance to show")
+    }
+
+    @Test
+    fun theRankedSearchMeasuresFromTheAnchor() = runTest {
+        val service = service { }
+
+        val results = service.searchPlacesRanked("Maryland", 8, fromLat = 38.7107, fromLon = -90.3559)
+
+        assertEquals(1, results.size)
+        // Maryland Heights sits a few miles from the anchor, so the row can say so.
+        assertTrue(results.single().distanceMiles > 0.0)
+        assertTrue(results.single().distanceText.endsWith("away"), results.single().distanceText)
+    }
 }

@@ -58,6 +58,21 @@ object GeoUtils {
         return r * c
     }
 
+    /**
+     * "0.4 mi", "12 mi". Shared so the route card and the address suggestions round identically —
+     * `String.format` is JVM-only, so the rounding is done by hand.
+     */
+    fun formatMiles(miles: Double): String = when {
+        miles < 0.1 -> "< 0.1 mi"
+        miles < 10 -> "${oneDecimal(miles)} mi"
+        else -> "${miles.roundToInt()} mi"
+    }
+
+    private fun oneDecimal(value: Double): String {
+        val scaled = (value * 10).roundToInt()
+        return "${scaled / 10}.${scaled % 10}"
+    }
+
     /** `java.lang.Math` does not exist in commonMain. */
     private fun Double.toRadians(): Double = this * PI / 180.0
 }

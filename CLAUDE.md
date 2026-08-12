@@ -119,6 +119,12 @@ not evidence. Verify against a build.
   no emulator setup. Validate against a throwaway project before pointing the live one at them.
 - The logo drawable still renders the old brand name — the artwork needs replacing, not just the
   filename.
+- **Device location is read natively on each platform, not in `:shared`** — `FusedLocationProvider`
+  in `:app`, `CLLocationManager` in `iosApp/` — because `CLLocationManager` cannot be
+  compile-checked on Linux, the same reason `KeychainStore` was deferred. Only the *ranking*
+  (`PlaceRanking`) is shared, so both platforms order address suggestions identically. Address
+  search asks Photon for 25 candidates and shows the nearest 8; asking for 8 was why a home address
+  never appeared, since Photon orders by OSM importance.
 - The `google-services` and `secrets` Gradle plugins are inert on `:app` now that no native
   Firebase SDK consumes them.
 - **`Theme.swift` reads the shared tokens through the Kotlin/Native ObjC export**
