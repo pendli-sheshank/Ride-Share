@@ -120,12 +120,8 @@ class OsrmRouteService(engine: HttpClientEngine?) {
         }
     }
 
-    /** `String.format` is JVM-only, so the rounding is done by hand. */
-    private fun formatDistance(miles: Double): String = when {
-        miles < 0.1 -> "< 0.1 mi"
-        miles < 10 -> "${oneDecimal(miles)} mi"
-        else -> "${miles.roundToInt()} mi"
-    }
+    /** Shared with the address suggestions, so the two never round differently. */
+    private fun formatDistance(miles: Double): String = GeoUtils.formatMiles(miles)
 
     private fun formatDuration(minutes: Double): String = when {
         minutes < 1 -> "< 1 min"
@@ -137,10 +133,6 @@ class OsrmRouteService(engine: HttpClientEngine?) {
         }
     }
 
-    private fun oneDecimal(value: Double): String {
-        val scaled = (value * 10).roundToInt()
-        return "${scaled / 10}.${scaled % 10}"
-    }
 
     /** Process-wide default; the class form exists so tests can inject a MockEngine. */
     companion object {

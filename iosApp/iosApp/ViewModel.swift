@@ -1,3 +1,4 @@
+import CoreLocation
 import Foundation
 import Shared
 
@@ -517,21 +518,20 @@ final class AppViewModel: ObservableObject {
 
     // MARK: - Search
 
-    // Kotlin/Native exports every `suspend fun` as `async throws` to Swift regardless of whether
-    // the Kotlin side is annotated `@Throws` — the completion handler it bridges to always carries
-    // an NSError slot. `try` is therefore required here even though OsmLocationService itself
-    // never lets an exception escape (it wraps its network call in `runCatching`).
-    func searchPlaces(_ query: String) async -> [PhotonPlaceResult] {
+    /// Address suggestions ordered nearest-first from `fromLat`/`fromLon`.
+    ///
+    /// Pass `0, 0` when there is no location fix; the shared searcher then leaves Photon's own
+    /// order alone rather than sorting against a point in the Gulf of Guinea. The ranking itself
+    /// lives in `PlaceRanking` in `:shared`, so both platforms order results identically.
+    ///
+    /// Kotlin/Native exports every `suspend fun` as `async throws` to Swift regardless of whether
+    /// the Kotlin side is annotated `@Throws` — the completion handler it bridges to always carries
+    /// an NSError slot. `try?` is therefore required here even though `OsmLocationService` itself
+    /// never lets an exception escape (it wraps its network call in `runCatching`).
+    func searchPlacesRanked(_ query: String, fromLat: Double, fromLon: Double) async -> [RankedPlace] {
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
-        return (try? await OsmLocationService.companion.autocompletePhoton(query: query, limit: 6)) ?? []
-    }
-
-    /// [searchPlaces], ranked toward `biasLat`/`biasLon` — see `OsmLocationService.autocompletePhotonNear`
-    /// in `:shared` for why this surfaces "Maryland Heights" ahead of the state of Maryland.
-    func searchPlaces(_ query: String, biasLat: Double, biasLon: Double) async -> [PhotonPlaceResult] {
-        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
-        return (try? await OsmLocationService.companion.autocompletePhotonNear(
-            query: query, limit: 6, biasLat: biasLat, biasLon: biasLon
+        return (try? await OsmLocationService.companion.searchPlacesRanked(
+            query: query, fromLat: fromLat, fromLon: fromLon
         )) ?? []
     }
 
@@ -593,6 +593,78 @@ final class AppViewModel: ObservableObject {
             errorMessage = error.localizedDescription
             return false
         }
+    }
+}
+
+// MARK: - Device location
+
+/// Where the device actually is, for ranking address suggestions by distance.
+///
+/// iOS has been shipping `NSLocationWhenInUseUsageDescription` in `Info.plist` since before there
+/// was any CoreLocation code to use it. Android's equivalent chip had Northeastern's campus
+/// hardcoded. Neither platform had ever read a real location, which is why a search for a home
+/// address returned whatever OSM considered most important instead of what was nearest.
+///
+/// Kept here rather than in a new file on purpose: a new `.swift` file has to be added to the
+/// hardcoded `SWIFT_SOURCES` list in `iosApp/generate-project.py` and the regenerated
+/// `project.pbxproj` committed, and CI enforces both halves. Nothing about this needs its own file.
+///
+/// The Kotlin half is not shared either — `CLLocationManager` cannot be compile-checked on Linux,
+/// the same reason `KeychainStore` was deferred. Only `PlaceRanking` is shared.
+final class DeviceLocationProvider: NSObject, ObservableObject, CLLocationManagerDelegate {
+
+    /// One manager for the whole app. Every address field observes this rather than owning its own:
+    /// a form with an origin and a destination box would otherwise spin up two `CLLocationManager`s
+    /// and ask twice, and a fix obtained by one field would not reach the other.
+    static let shared = DeviceLocationProvider()
+
+    /// The latest fix, or nil until one arrives. Callers pass `0, 0` downstream when it is nil.
+    @Published private(set) var coordinate: CLLocationCoordinate2D?
+
+    private let manager = CLLocationManager()
+    private var hasRequested = false
+
+    override init() {
+        super.init()
+        manager.delegate = self
+        // Ranking suggestions needs a neighbourhood, not a lane. Asking for less is faster to fix
+        // and lets a user who only granted "approximate" still get useful ordering.
+        manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+    }
+
+    /// Asks once, the first time an address field is focused, where the reason is on screen.
+    /// A denial is final and silent — suggestions still work, just unordered.
+    func requestIfNeeded() {
+        guard !hasRequested else { return }
+        hasRequested = true
+
+        switch manager.authorizationStatus {
+        case .notDetermined:
+            manager.requestWhenInUseAuthorization()
+        case .authorizedWhenInUse, .authorizedAlways:
+            manager.requestLocation()
+        default:
+            break
+        }
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        switch manager.authorizationStatus {
+        case .authorizedWhenInUse, .authorizedAlways:
+            manager.requestLocation()
+        default:
+            coordinate = nil
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let latest = locations.last else { return }
+        coordinate = latest.coordinate
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        // Nothing to surface: every caller's fallback is "rank by something else".
+        coordinate = nil
     }
 }
 

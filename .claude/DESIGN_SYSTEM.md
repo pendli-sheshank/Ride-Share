@@ -80,6 +80,7 @@ Extract before you copy. These already exist:
 | `RideSchedule` (in `:shared`) | same object | 3 places, and two of them disagreed |
 | `SplitCruiserAvatars` (in `:shared`) | same object | 3 places — the key list was written out twice on Android alone |
 | `PickupDetailRow` | `detailRow` | proposal and confirmation cards, which described the same terms differently |
+| `PlaceRanking` (in `:shared`) | same object | — the two platforms would otherwise sort suggestions differently |
 
 `RideSchedule` answers "is this ride still on someone's schedule, or is it history?" — and `"full"`
 is the case that catches people out. A ride whose last seat has gone is still very much happening,
@@ -109,6 +110,7 @@ Three adjectives: **direct**, **warm**, **concrete**.
 | "Please enter a contact number so riders can reach you" | "This field is required" |
 | "Hidden from your feed and can't message you" | "User ID: aQ3xR9…" |
 | "Accept and confirm" | "Accept & Confirm" |
+| "Use my location" / "Nearest first" | "Use GPS (Nominatim)" / "OPENSTREETMAP PHOTON SUGGESTIONS" |
 
 Three rules that cover most of it:
 
@@ -156,6 +158,7 @@ it, so until that changes this checklist is the mechanism.
 | Matches | Explore's "Active Trip Coordination" | `MatchesScreen` (`DetailScreens.swift`) |
 | Chat | `ChatScreen` | `ChatView` |
 | Propose a pickup | `ProposePickupDialog` | `ProposePickupSheet` (`ChatView.swift`) |
+| Address search | `LocationAutoCompleteTextField` | `LocationAutocompleteField` |
 | Profile | `ProfileScreen` | `ProfileScreen` (`ProfileScreens.swift`) |
 | Ratings | `ProfileScreen`'s rating card | `RatingsCard` (`ProfileScreens.swift`) |
 | Profile editing | `EditProfileDialog` | `EditProfileSheet` (`ProfileScreens.swift`) |
@@ -190,11 +193,9 @@ Not everything is at parity, and that is fine as long as it is deliberate:
 - **Google sign-in is Android-only.** The token exchange is shared, but only Android acquires a
   Google ID token (Credential Manager). iOS would need `ASWebAuthenticationSession` and a URL
   scheme in the generated Xcode project.
-- **The "use my location" chip in the address dropdown is Android-only, and should not be
-  ported as-is.** Android's version has the coordinates hardcoded to Northeastern's campus
-  (42.3383, -71.0881) — it is styled as a location button but reads no location. iOS omits it.
-  The fix is real `CoreLocation` feeding the existing shared `reverseGeocodeNominatim`, then
-  porting that back to Android.
+(The fake "use my location" chip used to be the second entry here — Android-only, with
+Northeastern's campus hardcoded into it. Both platforms now read a real fix and the chip is at
+parity.)
 
 Host analytics, blocked-user management, profile editing and ratings **used to be listed here**
 and are now on both platforms.

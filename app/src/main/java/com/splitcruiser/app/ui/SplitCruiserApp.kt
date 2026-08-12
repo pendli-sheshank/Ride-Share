@@ -49,6 +49,7 @@ import androidx.compose.animation.core.EaseInOutQuad
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import coil.compose.AsyncImage
@@ -7772,44 +7773,77 @@ fun LocationAutoCompleteTextField(
     focusedBorderColor: Color = SplitCruiserSuccess,
     leadingIcon: @Composable (() -> Unit)? = null,
     /**
-     * Ranks Photon results toward this point instead of matching purely on text — so searching
-     * "Maryland" from a St. Louis rider's home returns "Maryland Heights, MO" ahead of the state
-     * of Maryland. Callers pass the best anchor they have (home address, or an already-resolved
-     * origin when this field is the destination); null leaves results unranked by distance.
+     * A fallback anchor for ranking, used only when there is no location fix — an already-resolved
+     * origin when this field is the destination, or the user's home address. The device's own
+     * location takes precedence over it, because "nearest first" means nearest to the person
+     * typing.
      */
     biasLat: Double? = null,
     biasLng: Double? = null,
 ) {
+    val context = LocalContext.current
     var expanded by remember { mutableStateOf(false) }
-    var photonResults by remember { mutableStateOf<List<PhotonPlaceResult>>(emptyList()) }
+    var rankedResults by remember { mutableStateOf<List<RankedPlace>>(emptyList()) }
     var isSearchingPhoton by remember { mutableStateOf(false) }
     var isReverseGeocodingGps by remember { mutableStateOf(false) }
+    var deviceLocation by remember { mutableStateOf<DeviceCoordinate?>(null) }
+    var hasAskedForLocation by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
-    // Query Photon API with debounce when user types
-    LaunchedEffect(value, biasLat, biasLng) {
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { granted ->
+        if (granted.values.any { it }) {
+            scope.launch { deviceLocation = DeviceLocationProvider.current(context) }
+        }
+    }
+
+    // Asked the first time a field is focused rather than at launch, so the prompt arrives with an
+    // obvious reason on screen. A denial is final and silent — suggestions still work, unranked.
+    fun ensureLocation() {
+        if (hasAskedForLocation) return
+        hasAskedForLocation = true
+        if (DeviceLocationProvider.hasPermission(context)) {
+            scope.launch { deviceLocation = DeviceLocationProvider.current(context) }
+        } else {
+            locationPermissionLauncher.launch(DeviceLocationProvider.PERMISSIONS)
+        }
+    }
+
+    // The device wins; the caller's anchor is the fallback. 0.0/0.0 means "no anchor" to the
+    // shared searcher, which then leaves Photon's own order alone.
+    val anchorLat = deviceLocation?.lat ?: biasLat ?: 0.0
+    val anchorLon = deviceLocation?.lon ?: biasLng ?: 0.0
+
+    // Query Photon with a debounce as the user types.
+    LaunchedEffect(value, anchorLat, anchorLon) {
         if (value.length >= 2) {
             isSearchingPhoton = true
             kotlinx.coroutines.delay(250) // Debounce
-            val results = if (biasLat != null && biasLng != null) {
-                OsmLocationService.autocompletePhotonNear(value, 8, biasLat, biasLng)
-            } else {
-                OsmLocationService.autocompletePhoton(value)
-            }
-            photonResults = results
+            rankedResults = OsmLocationService.searchPlacesRanked(
+                value,
+                OsmLocationService.DISPLAY_LIMIT,
+                anchorLat,
+                anchorLon,
+            )
             isSearchingPhoton = false
         } else {
-            photonResults = emptyList()
+            rankedResults = emptyList()
             isSearchingPhoton = false
         }
     }
 
-    val filteredPlaces = remember(value, photonResults) {
-        if (photonResults.isNotEmpty()) {
-            photonResults.map { photon ->
+    val photonResults = rankedResults
+
+    val filteredPlaces = remember(value, rankedResults) {
+        if (rankedResults.isNotEmpty()) {
+            rankedResults.map { photon ->
                 LocationPlace(
                     name = photon.name,
-                    address = photon.formattedAddress,
+                    address = listOfNotNull(
+                        photon.formattedAddress.ifBlank { null },
+                        photon.distanceText.ifBlank { null },
+                    ).joinToString(" • "),
                     category = when {
                         photon.type.contains("university", ignoreCase = true) || photon.type.contains("college", ignoreCase = true) -> "Campus"
                         photon.type.contains("aeroway", ignoreCase = true) || photon.name.contains("airport", ignoreCase = true) -> "Airport"
@@ -7845,6 +7879,7 @@ fun LocationAutoCompleteTextField(
                 .onFocusChanged { focusState ->
                     if (focusState.isFocused) {
                         expanded = true
+                        ensureLocation()
                     }
                 }
                 .testTag(testTag),
@@ -7917,7 +7952,15 @@ fun LocationAutoCompleteTextField(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = if (photonResults.isNotEmpty()) "OPENSTREETMAP PHOTON SUGGESTIONS" else if (value.isBlank()) "POPULAR CAMPUS & TRANSIT SPOTS" else "AUTO MATCHING PLACES",
+                            // Names what the list is, not which vendor produced it — a rider has no
+                            // use for the word "Photon". "Nearest first" is also the one thing
+                            // worth saying about the order.
+                            text = when {
+                                photonResults.isNotEmpty() && deviceLocation != null -> "NEAREST FIRST"
+                                photonResults.isNotEmpty() -> "SEARCH RESULTS"
+                                value.isBlank() -> "POPULAR CAMPUS & TRANSIT SPOTS"
+                                else -> "MATCHING PLACES"
+                            },
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             color = if (photonResults.isNotEmpty()) Color(0xFF38BDF8) else SplitCruiserPrimary,
@@ -7929,19 +7972,31 @@ fun LocationAutoCompleteTextField(
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(SplitCruiserSuccess.copy(alpha = 0.15f))
                                 .clickable {
+                                    // Reads the real device location. This used to hardcode
+                                    // 42.3383/-71.0881 — Northeastern's campus — so it filled in
+                                    // the same Boston address wherever in the world you tapped it.
                                     if (!isReverseGeocodingGps) {
                                         isReverseGeocodingGps = true
                                         scope.launch {
-                                            val gpsLat = 42.3383
-                                            val gpsLon = -71.0881
-                                            val revResult = OsmLocationService.reverseGeocodeNominatim(gpsLat, gpsLon)
-                                            val placeName = revResult?.road?.let { "$it (Northeastern Univ)" } ?: revResult?.displayName ?: "Snell Library, Boston"
-                                            val placeAddr = revResult?.displayName ?: "360 Huntington Ave, Boston, MA"
-                                            val gpsPlace = LocationPlace(placeName, placeAddr, "Nominatim GPS", gpsLat, gpsLon)
-                                            onValueChange(gpsPlace.name)
-                                            onLocationSelected(gpsPlace)
+                                            val fix = deviceLocation
+                                                ?: DeviceLocationProvider.current(context)?.also { deviceLocation = it }
+                                            if (fix == null) {
+                                                ensureLocation()
+                                                PlatformContext.showMessage(
+                                                    "Turn on location to use this."
+                                                )
+                                            } else {
+                                                val resolved = OsmLocationService.reverseGeocodeNominatim(fix.lat, fix.lon)
+                                                val placeName = resolved?.road
+                                                    ?: resolved?.displayName
+                                                    ?: "My current location"
+                                                val placeAddr = resolved?.displayName ?: placeName
+                                                val gpsPlace = LocationPlace(placeName, placeAddr, "Current location", fix.lat, fix.lon)
+                                                onValueChange(gpsPlace.name)
+                                                onLocationSelected(gpsPlace)
+                                                expanded = false
+                                            }
                                             isReverseGeocodingGps = false
-                                            expanded = false
                                         }
                                     }
                                 }
@@ -7951,11 +8006,11 @@ fun LocationAutoCompleteTextField(
                             if (isReverseGeocodingGps) {
                                 CircularProgressIndicator(modifier = Modifier.size(10.dp), color = SplitCruiserSuccess, strokeWidth = 1.5.dp)
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Nominatim GPS...", fontSize = 10.sp, color = SplitCruiserSuccess, fontWeight = FontWeight.Bold)
+                                Text("Finding you…", fontSize = 10.sp, color = SplitCruiserSuccess, fontWeight = FontWeight.Bold)
                             } else {
                                 Icon(Icons.Default.MyLocation, contentDescription = null, tint = SplitCruiserSuccess, modifier = Modifier.size(12.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Use GPS (Nominatim)", fontSize = 10.sp, color = SplitCruiserSuccess, fontWeight = FontWeight.Bold)
+                                Text("Use my location", fontSize = 10.sp, color = SplitCruiserSuccess, fontWeight = FontWeight.Bold)
                             }
                         }
                     }

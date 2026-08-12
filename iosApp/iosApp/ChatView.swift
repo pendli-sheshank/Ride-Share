@@ -411,6 +411,8 @@ struct ProposePickupSheet: View {
                             placeholder: "e.g. 360 Huntington Ave, Boston",
                             selection: $pickup,
                             viewModel: viewModel,
+                            // Only used if there is no location fix; the device wins otherwise.
+                            bias: initialPickup,
                             accent: Brand.primary,
                             leadingSystemImage: "location.fill",
                             accessibilityID: "propose_location_input"
