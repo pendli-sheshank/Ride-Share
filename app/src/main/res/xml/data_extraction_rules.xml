@@ -1,19 +1,21 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample data extraction rules file; uncomment and customize as necessary.
-   See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Controls Android 12+ (API 31+) backup and device-to-device transfer.
+
+  The signed-in session — including the Firebase refresh token, a long-lived credential that does
+  not expire — is persisted in the session SharedPreferences file. It must never leave the device
+  through Auto Backup to Google Drive or a device transfer, so it is excluded from both here. The
+  Keystore-backed file (`split_cruiser_secure_session`) holds it as ciphertext and the legacy
+  plaintext file (`split_cruiser_session`) may linger on upgraded installs; both are excluded.
+  Everything else is still eligible for backup.
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <exclude domain="sharedpref" path="split_cruiser_secure_session.xml"/>
+        <exclude domain="sharedpref" path="split_cruiser_session.xml"/>
     </cloud-backup>
-    <!--
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <exclude domain="sharedpref" path="split_cruiser_secure_session.xml"/>
+        <exclude domain="sharedpref" path="split_cruiser_session.xml"/>
     </device-transfer>
-    -->
 </data-extraction-rules>

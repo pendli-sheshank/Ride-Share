@@ -1,13 +1,13 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample backup rules file; uncomment and customize as necessary.
-   See https://developer.android.com/guide/topics/data/autobackup
-   for details.
-   Note: This file is ignored for devices older than API 31
-   See https://developer.android.com/about/versions/12/backup-restore
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Controls Auto Backup on Android 11 and below (API <= 30).
+
+  Excludes the session SharedPreferences files, which hold the Firebase refresh token — a long-lived
+  credential that must not be copied off-device by Auto Backup or `adb backup`. Both the current
+  Keystore-backed file and any leftover legacy plaintext file are excluded. Everything else is still
+  backed up.
 -->
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <exclude domain="sharedpref" path="split_cruiser_secure_session.xml"/>
+    <exclude domain="sharedpref" path="split_cruiser_session.xml"/>
 </full-backup-content>

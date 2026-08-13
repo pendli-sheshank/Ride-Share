@@ -172,7 +172,7 @@ struct RideDetailView: View {
 
     private func contactRow(icon: String, label: String, url: String) -> some View {
         Button {
-            if let target = URL(string: url) { UIApplication.shared.open(target) }
+            openContactURL(url)
         } label: {
             HStack(spacing: BrandScale.spaceSm) {
                 Image(systemName: icon)
@@ -181,6 +181,16 @@ struct RideDetailView: View {
             }
             .foregroundColor(Brand.primary)
         }
+    }
+
+    /// Opens a `tel:`/`mailto:` link built from another user's stored profile. The value is remote
+    /// data, so the scheme is checked against an allowlist before handing it to the system — a
+    /// crafted phone/email must never be able to open anything other than the dialer or mail.
+    private func openContactURL(_ string: String) {
+        guard let url = URL(string: string),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "tel" || scheme == "mailto" else { return }
+        UIApplication.shared.open(url)
     }
 
     // MARK: - Cost

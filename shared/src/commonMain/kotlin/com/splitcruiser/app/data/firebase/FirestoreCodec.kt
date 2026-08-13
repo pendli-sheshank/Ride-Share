@@ -32,11 +32,18 @@ object FirestoreCodec {
     /**
      * `ignoreUnknownKeys` matters in both directions: documents written by the old Android
      * Firestore SDK may carry fields this version of the model no longer declares.
+     *
+     * `isLenient` is deliberately **off**. This codec already resolves every value's type from its
+     * Firestore type-key ([fromFirestoreValue]) before the model is decoded, so leniency buys
+     * nothing legitimate — all it did was let a value stored under the wrong type (e.g. a `senderId`
+     * written as `integerValue` where the model expects a `String`) coerce silently into the model
+     * instead of being rejected. With several collections readable and writable by non-owners, that
+     * coercion was a type-confusion foothold; a strict decode drops the malformed document instead.
      */
     val json: Json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
-        isLenient = true
+        isLenient = false
     }
 
     /** Serialises [value] into the `fields` map of a Firestore document. */

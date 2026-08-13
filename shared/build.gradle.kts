@@ -52,6 +52,8 @@ kotlin {
     androidMain.dependencies {
       implementation(libs.kotlinx.coroutines.android)
       implementation(libs.ktor.client.okhttp)
+      // Keystore-backed EncryptedSharedPreferences for the session store (holds the refresh token).
+      implementation(libs.androidx.security.crypto)
       // Compose remains in app module only (platform-specific UI)
     }
 

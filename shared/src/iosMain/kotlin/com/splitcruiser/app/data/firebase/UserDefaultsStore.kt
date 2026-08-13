@@ -3,11 +3,13 @@ package com.splitcruiser.app.data.firebase
 import platform.Foundation.NSUserDefaults
 
 /**
- * Session storage for iOS.
+ * Plain `NSUserDefaults` session storage for iOS.
  *
- * The refresh token is a long-lived credential and `NSUserDefaults` is a plaintext plist inside the
- * app container, so it belongs in the Keychain — see [KeychainStore], which is what the app
- * actually uses. This implementation is kept for the non-sensitive values and for simulator work.
+ * `NSUserDefaults` is a plaintext plist inside the app container and is copied into unencrypted
+ * device backups, so it must NOT be used for the session — the refresh token is a long-lived
+ * credential. [KeychainStore] is the secure implementation and is what the app wires in
+ * (`ViewModel.swift`). This class is retained only for non-sensitive values and simulator
+ * experiments; do not point the repository at it.
  */
 class UserDefaultsStore : KeyValueStore {
 

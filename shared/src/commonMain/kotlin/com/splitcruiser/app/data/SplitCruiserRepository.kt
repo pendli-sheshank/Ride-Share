@@ -489,7 +489,20 @@ class SplitCruiserRepository internal constructor(
             homeArea = homeArea,
             phoneNumber = contact.phoneNumber.trim(),
         )
-        firestore.setDocument("users", user.id, updated, serializer<User>())
+        // Write only the profile fields, not the whole document. A full-document set re-sends
+        // ratingAvg/ratingCount/noShowCount/verifiedTier, which the rules now forbid a client from
+        // changing — and after the aggregation function has updated them, a stale local copy would
+        // make this write fail. A masked update touches exactly the fields the user edited.
+        firestore.updateFields(
+            "users",
+            user.id,
+            buildFields(
+                "name" to stringValue(updated.name),
+                "lastInitial" to stringValue(updated.lastInitial),
+                "homeArea" to stringValue(updated.homeArea),
+                "phoneNumber" to stringValue(updated.phoneNumber),
+            ),
+        )
         adoptUser(updated)
 
         // After the user document, and tolerantly: a rejected private write must not strand an
@@ -524,7 +537,16 @@ class SplitCruiserRepository internal constructor(
             lastInitial = lastInitial,
             avatarUrl = avatarUrl,
         )
-        firestore.setDocument("users", user.id, updated, serializer<User>())
+        // Masked update — see createUserProfile. Never re-send the reputation/tier fields.
+        firestore.updateFields(
+            "users",
+            user.id,
+            buildFields(
+                "name" to stringValue(updated.name),
+                "lastInitial" to stringValue(updated.lastInitial),
+                "avatarUrl" to stringValue(updated.avatarUrl),
+            ),
+        )
         adoptUser(updated)
     }
 
@@ -594,7 +616,8 @@ class SplitCruiserRepository internal constructor(
         val user = requireUser()
         if (user.id == userId) {
             val updated = user.copy(avatarUrl = url)
-            firestore.setDocument("users", userId, updated, serializer<User>())
+            // Masked update — see createUserProfile. Only the avatar URL changed.
+            firestore.updateFields("users", userId, buildFields("avatarUrl" to stringValue(url)))
             adoptUser(updated)
         }
         return url
@@ -606,7 +629,8 @@ class SplitCruiserRepository internal constructor(
         val user = requireUser()
         if (user.id == userId) {
             val updated = user.copy(avatarUrl = "")
-            firestore.setDocument("users", userId, updated, serializer<User>())
+            // Masked update — see createUserProfile. Only the avatar URL changed.
+            firestore.updateFields("users", userId, buildFields("avatarUrl" to stringValue("")))
             adoptUser(updated)
         }
     }
@@ -1455,6 +1479,12 @@ class SplitCruiserRepository internal constructor(
     @Throws(Exception::class)
     suspend fun submitRating(toUserId: String, ratingValue: Float, comment: String) {
         val user = requireUser()
+        // Client-side mirror of the ratings rule (defence in depth — the rule is the real boundary).
+        // The old code passed ratingValue straight through, so submitRating(victim, 1e9f, "") was
+        // accepted and then averaged into the victim's public ratingAvg.
+        requireValid(toUserId.isNotBlank() && toUserId != user.id) { "You cannot rate yourself." }
+        requireValid(ratingValue in 1f..5f) { "A rating must be between 1 and 5." }
+        requireValid(comment.length <= MAX_RATING_COMMENT) { "That comment is too long." }
         val rating = Rating(
             id = ratingId(user.id, toUserId),
             fromUserId = user.id,
@@ -1506,6 +1536,16 @@ class SplitCruiserRepository internal constructor(
         myRatings.value = given.associateBy { it.toUserId }
     }
 
+    /**
+     * Reflects a just-submitted rating in the *local* cache so the screen updates immediately.
+     *
+     * It deliberately does **not** write the target's `ratingAvg`/`ratingCount` back to Firestore:
+     * that used to happen here and was the spoof — any client could PATCH any user's aggregates to
+     * any value. The authoritative aggregate is now computed server-side by the `aggregateRating`
+     * Cloud Function (Admin SDK) whenever a `ratings/{id}` document changes, and the rules forbid a
+     * client from touching those fields at all. The local average shown here is optimistic and is
+     * replaced by the server's value on the next user-profile refresh.
+     */
     private suspend fun recomputeUserRating(userId: String) {
         val ratings = firestore.runQuery(
             StructuredQuery(
@@ -1517,17 +1557,6 @@ class SplitCruiserRepository internal constructor(
         )
         if (ratings.isEmpty()) return
         val average = (ratings.sumOf { it.rating.toDouble() } / ratings.size).toFloat()
-
-        // The rules allow a non-owner to touch only these two fields. Aggregating on the client is
-        // spoofable; a Cloud Function with the Admin SDK is the real fix and is noted as a follow-up.
-        firestore.updateFields(
-            "users",
-            userId,
-            buildFields(
-                "ratingAvg" to doubleValue(average.toDouble()),
-                "ratingCount" to integerValue(ratings.size.toLong()),
-            ),
-        )
         val cached = users.value[userId]
         if (cached != null) {
             val updated = cached.copy(ratingAvg = average, ratingCount = ratings.size)
@@ -1536,14 +1565,28 @@ class SplitCruiserRepository internal constructor(
         }
     }
 
+    /**
+     * Files a no-show report against another user.
+     *
+     * Writes an immutable `no_show_reports/{reporter}_{target}` document and lets the
+     * `aggregateNoShow` Cloud Function (Admin SDK) own the `noShowCount` on the user record. The old
+     * implementation incremented that counter directly from a value it had just read off the same
+     * client-writable document — anyone could inflate anyone's no-show count. The local bump here is
+     * optimistic and is corrected by the server's value on the next refresh.
+     */
     @Throws(Exception::class)
     suspend fun recordNoShow(userId: String) {
-        val user = users.value[userId] ?: fetchUserProfile(userId)
-        firestore.updateFields(
-            "users",
-            userId,
-            buildFields("noShowCount" to integerValue((user.noShowCount + 1).toLong())),
+        val reporter = requireUser()
+        requireValid(userId.isNotBlank() && userId != reporter.id) { "You cannot report yourself." }
+        val report = NoShowReport(
+            id = "noshow_${reporter.id}_$userId",
+            reporterId = reporter.id,
+            targetId = userId,
+            timestamp = nowMs(),
         )
+        firestore.setDocument("no_show_reports", report.id, report, serializer<NoShowReport>())
+
+        val user = users.value[userId] ?: runCatching { fetchUserProfile(userId) }.getOrNull() ?: return
         val updated = user.copy(noShowCount = user.noShowCount + 1)
         users.value = users.value + (userId to updated)
         if (_currentUser.value?.id == userId) _currentUser.value = updated
@@ -1929,6 +1972,9 @@ class SplitCruiserRepository internal constructor(
 
         /** Below this a split is not worth the arithmetic. */
         const val MIN_SUGGESTED_CONTRIBUTION = 3.0
+
+        /** Matches the `comment.size() <= 500` cap in the ratings security rule. */
+        const val MAX_RATING_COMMENT = 500
     }
 }
 

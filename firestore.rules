@@ -25,18 +25,23 @@ service cloud.firestore {
     // ============================================
 
     match /users/{userId} {
-      // Public, so feeds can show a host's name and rating.
-      allow read: if true;
+      // Readable to any signed-in user so feeds can show a host's name and rating. NOT public:
+      // `allow read: if true` let anyone holding the (shippable) API key bulk-read every user's
+      // name, email, phone number and FCM token with a plain REST call. `isAuth()` closes the
+      // anonymous path. The phone number still reaches every *signed-in* user; moving contact
+      // fields off this document entirely is a tracked follow-up (needs both-platform UI changes).
+      allow read: if isAuth();
 
       allow create: if isOwner(userId);
 
-      // Ratings and no-show counts are aggregates written *about* a user by someone else, so the
-      // owner-only rule that used to guard the whole document made submitRating and recordNoShow
-      // impossible. This is deliberately narrow but still spoofable — anyone can inflate anyone's
-      // rating. The real fix is a Cloud Function holding the Admin SDK; until then this at least
-      // bounds the damage to three numeric fields.
-      allow update: if isOwner(userId) ||
-        (isAuth() && changed().hasOnly(['ratingAvg', 'ratingCount', 'noShowCount']));
+      // Reputation aggregates and the trust tier are written *about* a user, derived from the
+      // ratings and no-show reports, and must be computed server-side. The Admin SDK in
+      // functions/ (aggregateRating, aggregateNoShow) bypasses these rules and is the only writer
+      // of ratingAvg/ratingCount/noShowCount/verifiedTier. A client — even the owner — may update
+      // any other field but must leave these four alone, which stops both cross-user tampering and
+      // owner self-inflation (a user setting their own ratingAvg to 5.0).
+      allow update: if isOwner(userId) &&
+        !changed().hasAny(['ratingAvg', 'ratingCount', 'noShowCount', 'verifiedTier']);
 
       allow delete: if isOwner(userId);
 
@@ -59,16 +64,40 @@ service cloud.firestore {
     // ============================================
 
     match /trip_offers/{offerId} {
-      allow read: if true;
+      allow read: if isAuth();
 
       allow create: if isAuth() && request.resource.data.hostId == request.auth.uid;
 
-      // Joining a ride, accepting a match and declining one all change someone else's offer. The
-      // previous host-only rule denied every one of them. A non-host may touch only the seat and
-      // passenger bookkeeping.
+      // Joining a ride, accepting a match and declining one all change someone else's offer, so the
+      // host is not the only allowed writer. But the previous rule let *any* authenticated user set
+      // seatsLeft/status/passengers to anything — zero out every ride, cancel other people's trips,
+      // or delete riders from the manifest. A non-host is now confined to moving *themselves* in or
+      // out of the passenger list, with seatsLeft kept in range and status limited to the two the
+      // seat-booking flow legitimately sets. (Full seat-count integrity against a concurrent join
+      // still needs a server transaction — tracked as a follow-up; this closes the griefing paths.)
       allow update: if isAuth() && (
         resource.data.hostId == request.auth.uid ||
-        changed().hasOnly(['passengers', 'passengerNames', 'seatsLeft', 'status'])
+        (
+          changed().hasOnly(['passengers', 'passengerNames', 'seatsLeft', 'status']) &&
+          request.resource.data.seatsLeft is int &&
+          request.resource.data.seatsLeft >= 0 &&
+          request.resource.data.seatsLeft <= resource.data.totalSeats &&
+          request.resource.data.status in ['active', 'full'] &&
+          (
+            // Joining: adds only the caller, keeps every existing passenger.
+            (
+              !(request.auth.uid in resource.data.passengers) &&
+              request.auth.uid in request.resource.data.passengers &&
+              request.resource.data.passengers.hasAll(resource.data.passengers)
+            ) ||
+            // Leaving: removes only the caller, keeps every other passenger.
+            (
+              request.auth.uid in resource.data.passengers &&
+              !(request.auth.uid in request.resource.data.passengers) &&
+              resource.data.passengers.hasAll(request.resource.data.passengers)
+            )
+          )
+        )
       );
 
       allow delete: if isAuth() && resource.data.hostId == request.auth.uid;
@@ -79,14 +108,19 @@ service cloud.firestore {
     // ============================================
 
     match /ride_requests/{requestId} {
-      allow read: if true;
+      allow read: if isAuth();
 
       allow create: if isAuth() && request.resource.data.riderId == request.auth.uid;
 
       // A host flips the rider's request to "matched" when accepting, so this cannot be rider-only.
+      // A non-rider may only change `status`, and only to one of the known values — not rewrite the
+      // route, rider identity or departure time on someone else's request.
       allow update: if isAuth() && (
         resource.data.riderId == request.auth.uid ||
-        changed().hasOnly(['status'])
+        (
+          changed().hasOnly(['status']) &&
+          request.resource.data.status in ['active', 'pending', 'matched', 'closed', 'cancelled']
+        )
       );
 
       allow delete: if isAuth() && resource.data.riderId == request.auth.uid;
@@ -130,7 +164,13 @@ service cloud.firestore {
         request.resource.data.senderId == request.auth.uid &&
         request.auth.uid in request.resource.data.participants;
 
-      allow update, delete: if isOwner(resource.data.senderId);
+      // A sender may correct or delete their own message, but not rewrite its identity, thread,
+      // audience, timestamp or the agreed contribution after the fact — that would let a party
+      // repudiate a price both sides had seen. Delete is unconstrained (removing a message you sent
+      // has no such state to forge).
+      allow update: if isOwner(resource.data.senderId) &&
+        !changed().hasAny(['matchId', 'senderId', 'timestamp', 'participants', 'contribution']);
+      allow delete: if isOwner(resource.data.senderId);
     }
 
     // ============================================
@@ -151,7 +191,13 @@ service cloud.firestore {
         request.resource.data.title is string &&
         request.resource.data.title.size() <= 200 &&
         request.resource.data.message is string &&
-        request.resource.data.message.size() <= 1000;
+        request.resource.data.message.size() <= 1000 &&
+        // Bind the timestamp to server time (client clocks are attacker-controlled). Without this a
+        // notification could be dated far in the future to pin itself to the top of the recipient's
+        // list — which orders by timestamp DESC. Allow a little skew each way.
+        request.resource.data.timestamp is int &&
+        request.resource.data.timestamp <= request.time.toMillis() + 60000 &&
+        request.resource.data.timestamp >= request.time.toMillis() - 300000;
 
       // The recipient may only mark it read.
       allow update: if isOwner(resource.data.userId) && changed().hasOnly(['isRead']);
@@ -164,12 +210,50 @@ service cloud.firestore {
     // ============================================
 
     match /ratings/{ratingId} {
-      allow read: if true;
+      allow read: if isAuth();
 
       // The field is fromUserId. These rules checked `raterId`, which the Rating model has never
       // had, so every rating write would have been denied.
-      allow create: if isAuth() && request.resource.data.fromUserId == request.auth.uid;
-      allow update, delete: if isAuth() && resource.data.fromUserId == request.auth.uid;
+      //
+      // Validation: a rater cannot rate themselves, the score must be a number in 1..5 (the old
+      // rules let `submitRating(victim, 1e9f, "")` through, which then poisoned the aggregate), and
+      // the free-text comment is length-capped. A Cloud Function (aggregateRating) recomputes the
+      // target's ratingAvg/ratingCount from these documents, so the score here has to be sane.
+      allow create: if isAuth() &&
+        request.resource.data.fromUserId == request.auth.uid &&
+        request.resource.data.fromUserId != request.resource.data.toUserId &&
+        request.resource.data.rating is number &&
+        request.resource.data.rating >= 1 &&
+        request.resource.data.rating <= 5 &&
+        request.resource.data.comment is string &&
+        request.resource.data.comment.size() <= 500;
+      allow update: if isAuth() &&
+        resource.data.fromUserId == request.auth.uid &&
+        request.resource.data.rating is number &&
+        request.resource.data.rating >= 1 &&
+        request.resource.data.rating <= 5 &&
+        request.resource.data.comment.size() <= 500;
+      allow delete: if isAuth() && resource.data.fromUserId == request.auth.uid;
+    }
+
+    // ============================================
+    // COLLECTION: no_show_reports
+    // ============================================
+
+    // A rider or host reports that the other party did not turn up. One document per
+    // (reporter, target) pair, immutable once written; the aggregateNoShow Cloud Function counts
+    // them with the Admin SDK and writes the target's noShowCount. Clients can no longer touch that
+    // counter directly (see the users rule), which is what made it forgeable before.
+    match /no_show_reports/{reportId} {
+      allow read: if isAuth() && resource.data.reporterId == request.auth.uid;
+
+      allow create: if isAuth() &&
+        request.resource.data.reporterId == request.auth.uid &&
+        request.resource.data.reporterId != request.resource.data.targetId &&
+        request.resource.data.keys().hasOnly(['id', 'reporterId', 'targetId', 'timestamp']);
+
+      // Immutable. Only the Admin SDK aggregates them.
+      allow update, delete: if false;
     }
 
     // ============================================
@@ -177,8 +261,9 @@ service cloud.firestore {
     // ============================================
 
     match /vehicles/{userId} {
-      // Riders need to see the car they are getting into.
-      allow read: if true;
+      // Riders need to see the car they are getting into — but a licence plate is not something to
+      // publish to the anonymous internet, so this is signed-in-only rather than fully public.
+      allow read: if isAuth();
       allow write: if isOwner(userId);
     }
 

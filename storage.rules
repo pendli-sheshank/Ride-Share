@@ -28,12 +28,16 @@ service firebase.storage {
     }
 
     // ============================================
-    // TRIP DOCUMENTS (Future)
+    // TRIP DOCUMENTS (Future — currently disabled)
     // ============================================
 
+    // No client in this repo reads or writes this path yet. Left open, `if request.auth != null`
+    // was a live bucket: any signed-in user could upload unlimited files of any size and type under
+    // any tripId and read anyone else's — arbitrary file hosting on a firebasestorage.googleapis.com
+    // URL and unbounded egress billing. Denied until a real feature turns it on with per-participant
+    // authorization plus size and content-type caps (mirror the profile_pictures rule).
     match /trip_documents/{tripId}/{document=**} {
-      // Participants can read/upload trip documents
-      allow read, write: if request.auth != null;
+      allow read, write: if false;
     }
 
     // ============================================
