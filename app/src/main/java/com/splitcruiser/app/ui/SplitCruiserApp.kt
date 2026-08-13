@@ -6689,7 +6689,7 @@ fun StudentAvatar(
                     contentDescription = "Profile Picture",
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop,
-                    error = painterResource(id = R.drawable.ic_launcher_foreground)
+                    error = painterResource(id = R.drawable.img_split_cruiser_logo)
                 )
             } else if (SplitCruiserAvatars.isAvatarKey(avatarUrl)) {
                 Image(

@@ -203,3 +203,9 @@ and are now on both platforms.
 Photo upload is the loose one: it exists on both platforms but in different places — Android only
 during onboarding, iOS only in the edit sheet. Neither offers both. The avatar picker itself is at
 parity, drawing the twelve `SplitCruiserAvatars` on each.
+
+**A failed avatar image load looks different on each platform.** Android's `StudentAvatar` passes
+Coil an `error` painter and draws the logo; iOS's uses `AsyncImage`'s `placeholder:`, which covers
+loading *and* failure alike, so it draws the gradient-plus-initial fallback. Distinguishing them on
+iOS means the phase-based `AsyncImage` initialiser. Left as is deliberately — which of the two is
+the better failure state is a UX question, and the answer should then be applied to both.

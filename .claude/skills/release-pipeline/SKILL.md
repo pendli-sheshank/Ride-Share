@@ -755,7 +755,9 @@ fixed that error too. Do not hand-write the key.
 CI or the container; PNG encoding is ~15 lines of zlib). Icons are RGB with no alpha, because
 Apple rejects an App Store icon that has an alpha channel. It renders **both** platforms from
 `assets/app-icon-source.png`; it replaced `iosApp/generate-app-icons.py`, which drew a flat
-two-colour glyph in code and would have silently overwritten the real artwork if re-run.
+two-colour glyph in code and would have silently overwritten the real artwork if re-run. It
+also renders the in-app logo (`SplitCruiserLogo.imageset`, `img_split_cruiser_logo`) from the
+same source — 41 files in total, all of them byte-stable across runs.
 **Guard added:** `.github/scripts/verify-app-icons.py <appiconset>` checks every declared file
 exists, that its pixel dimensions equal size x scale, and that the 1024 marketing icon has no
 alpha. Wired into `build-ios.yml` and into `ios-release.yml` *before* the build, so it costs
