@@ -50,9 +50,14 @@ import platform.Security.kSecValueData
  * CFDictionary cinterop pattern used by well-tested KMP keychain wrappers.
  */
 @OptIn(ExperimentalForeignApi::class, BetaInteropApi::class)
-class KeychainStore(
-    private val service: String = "com.splitcruiser.app.session",
-) : KeyValueStore {
+class KeychainStore : KeyValueStore {
+
+    // A plain `val`, not a constructor parameter: Kotlin/Native does not export default-argument
+    // values to Swift, so `class KeychainStore(service: String = "…")` would expose only an
+    // `initWithService:` initializer and the Swift call `KeychainStore()` would fail to resolve
+    // (the iOS build's Swift compile fails with exit 65). This mirrors UserDefaultsStore, which
+    // takes no constructor arguments and is why its `UserDefaultsStore()` call worked.
+    private val service: String = "com.splitcruiser.app.session"
 
     override fun getString(key: String): String? = memScoped {
         val result = alloc<CFTypeRefVar>()
