@@ -117,12 +117,15 @@ not evidence. Verify against a build.
   fix is a Cloud Function with the Admin SDK; there is no `functions/` directory yet.
 - **The Firestore rules have never been executed anywhere.** No CI job exercises them and there is
   no emulator setup. Validate against a throwaway project before pointing the live one at them.
-- **The launcher icon is real artwork now; the in-app logo is not.** Both platforms' launcher
-  icons are generated from `assets/app-icon-source.png` by `scripts/generate-app-icon.py` (run it
-  after replacing the source; it rewrites all 33 files and is byte-stable). But
-  `R.drawable.ic_launcher_foreground` is still the old placeholder vector, and it is still what
-  Android draws while a profile image loads or fails — see `SplitCruiserApp.kt:6692`. Replacing
-  that is a separate change.
+- **The launcher icon and the in-app logo are both real artwork now**, generated from
+  `assets/app-icon-source.png` by `scripts/generate-app-icon.py` — 41 files, byte-stable, so
+  replacing the brand means replacing that one PNG and re-running it. The logo asset is inset so
+  its outermost pixel lands just inside the inscribed circle: all eight sites that draw it clip to
+  a circle, and the generator measures the artwork's true radius rather than assuming a square's.
+  **The two remaining stale images are `img_carpool_banner.jpg` and
+  `img_auth_illustration_*.jpg`** — both are campus scenes ("CAMPUS AREA", "UNIVERSITY DR", a
+  university gate) left over from when this was a student-only product, and both are shared
+  byte-for-byte by the two platforms. Neither is generated.
 - **Device location is read natively on each platform, not in `:shared`** — `FusedLocationProvider`
   in `:app`, `CLLocationManager` in `iosApp/` — because `CLLocationManager` cannot be
   compile-checked on Linux, the same reason `KeychainStore` was deferred. Only the *ranking*

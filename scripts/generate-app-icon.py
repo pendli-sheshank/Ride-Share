@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render every app-icon asset for both platforms from one source artwork.
+"""Render every app-icon and in-app-logo asset for both platforms from one source artwork.
 
 Replaces `iosApp/generate-app-icons.py`, which drew a flat two-colour car glyph in code.
 The icon is now real artwork (`assets/app-icon-source.png`), so this resamples it instead
@@ -25,6 +25,18 @@ Three things this does that a plain resize would not:
    the 66% safe zone over a solid navy background layer instead, so a circular launcher
    shows the whole badge inside a navy circle rather than a fragment of one.
 
+It also renders the **in-app logo** — `img_split_cruiser_logo` on Android, the
+`SplitCruiserLogo` imageset on iOS — which the two apps draw on eight screens between them
+(auth header, onboarding header, home top bar, the pulsing loading spinner). The file it
+replaced was a wordmark for the app's old name, and since every one of those eight sites clips
+to a circle with a centre crop, the crop ran straight through the middle of that wordmark.
+
+The logo is inset for the same reason the adaptive foreground is, but to a radius measured
+from the artwork rather than a fixed fraction: `content_radius` finds the furthest non-margin
+pixel from the badge's centre, and the badge is scaled so that pixel lands exactly on the
+inscribed circle. The badge's corners are rounded, so this fits it noticeably larger than the
+0.707 a square would have allowed, with the border still intact all the way round.
+
 Run from anywhere:  python3 scripts/generate-app-icon.py
 Idempotent — safe to re-run; it overwrites.
 """
@@ -42,6 +54,7 @@ import zlib
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SOURCE = ROOT / "assets/app-icon-source.png"
 ICONSET = ROOT / "iosApp/iosApp/Assets.xcassets/AppIcon.appiconset"
+LOGOSET = ROOT / "iosApp/iosApp/Assets.xcassets/SplitCruiserLogo.imageset"
 RES = ROOT / "app/src/main/res"
 
 # Sampled from the badge's own interior. Everything the artwork does not cover becomes this,
@@ -63,6 +76,19 @@ DENSITIES = {
 
 # An adaptive icon's safe zone is the middle 72dp of its 108dp canvas.
 SAFE_ZONE = 72 / 108
+
+# The in-app logo. Its largest use is 72dp/pt, so a 96 baseline leaves headroom at every
+# density without anyone having to revisit this when a screen grows.
+LOGO_BASE = 96
+LOGO_DENSITIES = {"mdpi": 1, "hdpi": 1.5, "xhdpi": 2, "xxhdpi": 3, "xxxhdpi": 4}
+LOGO_SCALES = (1, 2, 3)  # iOS imageset
+
+# How far inside the inscribed circle the artwork's outermost pixel is asked to land. Sizing
+# it to touch the circle exactly is half a pixel too generous in practice: `render` centres on
+# a whole-pixel origin, and the badge's outer glow is anti-aliased, so a handful of pixels end
+# up fractionally outside and the clip shaves them. This is absolute rather than proportional
+# because the overshoot is a rounding artefact, the same ~1px at 96 as at 384.
+LOGO_CLEARANCE_PX = 1.5
 
 
 # --- PNG -------------------------------------------------------------------------------
@@ -229,6 +255,29 @@ def content_box(width: int, height: int, pixels: bytearray) -> tuple[int, int, i
     return cx - half, cy - half, span, span
 
 
+def content_radius(width: int, height: int, pixels: bytearray,
+                   box: tuple[int, int, int, int]) -> float:
+    """Distance from `box`'s centre to the furthest pixel that is not the margin colour.
+
+    Used to size the logo: everything within this radius has to survive a circular clip, so
+    scaling the crop by `bw / (2 * radius)` puts the outermost artwork pixel exactly on the
+    inscribed circle. Measuring beats assuming — the badge's rounded corners mean the true
+    radius is well inside the half-diagonal a square would force.
+    """
+    bx, by, bw, _ = box
+    cx, cy = bx + bw / 2, by + bw / 2
+    best = 0.0
+    for y in range(height):
+        row = y * width * 3
+        for x in range(width):
+            i = row + x * 3
+            if (pixels[i], pixels[i + 1], pixels[i + 2]) != NAVY:
+                distance = ((x - cx) ** 2 + (y - cy) ** 2) ** 0.5
+                if distance > best:
+                    best = distance
+    return best
+
+
 class Sampler:
     """Area-average resampling over a summed-area table: O(1) per output pixel.
 
@@ -323,6 +372,26 @@ def ios_sizes() -> dict[str, int]:
     return sizes
 
 
+def write_logoset_manifest() -> None:
+    """Rewrite the logo imageset's Contents.json for the three scales written above.
+
+    The single unscaled `.jpg` this replaced declared no scale at all, which is legal but
+    leaves the catalogue with nothing to pick per-device.
+    """
+    manifest = {
+        "images": [
+            {
+                "filename": f"SplitCruiserLogo{'' if scale == 1 else f'@{scale}x'}.png",
+                "idiom": "universal",
+                "scale": f"{scale}x",
+            }
+            for scale in LOGO_SCALES
+        ],
+        "info": {"author": "xcode", "version": 1},
+    }
+    (LOGOSET / "Contents.json").write_text(json.dumps(manifest, indent=2) + "\n")
+
+
 def main() -> int:
     if not SOURCE.exists():
         raise SystemExit(f"missing source artwork: {SOURCE.relative_to(ROOT)}")
@@ -347,7 +416,29 @@ def main() -> int:
                   sampler.render(adaptive, box, SAFE_ZONE, alpha=True), alpha=True)
         print(f"  android {bucket:<8} launcher {legacy}px, adaptive foreground {adaptive}px")
 
-    print("\nRegenerated the app icon for both platforms.")
+    radius = content_radius(width, height, pixels, box)
+    print(f"logo: artwork reaches {radius:.1f}px from centre of a {box[2] / 2:.1f}px half-span")
+
+    def logo_inset(size: int) -> float:
+        """Scale that puts the outermost artwork pixel just inside `size`'s inscribed circle."""
+        return min(1.0, (size / 2 - LOGO_CLEARANCE_PX) * box[2] / (radius * size))
+
+    for bucket, factor in LOGO_DENSITIES.items():
+        size = int(round(LOGO_BASE * factor))
+        write_png(RES / f"drawable-{bucket}/img_split_cruiser_logo.png", size,
+                  sampler.render(size, box, logo_inset(size), alpha=False), alpha=False)
+        print(f"  android {bucket:<8} logo {size}px (inset {logo_inset(size):.3f})")
+
+    for scale in LOGO_SCALES:
+        size = LOGO_BASE * scale
+        suffix = "" if scale == 1 else f"@{scale}x"
+        write_png(LOGOSET / f"SplitCruiserLogo{suffix}.png", size,
+                  sampler.render(size, box, logo_inset(size), alpha=False), alpha=False)
+        print(f"  ios     SplitCruiserLogo{suffix}.png {size}px (inset {logo_inset(size):.3f})")
+
+    write_logoset_manifest()
+
+    print("\nRegenerated the app icon and the in-app logo for both platforms.")
     return 0
 
 
