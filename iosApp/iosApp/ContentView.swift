@@ -110,7 +110,10 @@ struct DashboardScreen: View {
                 Group {
                     switch selectedTab {
                     case .explore:
-                        ExploreFeed(onJoined: { joinSucceededFor = PresentedOffer(offer: $0) })
+                        ExploreFeed(
+                            onJoined: { joinSucceededFor = PresentedOffer(offer: $0) },
+                            onShowTrips: { selectedTab = .trips }
+                        )
                     case .trips:
                         TripsTab(onFindARide: { selectedTab = .explore })
                     }
@@ -183,7 +186,8 @@ struct DashboardScreen: View {
                         .background(Brand.surfaceMuted)
                         .cornerRadius(BrandScale.radiusMd)
                     }
-                    circleButton(icon: "person.fill") { router.push(.profile) }
+                    // No profile button here. The tab bar already has a Profile tab, so this was a
+                    // second route to one screen, parked in the corner of every Explore view.
                 }
             }
 

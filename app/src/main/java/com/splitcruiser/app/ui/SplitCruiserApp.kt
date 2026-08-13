@@ -1573,6 +1573,14 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
     var showSuccessDialog by remember { mutableStateOf(false) }
     var selectedOfferForDialog by remember { mutableStateOf<TripOffer?>(null) }
 
+    // Held here, not in the feed's own composable, so the controls and the "nothing matches"
+    // state can both see them — and so clearing the filters from the empty state actually works.
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedFilter by remember { mutableStateOf(TripFeedFilters.All) }
+    val filteredOffers = remember(activeOffers, searchQuery, selectedFilter) {
+        TripFeedFilters.apply(activeOffers, searchQuery, selectedFilter)
+    }
+
     val dashboardSubtitle = currentUser?.homeArea?.takeIf { it.isNotBlank() } ?: "Find your next ride"
 
     Scaffold(
@@ -1659,20 +1667,10 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                                         fontSize = 12.sp
                                     )
                                 }
-                                Spacer(modifier = Modifier.width(8.dp))
                             }
-
-                            // Profile Icon (Polished Avatar style)
-                            Box(
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(CircleShape)
-                                    .background(SplitCruiserPrimaryContainer)
-                                    .clickable { navController.navigate("profile") },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(imageVector = Icons.Default.Person, contentDescription = "Profile", tint = SplitCruiserOnPrimaryContainer)
-                            }
+                            // No profile button here. The bottom bar already has a Profile tab, so
+                            // this was a second route to one screen, parked in the corner of every
+                            // Explore view.
                         }
                     }
                 }
@@ -1786,8 +1784,16 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                     },
                     containerColor = SplitCruiserPrimary,
                     contentColor = Color.White,
-                    icon = { Icon(Icons.Default.Add, contentDescription = "Post") },
-                    text = { Text(if (activeMode == "Rider") "Post Request" else "Post Offer", fontWeight = FontWeight.Bold) },
+                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                    // Spelled out, because which of the two things this posts is the whole
+                    // confusion: in "Find a ride" it creates a *request*, which shows up for
+                    // hosts under "Give a ride" — not in the offers list right above it.
+                    text = {
+                        Text(
+                            if (activeMode == "Rider") "Post a ride request" else "Post a ride offer",
+                            fontWeight = FontWeight.Bold
+                        )
+                    },
                     shape = RoundedCornerShape(16.dp),
                     modifier = Modifier.testTag("action_fab")
                 )
@@ -1811,55 +1817,7 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                     .fillMaxSize()
                     .padding(horizontal = SplitCruiserSpacing.Lg)
             ) {
-                // Hero Illustration Banner card
-                item {
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Card(
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(140.dp)
-                    ) {
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            Image(
-                                painter = painterResource(id = R.drawable.img_carpool_banner),
-                                contentDescription = "Carpool Banner",
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
-                            // Gradient Overlay for readability
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(
-                                        Brush.verticalGradient(
-                                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.8f))
-                                        )
-                                    )
-                            )
-                            Column(
-                                modifier = Modifier
-                                    .align(Alignment.BottomStart)
-                                    .padding(16.dp)
-                            ) {
-                                Text(
-                                    text = if (activeMode == "Rider") "Direct cost splitting with host" else "Fill empty seats & share gas cost",
-                                    color = Color(0xFFF59E0B),
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 11.sp
-                                )
-                                Text(
-                                    text = if (activeMode == "Rider") "Select a host to split cash" else "Accept ride requests on your route",
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Black,
-                                    fontSize = 16.sp
-                                )
-                            }
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(20.dp))
-                }
+                item { Spacer(modifier = Modifier.height(SplitCruiserSpacing.Md)) }
 
                 // Sub-Section 1: My Active Matches / Active Coordination
                 val activeMatches = userMatches.filter { it.status == "pending" || it.status == "accepted" }
@@ -1946,30 +1904,69 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                 }
 
                 if (activeMode == "Rider") {
-                    // RIDER FEED: List active host trip offers
+                    // RIDER FEED: active offers from other hosts.
+                    item {
+                        TripFeedControls(
+                            searchQuery = searchQuery,
+                            onSearchChange = { searchQuery = it },
+                            selectedFilter = selectedFilter,
+                            onFilterChange = { selectedFilter = it }
+                        )
+                    }
+
                     if (isLoading && activeOffers.isEmpty()) {
                         item {
                             SplitCruiserFeedLoadingSkeleton()
                         }
                     } else if (activeOffers.isEmpty()) {
                         item {
+                            // Naming the two reasons the list can be empty while a ride was just
+                            // posted: your own rides are filtered out of this feed (you cannot book
+                            // your own seat), and the button on this tab posts a *request*, which
+                            // hosts answer from "Give a ride". Without saying so, posting a ride and
+                            // seeing "no offers" reads as the app being broken.
                             SplitCruiserEmptyState(
-                                title = "No Active Offers Yet",
-                                description = "Be the first to post a Ride Request so hosts can find you!",
+                                title = "No rides posted yet",
+                                description = "Nobody else has offered a ride yet. Rides you post " +
+                                    "yourself don't show up here — they're under My trips.",
                                 icon = Icons.Default.DirectionsCar,
-                                actionLabel = "Post Ride Request",
-                                onActionClick = { navController.navigate("post_request") }
+                                actionLabel = "Go to My trips",
+                                onActionClick = { selectedTab = "trips" }
+                            )
+                        }
+                    } else if (filteredOffers.isEmpty()) {
+                        item {
+                            SplitCruiserEmptyState(
+                                title = "No rides match those filters",
+                                description = "There are rides on offer, but none matching your search. Clear the filters to see all of them.",
+                                icon = Icons.Default.Search,
+                                actionLabel = "Clear filters",
+                                onActionClick = {
+                                    searchQuery = ""
+                                    selectedFilter = TripFeedFilters.All
+                                }
                             )
                         }
                     } else {
-                        item {
-                            TripOfferList(
-                                offers = activeOffers,
-                                currentUserId = currentUserId,
-                                userMatches = userMatches,
-                                viewModel = viewModel,
-                                navController = navController,
-                                onJoinClick = { offer ->
+                        // One lazy item per offer. This whole list used to be a single item holding
+                        // a Column of every card, so nothing virtualised — the host feed below has
+                        // always done it this way.
+                        items(filteredOffers, key = { it.id }) { offer ->
+                            val isHost = (offer.hostId == currentUserId)
+                            val hasAlreadyJoined = offer.passengers.contains(currentUserId)
+                            val hasPendingRequest = userMatches.any {
+                                it.offerId == offer.id && it.riderId == currentUserId && it.status == "pending"
+                            }
+                            val isJoinable = !isHost && !hasAlreadyJoined && !hasPendingRequest &&
+                                offer.seatsLeft > 0 && offer.status == "active"
+
+                            TripOfferCard(
+                                offer = offer,
+                                isJoinable = isJoinable,
+                                hasPendingRequest = hasPendingRequest,
+                                hasAlreadyJoined = hasAlreadyJoined,
+                                isHost = isHost,
+                                onJoinClick = {
                                     // The request id is the repository's to generate: this used to
                                     // be the clock's last six digits, which repeat every 17 minutes.
                                     viewModel.requestSeat(offer.id, offer.costPerRider) {
@@ -1977,7 +1974,9 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                                         showSuccessDialog = true
                                     }
                                 }
-                            )
+                            ) {
+                                navController.navigate("trip_detail/${offer.id}/offer")
+                            }
                         }
                     }
                 } else {
@@ -1988,12 +1987,16 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                         }
                     } else if (activeRequests.isEmpty()) {
                         item {
+                            // Same rule as the rider side: no button here, because the FAB below
+                            // already posts an offer and two controls doing one thing is what made
+                            // this screen confusing.
                             SplitCruiserEmptyState(
-                                title = "No Open Requests",
-                                description = "Post a trip offer or wait until someone nearby submits a ride request.",
+                                title = "No open requests",
+                                description = "Nobody has asked for a ride yet. Requests you post " +
+                                    "yourself don't show up here — they're under My trips.",
                                 icon = Icons.Default.DirectionsCar,
-                                actionLabel = "Post Trip Offer",
-                                onActionClick = { navController.navigate("post_offer") }
+                                actionLabel = "Go to My trips",
+                                onActionClick = { selectedTab = "trips" }
                             )
                         }
                     } else {
@@ -3591,26 +3594,25 @@ fun TripOfferCard(
     }
 }
 
-@Composable
-fun TripOfferList(
-    offers: List<TripOffer>,
-    currentUserId: String,
-    userMatches: List<TripMatch>,
-    viewModel: MainViewModel,
-    navController: NavController,
-    onJoinClick: (TripOffer) -> Unit
-) {
-    var searchQuery by remember { mutableStateOf("") }
-    var selectedFilter by remember { mutableStateOf("All") } // "All", "Under $15", "Women Only", "With Seats"
+/**
+ * How the offers feed is narrowed, kept next to the control that sets it so the two cannot drift.
+ *
+ * The quick-place chips that used to sit under these — Snell, Ruggles, Mission Hill, Harvard,
+ * South Station — are gone. They hardcoded one university's neighbourhood into a product that is
+ * open to anyone, and all they did was type a word into the search box below.
+ */
+object TripFeedFilters {
+    const val All = "All"
+    val labels = listOf(All, "Under $15", "Women Only", "With Seats")
 
-    // Filtered list
-    val filteredOffers = remember(offers, searchQuery, selectedFilter) {
+    fun apply(offers: List<TripOffer>, query: String, filter: String): List<TripOffer> =
         offers.filter { offer ->
-            val matchesSearch = offer.origin.contains(searchQuery, ignoreCase = true) ||
-                    offer.destination.contains(searchQuery, ignoreCase = true) ||
-                    offer.hostName.contains(searchQuery, ignoreCase = true)
+            val matchesSearch = query.isBlank() ||
+                offer.origin.contains(query, ignoreCase = true) ||
+                offer.destination.contains(query, ignoreCase = true) ||
+                offer.hostName.contains(query, ignoreCase = true)
 
-            val matchesFilter = when (selectedFilter) {
+            val matchesFilter = when (filter) {
                 "Under $15" -> offer.costPerRider <= 15
                 "Women Only" -> offer.womenOnly
                 "With Seats" -> offer.seatsLeft > 0
@@ -3619,29 +3621,40 @@ fun TripOfferList(
 
             matchesSearch && matchesFilter
         }
-    }
+}
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .animateContentSize()
-    ) {
-        // Search bar
+/**
+ * Search box and filter chips for the offers feed.
+ *
+ * State lives in `DashboardScreen` rather than here: these used to be declared inside the offer
+ * list, which the screen only rendered when the feed had something in it, so the controls vanished
+ * at exactly the moment someone wanted to widen a search. iOS always drew them above its empty
+ * state; this is Android catching up.
+ */
+@Composable
+fun TripFeedControls(
+    searchQuery: String,
+    onSearchChange: (String) -> Unit,
+    selectedFilter: String,
+    onFilterChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
         OutlinedTextField(
             value = searchQuery,
-            onValueChange = { searchQuery = it },
+            onValueChange = onSearchChange,
             placeholder = { Text("Search by origin, destination or host...", color = SplitCruiserTextSecondary, fontSize = 13.sp) },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search", tint = SplitCruiserTextSecondary) },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = SplitCruiserTextSecondary) },
             trailingIcon = {
                 if (searchQuery.isNotEmpty()) {
-                    IconButton(onClick = { searchQuery = "" }) {
-                        Icon(Icons.Default.Clear, contentDescription = "Clear", tint = SplitCruiserTextSecondary)
+                    IconButton(onClick = { onSearchChange("") }) {
+                        Icon(Icons.Default.Clear, contentDescription = "Clear search", tint = SplitCruiserTextSecondary)
                     }
                 }
             },
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 8.dp)
+                .padding(bottom = 8.dp)
                 .testTag("trip_list_search_input"),
             singleLine = true,
             colors = OutlinedTextFieldDefaults.colors(
@@ -3655,23 +3668,20 @@ fun TripOfferList(
             shape = RoundedCornerShape(12.dp)
         )
 
-        // Filter chips row
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 4.dp),
-            contentPadding = PaddingValues(bottom = 8.dp)
+                .padding(bottom = 12.dp)
         ) {
-            val filters = listOf("All", "Under $15", "Women Only", "With Seats")
-            items(filters) { filter ->
+            items(TripFeedFilters.labels) { filter ->
                 val isSelected = selectedFilter == filter
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(20.dp))
                         .background(if (isSelected) SplitCruiserPrimary else SplitCruiserSurfaceCard)
                         .border(1.dp, if (isSelected) Color.Transparent else SplitCruiserOutline, RoundedCornerShape(20.dp))
-                        .clickable { selectedFilter = filter }
+                        .clickable { onFilterChange(filter) }
                         .padding(horizontal = 14.dp, vertical = 6.dp)
                         .testTag("filter_chip_$filter")
                 ) {
@@ -3681,80 +3691,6 @@ fun TripOfferList(
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
                     )
-                }
-            }
-        }
-
-        // Popular Auto Places Shortcut Chips
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 12.dp)
-        ) {
-            val quickPlaces = listOf("Snell", "Airport", "Ruggles", "South Station", "Harvard", "Mission Hill")
-            items(quickPlaces) { placeTag ->
-                val isSelected = searchQuery.contains(placeTag, ignoreCase = true)
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = if (isSelected) SplitCruiserSuccess.copy(alpha = 0.25f) else SplitCruiserSurfaceCard,
-                    border = BorderStroke(1.dp, if (isSelected) SplitCruiserSuccess else SplitCruiserOutline)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .clickable {
-                                searchQuery = if (isSelected) "" else placeTag
-                            }
-                            .padding(horizontal = 10.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Place,
-                            contentDescription = null,
-                            tint = if (isSelected) SplitCruiserSuccess else SplitCruiserPrimary,
-                            modifier = Modifier.size(12.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = placeTag,
-                            color = if (isSelected) SplitCruiserSuccess else SplitCruiserTextPrimary,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-            }
-        }
-
-        if (filteredOffers.isEmpty()) {
-            Box(modifier = Modifier.padding(vertical = 12.dp)) {
-                SplitCruiserEmptyState(
-                    title = "No Matching Offers",
-                    description = "Try adjusting your search query or filters to find other carpools.",
-                    icon = Icons.Default.Search,
-                    actionLabel = "Clear Filters",
-                    onActionClick = {
-                        searchQuery = ""
-                        selectedFilter = "All"
-                    }
-                )
-            }
-        } else {
-            filteredOffers.forEach { offer ->
-                val isHost = (offer.hostId == currentUserId)
-                val hasAlreadyJoined = offer.passengers.contains(currentUserId)
-                val hasPendingRequest = userMatches.any { it.offerId == offer.id && it.riderId == currentUserId && it.status == "pending" }
-                val isJoinable = !isHost && !hasAlreadyJoined && !hasPendingRequest && offer.seatsLeft > 0 && offer.status == "active"
-
-                TripOfferCard(
-                    offer = offer,
-                    isJoinable = isJoinable,
-                    hasPendingRequest = hasPendingRequest,
-                    hasAlreadyJoined = hasAlreadyJoined,
-                    isHost = isHost,
-                    onJoinClick = { onJoinClick(offer) }
-                ) {
-                    navController.navigate("trip_detail/${offer.id}/offer")
                 }
             }
         }

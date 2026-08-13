@@ -185,6 +185,10 @@ safety section now links to it on both platforms.)
       platforms get it.
 - [ ] Does it add developer instrumentation to a user-facing screen? Gate it: `BuildConfig.DEBUG`
       on Android, `#if DEBUG` on iOS.
+- [ ] **Does it add a second control that does what another control on the same screen already
+      does?** The Explore feed had two: an empty-state button and the FAB, both posting the same
+      thing. An empty state should explain the emptiness, and point somewhere the primary action
+      does not already go.
 
 ### Known, accepted gaps
 
