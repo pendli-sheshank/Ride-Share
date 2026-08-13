@@ -117,8 +117,12 @@ not evidence. Verify against a build.
   fix is a Cloud Function with the Admin SDK; there is no `functions/` directory yet.
 - **The Firestore rules have never been executed anywhere.** No CI job exercises them and there is
   no emulator setup. Validate against a throwaway project before pointing the live one at them.
-- The logo drawable still renders the old brand name — the artwork needs replacing, not just the
-  filename.
+- **The launcher icon is real artwork now; the in-app logo is not.** Both platforms' launcher
+  icons are generated from `assets/app-icon-source.png` by `scripts/generate-app-icon.py` (run it
+  after replacing the source; it rewrites all 33 files and is byte-stable). But
+  `R.drawable.ic_launcher_foreground` is still the old placeholder vector, and it is still what
+  Android draws while a profile image loads or fails — see `SplitCruiserApp.kt:6692`. Replacing
+  that is a separate change.
 - **Device location is read natively on each platform, not in `:shared`** — `FusedLocationProvider`
   in `:app`, `CLLocationManager` in `iosApp/` — because `CLLocationManager` cannot be
   compile-checked on Linux, the same reason `KeychainStore` was deferred. Only the *ranking*

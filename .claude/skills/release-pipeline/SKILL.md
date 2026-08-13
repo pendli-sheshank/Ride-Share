@@ -751,9 +751,11 @@ clean and the problem surfaced only at upload — after a build number was consu
 `CFBundleIconName` is *emitted by actool* once it compiles a real icon; it was missing as a
 consequence of the empty catalog, not as a separate Info.plist omission. Fixing the images
 fixed that error too. Do not hand-write the key.
-**Fix:** `iosApp/generate-app-icons.py` renders all 18 slots (dependency-free — no Pillow in
+**Fix:** `scripts/generate-app-icon.py` renders all 18 slots (dependency-free — no Pillow in
 CI or the container; PNG encoding is ~15 lines of zlib). Icons are RGB with no alpha, because
-Apple rejects an App Store icon that has an alpha channel.
+Apple rejects an App Store icon that has an alpha channel. It renders **both** platforms from
+`assets/app-icon-source.png`; it replaced `iosApp/generate-app-icons.py`, which drew a flat
+two-colour glyph in code and would have silently overwritten the real artwork if re-run.
 **Guard added:** `.github/scripts/verify-app-icons.py <appiconset>` checks every declared file
 exists, that its pixel dimensions equal size x scale, and that the 1024 marketing icon has no
 alpha. Wired into `build-ios.yml` and into `ios-release.yml` *before* the build, so it costs
