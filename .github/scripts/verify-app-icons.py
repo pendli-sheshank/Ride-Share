@@ -89,7 +89,7 @@ def main(argv: list[str]) -> int:
         print(f"App icon check FAILED ({len(errors)} problem(s)) in {iconset}:")
         for err in errors:
             print(f"  - {err}")
-        print("\nRegenerate with: python3 iosApp/generate-app-icons.py")
+        print("\nRegenerate with: python3 scripts/generate-app-icon.py")
         return 1
 
     print(f"App icon check passed: {checked} icons present and correctly sized.")

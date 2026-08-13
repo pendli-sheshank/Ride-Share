@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      The app icon artwork's own background, sampled from it. It backs the adaptive icon so the
+      area a launcher's mask reveals outside the badge is the icon's navy rather than a white or
+      themed plate. Generated assets and this value both come from assets/app-icon-source.png —
+      see scripts/generate-app-icon.py.
+    -->
+    <color name="ic_launcher_navy">#FF091B4E</color>
+</resources>

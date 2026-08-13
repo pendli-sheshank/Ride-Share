@@ -23,3 +23,7 @@ debug.keystore
 status.json
 archived-tasks.json
 session-end-summary.txt
+
+# Python bytecode
+__pycache__/
+*.pyc
