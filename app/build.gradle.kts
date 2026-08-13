@@ -51,7 +51,12 @@ android {
   buildTypes {
     release {
       isCrunchPngs = false
-      isMinifyEnabled = false
+      // Minify + shrink the release build. Previously false, which made `proguardFiles` inert and
+      // shipped a fully symbolised AAB — class names, Firebase identifiers and all app logic
+      // readable straight out of the artifact. See proguard-rules.pro for the keeps that protect
+      // kotlinx.serialization and Ktor under obfuscation.
+      isMinifyEnabled = true
+      isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       if (releaseKeystorePath != null) {
         signingConfig = signingConfigs.getByName("release")

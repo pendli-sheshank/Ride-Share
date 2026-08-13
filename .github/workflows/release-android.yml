@@ -53,7 +53,7 @@ jobs:
 
       # Installs cmdline-tools and puts sdkmanager on PATH. The runner image ships an SDK
       # but not sdkmanager itself, so calling it directly fails with exit 127.
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
         with:
           packages: 'platforms;android-36 build-tools;36.0.0'
 
@@ -130,7 +130,10 @@ jobs:
 
       - name: Publish to Play internal testing
         if: env.HAS_PLAY_SERVICE_ACCOUNT == 'true' && env.HAS_KEYSTORE == 'true' && (github.event_name == 'push' || inputs.publish)
-        uses: r0adkll/upload-google-play@v1.1.3
+        # Pinned to a commit SHA, not the mutable v1.1.3 tag: this step is handed the Play
+        # service-account JSON (the highest-value secret in the repo), so the action code it runs
+        # must not be able to change under a re-pointed tag.
+        uses: r0adkll/upload-google-play@935ef9c68bb393a8e6116b1575626a7f5be3a7fb # v1.1.3
         with:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
           packageName: com.splitcruiser.app

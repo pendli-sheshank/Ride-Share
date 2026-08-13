@@ -77,7 +77,9 @@ final class AppViewModel: ObservableObject {
     init() {
         repository = SplitCruiserRepository(
             config: FirebaseConfig.companion.fromBuild(),
-            store: UserDefaultsStore()
+            // Keychain-backed: the session (with the long-lived refresh token) is stored in the
+            // Keychain, not a plaintext plist that ends up in unencrypted backups.
+            store: KeychainStore()
         )
 
         subscriptions.append(repository.observeCurrentUser { [weak self] user in

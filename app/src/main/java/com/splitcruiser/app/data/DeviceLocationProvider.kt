@@ -25,10 +25,13 @@ import kotlin.coroutines.resume
  */
 object DeviceLocationProvider {
 
-    /** What the permission launcher should request. Coarse alone is enough to rank suggestions. */
+    /**
+     * What the permission launcher should request. Coarse alone is enough to rank suggestions, and
+     * it is the only location permission declared in the manifest — requesting FINE here as well
+     * would silently no-op (an undeclared runtime permission is never granted) and over-ask.
+     */
     val PERMISSIONS = arrayOf(
         Manifest.permission.ACCESS_COARSE_LOCATION,
-        Manifest.permission.ACCESS_FINE_LOCATION,
     )
 
     fun hasPermission(context: Context): Boolean = PERMISSIONS.any { permission ->

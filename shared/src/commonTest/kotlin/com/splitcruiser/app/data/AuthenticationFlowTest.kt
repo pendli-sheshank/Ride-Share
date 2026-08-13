@@ -102,18 +102,10 @@ class AuthenticationFlowTest {
         assertTrue(completeUser.avatarUrl.isNotEmpty())
     }
 
-    @Test
-    fun testCredentialStorage() {
-        val credential = LocalCredential(
-            email = "user@example.com",
-            password = "hashed_password_value",
-            userId = "user_123"
-        )
-
-        assertEquals("user@example.com", credential.email)
-        assertTrue(credential.password.isNotEmpty())
-        assertEquals("user_123", credential.userId)
-    }
+    // Removed testCredentialStorage: the LocalCredential(email, password, userId) model it exercised
+    // was dead — a leftover of the removed plaintext-JSON auth fallback. It was still @Serializable,
+    // so nothing stopped a future caller from round-tripping a cleartext password into Firestore.
+    // Auth now runs entirely through Firebase Identity Toolkit; there is no local credential store.
 
     @Test
     fun testRatingInitialization() {

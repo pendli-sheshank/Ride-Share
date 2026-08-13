@@ -8,6 +8,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.serializer
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 /**
@@ -281,6 +282,19 @@ class FirestoreCodecTest {
             """{ "hostRating": { "integerValue": "5" } }"""
         ).jsonObject
         assertEquals(5.0f, FirestoreCodec.decode(serializer<TripOffer>(), fields).hostRating)
+    }
+
+    @Test
+    fun aStringFieldArrivingAsANumberIsRejectedNotCoerced() {
+        // Security regression (M4): the codec's Json used to be `isLenient = true`, which let a value
+        // stored under the wrong Firestore type coerce into the model — a `stringValue`-typed field
+        // arriving as an `integerValue` became "5" instead of being rejected. With several
+        // collections writable by non-owners, that silent coercion was a type-confusion foothold.
+        // A strict decode now rejects the malformed document.
+        val fields = Json.parseToJsonElement(
+            """{ "id": { "integerValue": "5" } }"""
+        ).jsonObject
+        assertFailsWith<Exception> { FirestoreCodec.decode(serializer<TripOffer>(), fields) }
     }
 
     private inline fun <reified T> roundTrip(value: T): T =

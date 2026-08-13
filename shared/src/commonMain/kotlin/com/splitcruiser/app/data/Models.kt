@@ -48,13 +48,6 @@ data class ContactDetails(
 }
 
 @Serializable
-data class LocalCredential(
-    val email: String = "",
-    val password: String = "",
-    val userId: String = ""
-)
-
-@Serializable
 data class Vehicle(
     val ownerId: String = "",
     val make: String = "",
@@ -272,6 +265,22 @@ data class Block(
     val id: String = "",
     val userId: String = "",
     val blockedUserId: String = ""
+)
+
+/**
+ * A report that another user did not show up for a shared ride.
+ *
+ * One immutable document per (reporter, target) pair. The `aggregateNoShow` Cloud Function counts
+ * these with the Admin SDK and writes the target's `noShowCount`; clients can no longer write that
+ * counter directly. The field set is fixed by the `no_show_reports` security rule
+ * (`keys().hasOnly([...])`), so do not add fields here without updating the rule.
+ */
+@Serializable
+data class NoShowReport(
+    val id: String = "",
+    val reporterId: String = "",
+    val targetId: String = "",
+    val timestamp: Long = 0L
 )
 
 @Serializable

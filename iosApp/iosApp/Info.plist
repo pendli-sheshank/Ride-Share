@@ -62,16 +62,7 @@
 	</array>
 	<key>UIUserInterfaceStyle</key>
 	<string>Light</string>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>This app needs local network access</string>
-	<key>NSBonjourServices</key>
-	<array>
-		<string>_http._tcp</string>
-		<string>_https._tcp</string>
-	</array>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Split Cruiser needs your location to show nearby rides</string>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Split Cruiser needs your location to show nearby rides</string>
 </dict>
 </plist>

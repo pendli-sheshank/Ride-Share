@@ -11,6 +11,7 @@ import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import io.ktor.http.encodeURLParameter
 import io.ktor.http.isSuccess
 import io.ktor.http.parameters
 import kotlinx.serialization.SerialName
@@ -50,7 +51,11 @@ internal class FirebaseAuthClient(
             contentType(ContentType.Application.Json)
             setBody(
                 IdpRequest(
-                    postBody = "id_token=$googleIdToken&providerId=google.com",
+                    // URL-encode the token before splicing it into the form-encoded postBody. A raw
+                    // `&` or `=` in the value would otherwise inject extra postBody parameters (e.g.
+                    // an attacker-chosen providerId). Real Google JWTs are base64url and wouldn't
+                    // today, but concatenating untrusted input into a form string is the bug class.
+                    postBody = "id_token=${googleIdToken.encodeURLParameter()}&providerId=google.com",
                     requestUri = "http://localhost",
                 ),
             )

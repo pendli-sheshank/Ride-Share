@@ -33,3 +33,19 @@ internal expect fun logDebug(tag: String, message: String)
 internal expect fun logWarn(tag: String, message: String, error: Throwable?)
 
 internal const val LOG_TAG: String = "SplitCruiser"
+
+/**
+ * Redacts credentials from anything about to be logged.
+ *
+ * The values that reach a log are static messages plus, on warnings, an exception. A Ktor exception
+ * carries the failed request URL in its message, and Firebase's Identity Toolkit and SecureToken
+ * endpoints put the API key in a `?key=…` query parameter (and the Google sign-in body an
+ * `id_token=…`). Passing such a throwable straight to `Log.w`/`NSLog` would surface those in logcat
+ * or the iOS unified log, both readable off-device in the wrong hands. The platform log sinks route
+ * every message and exception string through here first.
+ */
+internal fun scrubSensitive(text: String): String =
+    SENSITIVE_PARAM.replace(text) { "${it.groupValues[1]}=REDACTED" }
+
+private val SENSITIVE_PARAM =
+    Regex("(?i)(key|password|access_token|refresh_token|id_token|token)=([^&\\s\"')]+)")

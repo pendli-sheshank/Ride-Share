@@ -26,7 +26,7 @@ import com.splitcruiser.app.data.blockUserResult
 import com.splitcruiser.app.data.confirmPickupProposalResult
 import com.splitcruiser.app.data.createUserProfileResult
 import com.splitcruiser.app.data.fetchMyTripsFromFirestore
-import com.splitcruiser.app.data.firebase.SharedPreferencesStore
+import com.splitcruiser.app.data.firebase.EncryptedSharedPreferencesStore
 import com.splitcruiser.app.data.joinTripOfferDirectResult
 import com.splitcruiser.app.data.logInWithEmailResult
 import com.splitcruiser.app.data.offerSeatForRequestResult
@@ -59,7 +59,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     val repository = SplitCruiserRepository(
         FirebaseConfig.fromBuild(),
-        SharedPreferencesStore(application.applicationContext),
+        // Keystore-backed: the session (with the long-lived refresh token) is encrypted at rest.
+        EncryptedSharedPreferencesStore(application.applicationContext),
     )
 
     // --- State streams mapped from the repository ---

@@ -101,7 +101,6 @@ once they exist.
 | `ANDROID_KEY_ALIAS` | key alias; defaults to `upload` if unset |
 | `PLAY_SERVICE_ACCOUNT_JSON` | full service-account JSON, raw (not base64) |
 | `GOOGLE_SERVICES_JSON` | contents of `google-services.json` (optional but recommended) |
-| `GEMINI_API_KEY` | → `.env` → `BuildConfig.GEMINI_API_KEY` |
 
 ### Firebase — used by **both** platforms
 
@@ -1314,6 +1313,30 @@ ever have been caught by `build-ios.yml`'s "Validate Swift syntax" step, which r
 wraps the whole thing in `|| true` besides. The only thing that has ever exercised these lines
 for real is `xcodebuild archive`, and until this change that only ran when someone remembered to
 `workflow_dispatch` it.
+
+### 2026-08-13 — security-audit hardening of the release workflows
+**Not a failure — hardening applied during a repo-wide security audit, recorded here so the next
+person understands why these lines look the way they do.**
+- **Third-party actions pinned to commit SHAs.** `r0adkll/upload-google-play` (release-android.yml)
+  is handed `PLAY_SERVICE_ACCOUNT_JSON`, the highest-value secret in the repo, and
+  `android-actions/setup-android` (ci.yml, release-android.yml) runs in the same job as the keystore
+  and Play secrets. A version tag like `v1.1.3` is mutable — whoever controls the action repo can
+  repoint it. Both are now pinned as `owner/action@<sha> # <tag>`. When bumping, resolve the new tag
+  with `git ls-remote https://github.com/<owner>/<action> refs/tags/<tag>` and update the SHA and the
+  trailing tag comment together.
+- **Release IPA artifact retention cut 30 → 1 day.** `ios-release.yml` uploads a *distribution-signed*
+  IPA, downloadable by anyone with repo read access. The build has already gone to TestFlight, so the
+  artifact is only a short debugging convenience; keep the exposure window small.
+- **Removed the stale `GEMINI_API_KEY → BuildConfig.GEMINI_API_KEY` secret row from §3.** No workflow
+  writes it and no code reads it. Following it would have baked a genuine server-side API key into the
+  APK — the opposite of what the row implied. If a Gemini key is ever actually needed, it belongs
+  behind a backend, never in `BuildConfig`.
+
+### Not fixable in CI, flagged for the maintainer
+- **The Firestore/Storage rules are still never executed by any job.** This audit rewrote them
+  (tighter authorization, input validation) but there is no emulator or `firebase emulators:exec`
+  rules-test job, so a rules regression cannot be caught before it reaches the live project. Validate
+  against a throwaway Firebase project before deploying, and consider adding a rules-test job.
 
 ---
 
