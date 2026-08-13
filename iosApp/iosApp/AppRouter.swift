@@ -55,10 +55,14 @@ enum RideMode: String, CaseIterable {
     }
 
     /// The label on the extended FAB.
+    ///
+    /// Spelled out, because which of the two things it posts is the whole confusion: in
+    /// "Find a ride" it creates a *request*, which hosts answer from "Give a ride" — it does not
+    /// add anything to the offers list directly above it.
     var actionLabel: String {
         switch self {
-        case .rider: return "Post Request"
-        case .host: return "Post Offer"
+        case .rider: return "Post a ride request"
+        case .host: return "Post a ride offer"
         }
     }
 }

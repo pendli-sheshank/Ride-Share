@@ -511,34 +511,6 @@ struct BrandFilterChip: View {
     }
 }
 
-/// The quick-place chips under the filter row ("Snell", "Airport", …).
-struct QuickPlaceChip: View {
-    let label: String
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                Image(systemName: "mappin.and.ellipse")
-                    .font(.system(size: 12))
-                Text(label)
-                    .font(BrandFont.eyebrow(.semibold))
-            }
-            .foregroundColor(isSelected ? Brand.success : Brand.textSecondary)
-            .padding(.horizontal, BrandScale.spaceMd)
-            .padding(.vertical, 6)
-            .background(isSelected ? Brand.success.opacity(0.25) : Brand.surfaceCard)
-            .cornerRadius(BrandScale.radiusMd)
-            .overlay(
-                RoundedRectangle(cornerRadius: BrandScale.radiusMd)
-                    .stroke(isSelected ? Brand.success : Brand.outline, lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-    }
-}
-
 // MARK: - Debug instrumentation
 
 /// Backend connectivity, in debug builds only.

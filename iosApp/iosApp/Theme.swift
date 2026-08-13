@@ -51,7 +51,6 @@ enum BrandLiteral {
     static let destinationOrange = Color(argb: Int64(0xFFF9_7316))
     static let seatsViolet = Color(argb: Int64(0xFF8B_5CF6))
     static let notesTeal = Color(argb: Int64(0xFF14_B8A6))
-    static let heroEyebrow = Color(argb: Int64(0xFFF5_9E0B))
     static let osmSuggestion = Color(argb: Int64(0xFF38_BDF8))
     static let neighborhood = Color(argb: Int64(0xFFA8_55F7))
 }

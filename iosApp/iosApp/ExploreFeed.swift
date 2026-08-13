@@ -14,9 +14,12 @@ struct PresentedOffer: Identifiable {
 
 // MARK: - Explore
 
-/// The browse feed: hero banner, active coordination, search, filters and the cards.
+/// The browse feed: active coordination, search, filters and the cards.
 struct ExploreFeed: View {
     let onJoined: (TripOffer) -> Void
+    /// Switches the dashboard to My trips. The tab selection lives in `ContentView`, and the empty
+    /// states point there rather than repeating the post button already on screen.
+    let onShowTrips: () -> Void
 
     @EnvironmentObject private var viewModel: AppViewModel
     @EnvironmentObject private var router: AppRouter
@@ -31,17 +34,12 @@ struct ExploreFeed: View {
         case withSeats = "With Seats"
     }
 
-    private static let quickPlaces = [
-        "Snell", "Airport", "Ruggles", "South Station", "Harvard", "Mission Hill",
-    ]
-
     var body: some View {
         GeometryReader { proxy in
             let isWide = proxy.size.width >= 500
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: BrandScale.spaceMd) {
-                    heroBanner
                     activeCoordination
                     Text(viewModel.mode == .rider ? "Trip Offers Near You" : "Local Ride Requests")
                         .font(BrandFont.title(.black))
@@ -62,40 +60,6 @@ struct ExploreFeed: View {
             .background(Brand.surface)
             .scrollContentBackground(.hidden)
         }
-    }
-
-    // MARK: Hero
-
-    private var heroBanner: some View {
-        ZStack(alignment: .bottomLeading) {
-            Image("CarpoolBanner")
-                .resizable()
-                .scaledToFill()
-                .frame(height: 140)
-                .clipped()
-
-            LinearGradient(
-                colors: [.clear, .black.opacity(0.8)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(viewModel.mode == .rider
-                     ? "Direct cost splitting with host"
-                     : "Fill empty seats & share gas cost")
-                    .font(BrandFont.eyebrow(.bold))
-                    .foregroundColor(BrandLiteral.heroEyebrow)
-                Text(viewModel.mode == .rider
-                     ? "Select a host to split cash"
-                     : "Accept ride requests on your route")
-                    .font(BrandFont.title(.black))
-                    .foregroundColor(.white)
-            }
-            .padding(BrandScale.spaceLg)
-        }
-        .frame(height: 140)
-        .cornerRadius(BrandScale.radiusLg)
     }
 
     // MARK: Active coordination
@@ -166,26 +130,29 @@ struct ExploreFeed: View {
     private func riderFeed(isWide: Bool) -> some View {
         searchField
         filterChips
-        quickPlaceChips
 
         let offers = filteredOffers
 
         if viewModel.activeOffers.isEmpty && viewModel.isRefreshing {
             FeedLoadingSkeleton()
         } else if viewModel.activeOffers.isEmpty {
+            // Naming the two reasons this list can be empty right after posting a ride: your own
+            // rides are filtered out of the browse feed (you cannot book your own seat), and the
+            // post button on this tab creates a *request*, which hosts answer from "Give a ride".
+            // Unexplained, posting a ride and then reading "no offers" looks like a broken app.
             BrandEmptyState(
                 icon: "car.fill",
-                title: "No Active Offers Yet",
-                description: "Nobody has posted a ride on your route yet. Post a request and hosts will come to you.",
-                actionLabel: "Post Ride Request",
-                action: { router.push(.postRequest) }
+                title: "No rides posted yet",
+                description: "Nobody else has offered a ride yet. Rides you post yourself don't show up here — they're under My trips.",
+                actionLabel: "Go to My trips",
+                action: { onShowTrips() }
             )
         } else if offers.isEmpty {
             BrandEmptyState(
                 icon: "magnifyingglass",
-                title: "No Matching Offers",
-                description: "Nothing matches those filters. Try clearing them to see every open ride.",
-                actionLabel: "Clear Filters",
+                title: "No rides match those filters",
+                description: "There are rides on offer, but none matching your search. Clear the filters to see all of them.",
+                actionLabel: "Clear filters",
                 action: {
                     search = ""
                     filter = .all
@@ -243,20 +210,9 @@ struct ExploreFeed: View {
         }
     }
 
-    private var quickPlaceChips: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: BrandScale.spaceSm) {
-                ForEach(Self.quickPlaces, id: \.self) { place in
-                    QuickPlaceChip(
-                        label: place,
-                        isSelected: search.localizedCaseInsensitiveContains(place)
-                    ) {
-                        search = search.localizedCaseInsensitiveContains(place) ? "" : place
-                    }
-                }
-            }
-        }
-    }
+    // The quick-place chips that sat here — Snell, Ruggles, Mission Hill, Harvard, South Station —
+    // are gone. They hardcoded one university's neighbourhood into a product open to anyone, and
+    // all they did was type a word into the search field above.
 
     private var filteredOffers: [TripOffer] {
         viewModel.activeOffers.filter { offer in
@@ -303,12 +259,15 @@ struct ExploreFeed: View {
         if viewModel.activeRequests.isEmpty && viewModel.isRefreshing {
             FeedLoadingSkeleton()
         } else if viewModel.activeRequests.isEmpty {
+            // Same rule as the rider side: no post button here, because the one at the bottom of
+            // the screen already does it and two controls for one action is what made this
+            // confusing.
             BrandEmptyState(
                 icon: "person.2.fill",
-                title: "No Open Requests",
-                description: "No riders are looking for a seat right now. Post an offer and they will find you.",
-                actionLabel: "Post Trip Offer",
-                action: { router.push(.postOffer) }
+                title: "No open requests",
+                description: "Nobody has asked for a ride yet. Requests you post yourself don't show up here — they're under My trips.",
+                actionLabel: "Go to My trips",
+                action: { onShowTrips() }
             )
         } else {
             ForEach(viewModel.activeRequests, id: \.id) { request in
