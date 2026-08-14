@@ -80,6 +80,15 @@ class OsmLocationService(engine: HttpClientEngine?) {
             } else {
                 ""
             }
+            // No `osm_tag` filter is sent, on purpose. In Photon `osm_tag` is a whitelist: adding
+            // e.g. `osm_tag=amenity` (or `place:house`) would return ONLY that tag and hide every
+            // other kind of result. Sending no tag is what lets a single query return both
+            // commercial places (shops, amenities) AND residential house-number addresses — a
+            // rideshare pickup/drop-off is just as often someone's home as a landmark. Residential
+            // results are never dropped here; when they look "missing" it is because Photon orders
+            // by OSM importance, which buries a house behind same-named cities. That is handled by
+            // over-fetching CANDIDATE_LIMIT and re-ranking nearest-first in [searchPlacesRanked],
+            // not by tag filtering.
             val url = "https://photon.komoot.io/api/?q=${query.trim().encodeURLParameter()}" +
                 "&limit=$limit&lang=en$bias"
             val response = http.get(url) { header("User-Agent", OSM_USER_AGENT) }
