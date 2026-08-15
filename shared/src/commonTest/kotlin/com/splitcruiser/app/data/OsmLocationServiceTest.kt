@@ -102,6 +102,45 @@ class OsmLocationServiceTest {
         assertEquals("", results.single().distanceText, "no anchor means no distance to show")
     }
 
+    /**
+     * The residential-address bug: the wide over-fetch used to be gated on having a location fix, so
+     * a user who denied location got back only DISPLAY_LIMIT results in Photon's importance order —
+     * which never contains a residential address. The wide fetch must run with no fix too.
+     */
+    @Test
+    fun theRankedSearchWithNoFixStillAsksForTheWideCandidateSet() = runTest {
+        var url = ""
+        val service = service { url = it.url.toString() }
+
+        service.searchPlacesRanked("Maryland", 8, fromLat = 0.0, fromLon = 0.0)
+
+        assertTrue(
+            url.contains("limit=${OsmLocationService.CANDIDATE_LIMIT}"),
+            "even without a location fix the fetch must be the candidate limit, not the display limit — got $url",
+        )
+    }
+
+    @Test
+    fun aHouseNumberInThePropertiesIsFlaggedAsAPreciseAddress() = runTest {
+        val houseResponse = """
+            {"features":[{
+                "geometry":{"coordinates":[-71.0881, 42.3383]},
+                "properties":{"housenumber":"340","street":"Huntington Avenue","city":"Boston","type":"house"}
+            }]}
+        """.trimIndent()
+        val engine = MockEngine {
+            respond(
+                content = ByteReadChannel(houseResponse),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, "application/json"),
+            )
+        }
+        val results = OsmLocationService(engine).autocompletePhoton("340 Huntington", 8)
+
+        assertEquals(1, results.size)
+        assertTrue(results.single().hasHouseNumber, "a feature with a housenumber is a precise street address")
+    }
+
     @Test
     fun theRankedSearchMeasuresFromTheAnchor() = runTest {
         val service = service { }
