@@ -24,6 +24,13 @@ data class PhotonPlaceResult(
     val lat: Double,
     val lon: Double,
     val type: String,
+    /**
+     * True when Photon returned a house number for this feature, i.e. it is a precise street
+     * address rather than a named POI. Used by [PlaceRanking] to surface residential addresses,
+     * which Photon otherwise buries under higher-importance places. Defaulted so existing callers
+     * and tests that build a result by name keep compiling.
+     */
+    val hasHouseNumber: Boolean = false,
 )
 
 data class NominatimReverseResult(
@@ -131,6 +138,7 @@ class OsmLocationService(engine: HttpClientEngine?) {
                     lat = lat,
                     lon = lon,
                     type = type,
+                    hasHouseNumber = houseNumber.isNotBlank(),
                 )
             }
         }.onFailure { logWarn(LOG_TAG, "Photon place search failed", it) }.getOrDefault(emptyList())
@@ -143,13 +151,25 @@ class OsmLocationService(engine: HttpClientEngine?) {
     /**
      * Address suggestions ordered nearest-first from ([fromLat], [fromLon]).
      *
-     * Fetches [CANDIDATE_LIMIT] rather than the [limit] actually shown, because Photon orders by OSM
-     * importance: asking for 8 and displaying 8 meant a house-number address lost its place to every
-     * city and county with a similar name, and the address the user was typing never arrived. The
-     * wide set is then ordered by real distance and cut back down.
+     * Always fetches [CANDIDATE_LIMIT] rather than the [limit] actually shown, because Photon orders
+     * by OSM importance: asking for 8 and displaying 8 meant a house-number address lost its place to
+     * every city and county with a similar name, and the address the user was typing never arrived.
+     * The wide set is then re-ranked here and cut back down.
+     *
+     * The wide fetch runs **whether or not there is a location fix**. It used to be gated on an
+     * anchor, so a user who denied location (or whose fix had not arrived, or on an emulator) fell
+     * back to fetching only 8 in Photon's raw importance order — which never contains residential
+     * addresses, since houses rank far below every named POI. That was the "I still can't see
+     * residential addresses" bug.
+     *
+     * When the query contains a digit the user is typing a street address, so [PlaceRanking] lifts
+     * results that carry a house number to the top ([PhotonPlaceResult.hasHouseNumber]); Photon
+     * would otherwise bury the exact address the user is spelling out under nearer or more
+     * "important" POIs. Commercial places still appear, just below the precise address matches.
      *
      * Pass `0.0, 0.0` for the anchor when there is no location fix; results come back in Photon's
-     * own order with no distance text, rather than sorted against a meaningless point.
+     * own order (address-first when applicable) with no distance text, rather than sorted against a
+     * meaningless point.
      */
     suspend fun searchPlacesRanked(
         query: String,
@@ -161,12 +181,13 @@ class OsmLocationService(engine: HttpClientEngine?) {
         val candidates = if (anchored) {
             fetchAutocomplete(query, CANDIDATE_LIMIT, fromLat, fromLon)
         } else {
-            fetchAutocomplete(query, limit, null, null)
+            fetchAutocomplete(query, CANDIDATE_LIMIT, null, null)
         }
+        val preferAddresses = query.any { it.isDigit() }
         return if (anchored) {
-            PlaceRanking.rankByDistance(candidates, fromLat, fromLon, limit)
+            PlaceRanking.rankByDistance(candidates, fromLat, fromLon, limit, preferAddresses)
         } else {
-            PlaceRanking.unranked(candidates, limit)
+            PlaceRanking.unranked(candidates, limit, preferAddresses)
         }
     }
 

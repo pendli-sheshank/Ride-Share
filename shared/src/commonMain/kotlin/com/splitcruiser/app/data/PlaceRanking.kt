@@ -20,6 +20,8 @@ data class RankedPlace(
     val distanceMiles: Double,
     /** "0.4 mi away". Empty when [distanceMiles] is unknown, so the UI can simply omit the row. */
     val distanceText: String,
+    /** Carried from [PhotonPlaceResult.hasHouseNumber]: a precise street address vs a named POI. */
+    val hasHouseNumber: Boolean = false,
 )
 
 /**
@@ -46,8 +48,9 @@ object PlaceRanking {
         fromLat: Double,
         fromLon: Double,
         limit: Int,
+        preferAddresses: Boolean = false,
     ): List<RankedPlace> {
-        if (!isUsableCoordinate(fromLat, fromLon)) return unranked(results, limit)
+        if (!isUsableCoordinate(fromLat, fromLon)) return unranked(results, limit, preferAddresses)
 
         return results
             .map { place ->
@@ -59,15 +62,40 @@ object PlaceRanking {
                 }
                 place.ranked(miles)
             }
-            // Unknown distances last, then nearest first. A stable sort, so Photon's own relevance
+            // Precise street addresses first when the user is typing one ([preferAddresses]), then
+            // unknown distances last, then nearest first. A stable sort, so Photon's own relevance
             // order still breaks ties between two places the same distance away.
-            .sortedWith(compareBy({ it.distanceMiles < 0.0 }, { it.distanceMiles }))
+            .sortedWith(
+                compareBy(
+                    { preferAddresses && !it.hasHouseNumber },
+                    { it.distanceMiles < 0.0 },
+                    { it.distanceMiles },
+                ),
+            )
             .take(limit)
     }
 
-    /** The same shape with no anchor — what the UI shows before a location fix arrives. */
-    fun unranked(results: List<PhotonPlaceResult>, limit: Int): List<RankedPlace> =
-        results.take(limit).map { it.ranked(UNKNOWN_DISTANCE) }
+    /**
+     * The same shape with no anchor — what the UI shows before a location fix arrives.
+     *
+     * With [preferAddresses] the precise street-address results (those carrying a house number) are
+     * lifted to the front while everything else keeps Photon's own importance order. Without it, the
+     * order is left entirely to Photon. Either way the sort is stable, so relative order is
+     * preserved within each group. This is what lets a residential address the user is typing appear
+     * even when there is no location fix to rank against — the case that hid houses entirely before.
+     */
+    fun unranked(
+        results: List<PhotonPlaceResult>,
+        limit: Int,
+        preferAddresses: Boolean = false,
+    ): List<RankedPlace> {
+        val ordered = if (preferAddresses) {
+            results.sortedBy { !it.hasHouseNumber }
+        } else {
+            results
+        }
+        return ordered.take(limit).map { it.ranked(UNKNOWN_DISTANCE) }
+    }
 
     private fun PhotonPlaceResult.ranked(miles: Double) = RankedPlace(
         name = name,
@@ -80,6 +108,7 @@ object PlaceRanking {
         type = type,
         distanceMiles = miles,
         distanceText = if (miles < 0.0) "" else "${GeoUtils.formatMiles(miles)} away",
+        hasHouseNumber = hasHouseNumber,
     )
 
     /**
