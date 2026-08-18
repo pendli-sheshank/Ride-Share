@@ -35,7 +35,18 @@ data class FirebaseConfig(
      * `FIRESTORE_DATABASE_ID=(default)`.
      */
     val firestoreDatabaseId: String = "splitcruiser",
+    /**
+     * Google Places (New) API key for address autocomplete, or empty to use the free Photon/OSM
+     * search instead. Metered when set: every autocomplete and place-details call is billed, which
+     * is why the empty-key fallback exists and is the default. Consumed only by the location search
+     * layer ([com.splitcruiser.app.data.OsmLocationService]), never by any Firebase endpoint.
+     */
+    val mapsApiKey: String = "",
 ) {
+    /** Whether Google Places autocomplete is configured. When false, address search uses Photon. */
+    val isMapsAutocompleteEnabled: Boolean
+        get() = mapsApiKey.isNotBlank() && !mapsApiKey.contains("PLACEHOLDER")
+
     /**
      * False when a value is missing or is still the placeholder committed in `.env.example`.
      *
@@ -81,6 +92,7 @@ data class FirebaseConfig(
             storageBucket = FirebaseBuildConfig.STORAGE_BUCKET,
             googleWebClientId = FirebaseBuildConfig.GOOGLE_WEB_CLIENT_ID,
             firestoreDatabaseId = FirebaseBuildConfig.FIRESTORE_DATABASE_ID,
+            mapsApiKey = FirebaseBuildConfig.MAPS_API_KEY,
         )
     }
 }

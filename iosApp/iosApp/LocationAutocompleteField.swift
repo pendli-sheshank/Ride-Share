@@ -25,6 +25,13 @@ struct PlaceSuggestion: Identifiable {
     let lon: Double
     /// "0.4 mi away", or empty when there was no location to measure from.
     let distanceText: String
+    /// Google prediction id + session token, empty for a Photon result or seed place. When set with
+    /// `lat`/`lon` still 0, the coordinates are fetched on selection (a Place Details call).
+    let providerId: String
+    let sessionToken: String
+
+    /// A Google prediction that still needs its coordinates fetched before it can be used.
+    var needsResolution: Bool { !providerId.isEmpty && lat == 0.0 && lon == 0.0 }
 
     init(_ ranked: RankedPlace) {
         name = ranked.name
@@ -33,6 +40,8 @@ struct PlaceSuggestion: Identifiable {
         lat = ranked.lat
         lon = ranked.lon
         distanceText = ranked.distanceText
+        providerId = ranked.providerId
+        sessionToken = ranked.sessionToken
     }
 
     init(_ place: LocationPlace) {
@@ -42,6 +51,8 @@ struct PlaceSuggestion: Identifiable {
         lat = place.lat
         lon = place.lng
         distanceText = ""
+        providerId = place.providerId
+        sessionToken = place.sessionToken
     }
 
     /// The tile Android draws beside each result, by category.
@@ -307,11 +318,30 @@ struct LocationAutocompleteField: View {
 
     private func choose(_ place: PlaceSuggestion) {
         searchTask?.cancel()
-        selection = PlaceSelection(name: place.name, lat: place.lat, lon: place.lon)
         setQueryProgrammatically(place.name)
         results = []
         isShowingResults = false
         isSearching = false
+
+        // A Google prediction has no coordinates yet — resolve them with a Place Details call before
+        // recording the selection. A Photon result or seed place already has coordinates.
+        if place.needsResolution {
+            isSearching = true
+            Task {
+                let resolved = await viewModel.resolvePlace(
+                    providerId: place.providerId,
+                    sessionToken: place.sessionToken
+                )
+                isSearching = false
+                if let resolved {
+                    selection = PlaceSelection(name: place.name, lat: resolved.lat, lon: resolved.lon)
+                } else {
+                    viewModel.setError("Couldn't load that address — try another.")
+                }
+            }
+        } else {
+            selection = PlaceSelection(name: place.name, lat: place.lat, lon: place.lon)
+        }
     }
 
     private func setQueryProgrammatically(_ newValue: String) {

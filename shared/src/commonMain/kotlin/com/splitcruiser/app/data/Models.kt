@@ -309,7 +309,15 @@ data class LocationPlace(
     val address: String,
     val category: String, // "Campus", "Airport", "Transit", "Neighborhood", "Landmark"
     val lat: Double,
-    val lng: Double
+    val lng: Double,
+    /**
+     * Google Places prediction id, empty for a seed place or a Photon result. When set with
+     * [lat]/[lng] still `0.0`, the coordinates have not been fetched yet and the picker resolves them
+     * with `OsmLocationService.resolvePlace` on selection. See [RankedPlace.providerId].
+     */
+    val providerId: String = "",
+    /** The Google autocomplete session token this place belongs to. Empty off the Google path. */
+    val sessionToken: String = "",
 )
 
 val DEFAULT_LOCATION_PLACES = listOf(

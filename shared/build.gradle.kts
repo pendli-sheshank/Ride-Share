@@ -99,6 +99,11 @@ val googleWebClientId = providers.environmentVariable("GOOGLE_WEB_CLIENT_ID").or
 // *value*, below, with `ifBlank`, which catches both "absent" and "present but empty".
 val firestoreDatabaseId = providers.environmentVariable("FIRESTORE_DATABASE_ID").orElse("")
 
+// Google Places (New) autocomplete key. Optional: when empty, the location search falls back to the
+// free Photon/OSM path, so a build without this secret behaves exactly as before. Metered when set —
+// see OsmLocationService. Passed to the Gradle step by CI the same way as the FIREBASE_* secrets.
+val googleMapsApiKey = providers.environmentVariable("GOOGLE_MAPS_API_KEY").orElse("")
+
 val firebaseConfigDir: Provider<Directory> = layout.buildDirectory.dir("generated/firebaseConfig")
 
 val generateFirebaseConfig by tasks.registering {
@@ -107,6 +112,7 @@ val generateFirebaseConfig by tasks.registering {
   val storageBucket = firebaseStorageBucket
   val webClientId = googleWebClientId
   val databaseId = firestoreDatabaseId
+  val mapsApiKey = googleMapsApiKey
   val outputDir = firebaseConfigDir
 
   inputs.property("firebaseApiKey", apiKey)
@@ -114,6 +120,7 @@ val generateFirebaseConfig by tasks.registering {
   inputs.property("firebaseStorageBucket", storageBucket)
   inputs.property("googleWebClientId", webClientId)
   inputs.property("firestoreDatabaseId", databaseId)
+  inputs.property("googleMapsApiKey", mapsApiKey)
   outputs.dir(outputDir)
 
   doLast {
@@ -148,6 +155,7 @@ val generateFirebaseConfig by tasks.registering {
           const val STORAGE_BUCKET: String = ${quote(storageBucket.get())}
           const val FIRESTORE_DATABASE_ID: String = ${quote(databaseId.get().ifBlank { "splitcruiser" })}
           const val GOOGLE_WEB_CLIENT_ID: String = ${quote(webClientId.get())}
+          const val MAPS_API_KEY: String = ${quote(mapsApiKey.get())}
       }
       """.trimIndent() + "\n"
     )
