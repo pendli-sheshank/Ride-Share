@@ -4119,7 +4119,14 @@ fun PostOfferScreen(viewModel: MainViewModel, navController: NavController) {
                     }
                 )
 
-                GoogleMapsMatrixCard(origin = origin, destination = destination)
+                GoogleMapsMatrixCard(
+                    origin = origin,
+                    destination = destination,
+                    originLat = originLat,
+                    originLng = originLng,
+                    destLat = destLat,
+                    destLng = destLng,
+                )
             }
 
             Spacer(modifier = Modifier.height(SplitCruiserSpacing.Lg))
@@ -4482,7 +4489,14 @@ fun PostRequestScreen(viewModel: MainViewModel, navController: NavController) {
                     }
                 )
 
-                GoogleMapsMatrixCard(origin = origin, destination = destination)
+                GoogleMapsMatrixCard(
+                    origin = origin,
+                    destination = destination,
+                    originLat = originLat,
+                    originLng = originLng,
+                    destLat = destLat,
+                    destLng = destLng,
+                )
             }
 
             Spacer(modifier = Modifier.height(SplitCruiserSpacing.Lg))
@@ -4805,7 +4819,14 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                GoogleMapsMatrixCard(origin = offer.origin, destination = offer.destination)
+                GoogleMapsMatrixCard(
+                    origin = offer.origin,
+                    destination = offer.destination,
+                    originLat = offer.originLat,
+                    originLng = offer.originLng,
+                    destLat = offer.destLat,
+                    destLng = offer.destLng,
+                )
 
                 Spacer(modifier = Modifier.height(16.dp))
 
@@ -5482,7 +5503,14 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                GoogleMapsMatrixCard(origin = request.origin, destination = request.destination)
+                GoogleMapsMatrixCard(
+                    origin = request.origin,
+                    destination = request.destination,
+                    originLat = request.originLat,
+                    originLng = request.originLng,
+                    destLat = request.destLat,
+                    destLng = request.destLng,
+                )
 
                 Spacer(modifier = Modifier.height(16.dp))
 
@@ -8067,6 +8095,10 @@ fun LocationAutoCompleteTextField(
 fun GoogleMapsMatrixCard(
     origin: String,
     destination: String,
+    originLat: Double,
+    originLng: Double,
+    destLat: Double,
+    destLng: Double,
     modifier: Modifier = Modifier
 ) {
     var isLoading by remember { mutableStateOf(false) }
@@ -8133,43 +8165,47 @@ fun GoogleMapsMatrixCard(
                         isLoading = true
                         scope.launch {
                             try {
-                                val originResults = OsmLocationService.autocompletePhoton(origin, limit = 1)
-                                val destResults = OsmLocationService.autocompletePhoton(destination, limit = 1)
+                                // Use the coordinates and addresses the user already selected — do
+                                // NOT re-geocode the text. The old code called
+                                // autocompletePhoton(origin, limit = 1) and took Photon's top hit,
+                                // which for a home-address string is the enclosing city ("Saint
+                                // Louis, Missouri"), so the card showed a different address than the
+                                // one entered and routed between city centroids. `origin` /
+                                // `destination` are exactly what the user typed/picked.
+                                val hasCoordinates = (originLat != 0.0 || originLng != 0.0) &&
+                                    (destLat != 0.0 || destLng != 0.0)
 
-                                if (originResults.isNotEmpty() && destResults.isNotEmpty()) {
-                                    val originPlace = originResults[0]
-                                    val destPlace = destResults[0]
-
+                                if (hasCoordinates) {
                                     // The shared service throws rather than returning Result, which
                                     // does not survive the Swift export; this is the null-returning
                                     // variant for callers that just want to skip the estimate.
                                     val route = OsrmRouteService.getRouteOrNull(
-                                        originLat = originPlace.lat,
-                                        originLon = originPlace.lon,
-                                        destLat = destPlace.lat,
-                                        destLon = destPlace.lon
+                                        originLat = originLat,
+                                        originLon = originLng,
+                                        destLat = destLat,
+                                        destLon = destLng
                                     )
 
                                     matrixResult = if (route != null) {
                                         MapsRouteMatrixResult(
                                             distanceText = route.distanceText,
                                             durationText = route.durationText,
-                                            routeSummary = "Route from ${originPlace.name} to ${destPlace.name}",
-                                            pickupRecommendation = originPlace.formattedAddress,
-                                            dropoffRecommendation = destPlace.formattedAddress,
-                                            universityContext = "Route between ${originPlace.city ?: "the area"} and ${destPlace.city ?: "the area"}",
+                                            routeSummary = "Route from $origin to $destination",
+                                            pickupRecommendation = origin,
+                                            dropoffRecommendation = destination,
+                                            universityContext = "Distance ${route.distanceText}, about ${route.durationText}",
                                             fullGroundedText = "Distance: ${route.distanceText}, Duration: ${route.durationText}"
                                         )
                                     } else {
-                                        val straightDist = GeoUtils.distanceInMiles(originPlace.lat, originPlace.lon, destPlace.lat, destPlace.lon)
+                                        val straightDist = GeoUtils.distanceInMiles(originLat, originLng, destLat, destLng)
                                         val estimatedTime = straightDist * 1.3
                                         MapsRouteMatrixResult(
                                             distanceText = "~%.1f mi".format(straightDist),
                                             durationText = "~%.0f min".format(estimatedTime),
-                                            routeSummary = "Estimated route from ${originPlace.name} to ${destPlace.name}",
-                                            pickupRecommendation = originPlace.formattedAddress,
-                                            dropoffRecommendation = destPlace.formattedAddress,
-                                            universityContext = "Route between ${originPlace.city ?: "the area"} and ${destPlace.city ?: "the area"}",
+                                            routeSummary = "Estimated route from $origin to $destination",
+                                            pickupRecommendation = origin,
+                                            dropoffRecommendation = destination,
+                                            universityContext = "Straight-line estimate; live route unavailable",
                                             fullGroundedText = "Estimated distance: ~%.1f mi".format(straightDist)
                                         )
                                     }
@@ -8177,11 +8213,11 @@ fun GoogleMapsMatrixCard(
                                     matrixResult = MapsRouteMatrixResult(
                                         distanceText = "Unknown",
                                         durationText = "Unknown",
-                                        routeSummary = "Could not find route from $origin to $destination",
+                                        routeSummary = "Route from $origin to $destination",
                                         pickupRecommendation = origin,
                                         dropoffRecommendation = destination,
-                                        universityContext = "Location search failed",
-                                        fullGroundedText = "Unable to geocode locations"
+                                        universityContext = "Pick both addresses from the suggestions to see a route",
+                                        fullGroundedText = "No coordinates for one of the addresses"
                                     )
                                 }
                             } catch (e: Exception) {
