@@ -131,6 +131,14 @@ jobs:
           if-no-files-found: warn
 
       - name: Publish to Play internal testing
+        id: play_publish
+        # TEMPORARY: non-blocking. Google Play is rejecting the commit with "all keys should be
+        # registered to meet the Android Developer Verification requirements" — a Play Console
+        # account/key-registration gate, not a build problem (the AAB builds and signs fine and is
+        # uploaded as a workflow artifact above). `continue-on-error` keeps a merge to main from
+        # showing a red release while that registration is completed in the Play Console. REMOVE this
+        # line once the signing key is registered, so a genuine publish failure fails the job again.
+        continue-on-error: true
         if: env.HAS_PLAY_SERVICE_ACCOUNT == 'true' && env.HAS_KEYSTORE == 'true' && (github.event_name == 'push' || inputs.publish)
         # Pinned to a commit SHA, not the mutable v1.1.3 tag: this step is handed the Play
         # service-account JSON (the highest-value secret in the repo), so the action code it runs
@@ -143,6 +151,21 @@ jobs:
           track: internal
           status: completed
           releaseName: ${{ env.VERSION_NAME }} (${{ env.VERSION_CODE }})
+
+      # Surfaces the outcome so a swallowed publish failure is still visible in the run, not silent.
+      - name: Note Play publish outcome
+        if: always() && steps.play_publish.outcome != ''
+        run: |
+          if [ "${{ steps.play_publish.outcome }}" = "success" ]; then
+            echo "✅ Published to Play internal testing (${VERSION_NAME} / ${VERSION_CODE})." >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "⚠️ **Play publish did not succeed** (build + signed AAB are fine and uploaded as an artifact)."
+              echo "This step is temporarily non-blocking while the signing key is registered for"
+              echo "Android Developer Verification in the Play Console. Remove \`continue-on-error\` from"
+              echo "the publish step once that is done."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       # always(), so the reason is still reported when an earlier step failed.
       - name: Explain skipped publish
