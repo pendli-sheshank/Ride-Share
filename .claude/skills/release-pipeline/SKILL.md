@@ -307,6 +307,26 @@ account state.
 
 Append-only log. Format: symptom as logged → cause → fix.
 
+### 2026-08-18 — Play publish fails: "all keys should be registered to meet the Android Developer Verification requirements"
+**Symptom:** `release-android.yml` → "Build AAB & publish to internal testing" is red. The Gradle
+build is `BUILD SUCCESSFUL`, the signed AAB uploads as an artifact, and the failure is only the
+final `r0adkll/upload-google-play` step, at "Committing the Edit":
+`##[error]To proceed with this release, all keys should be registered to meet the Android Developer
+Verification requirements.`
+**Cause:** a Play Console account/policy gate, **not** a build or code problem. Google's Android
+Developer Verification has two parts — identity verification *and* registering every signing key.
+Identity being verified is not enough; the app's signing key (the app-signing key held by Play App
+Signing, whose SHA-256 is on **Test and release → App integrity → App signing**) must also be
+registered under the verification requirements. Earlier releases published fine; Google enforced this
+after the fact, so it appeared on an unrelated merge.
+**Fix (Play Console, not the repo):** register the signing key's SHA-256 in the developer
+verification area. Nothing in Gradle/signing/the workflow is wrong — the artifact is valid.
+**Interim:** the publish step is marked `continue-on-error: true` so a merge to `main` does not show
+a red release while the key is being registered (the AAB still builds and uploads). A follow-up "Note
+Play publish outcome" step writes the outcome to the job summary so the swallowed failure stays
+visible. **Remove `continue-on-error` from the publish step once the key is registered**, so a real
+publish failure fails the job again.
+
 ### 2026-08-09 — a Swift type error reached `main` because no PR job compiled Swift
 **Cause:** `build-ios.yml`'s "Validate Swift syntax" step ran `swiftc -parse` per file and ended
 in `|| true`, so it could never fail. It could not have worked regardless: parsing one file at a
