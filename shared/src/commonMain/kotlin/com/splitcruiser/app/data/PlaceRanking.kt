@@ -22,6 +22,28 @@ data class RankedPlace(
     val distanceText: String,
     /** Carried from [PhotonPlaceResult.hasHouseNumber]: a precise street address vs a named POI. */
     val hasHouseNumber: Boolean = false,
+    /**
+     * Google Places prediction id, or empty for a Photon result / seed place that already carries
+     * coordinates. A non-empty value with [lat]/[lon] still `0.0` means the coordinates have not
+     * been fetched yet — the UI must call `OsmLocationService.resolvePlace` (a Place Details lookup)
+     * when the user picks this row. This is how Google's Autocomplete API works: predictions have no
+     * geometry until a details call, which is also what keeps it cheap (one details call per
+     * selection, not per keystroke).
+     */
+    val providerId: String = "",
+    /**
+     * The Google autocomplete session token this prediction belongs to, passed back to the
+     * Place Details call so the two are billed as one session. Empty for the Photon path.
+     */
+    val sessionToken: String = "",
+)
+
+/** A place whose coordinates have been resolved — the result of `OsmLocationService.resolvePlace`. */
+data class ResolvedPlace(
+    val name: String,
+    val formattedAddress: String,
+    val lat: Double,
+    val lon: Double,
 )
 
 /**

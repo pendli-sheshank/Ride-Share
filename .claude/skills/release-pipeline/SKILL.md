@@ -112,6 +112,7 @@ once they exist.
 | `FIREBASE_APP_ID` | `.env` only. **Unused** — it identifies an app to the native SDKs and has no role in any REST endpoint. |
 | `GOOGLE_WEB_CLIENT_ID` | same `env:` blocks. **Optional** — unset means the app offers email/password only. Must be the OAuth **Web** client ID, not the Android one (§4). |
 | `FIRESTORE_DATABASE_ID` | same `env:` blocks. **Optional** — defaults to `"splitcruiser"`, which is what this project's database is actually named (§7). Only set it if your copy of the project used a different Database ID, including a fresh project's `"(default)"`. |
+| `GOOGLE_MAPS_API_KEY` | same `env:` blocks → `FirebaseBuildConfig.MAPS_API_KEY`. **Optional and metered.** Set it to switch address autocomplete from the free Photon/OSM search to Google Places (New); empty leaves the Photon fallback in place. Every autocomplete + place-details call is billed, so this is off by default. Restrict the key to the Places API in the Google Cloud console. Reverse geocoding and routing stay on OSM regardless. |
 
 These three configure the app on *both* platforms, because the backend is one shared Kotlin
 repository. Putting them only in `.env` is not enough: `.env` feeds `:app`'s `BuildConfig` via the

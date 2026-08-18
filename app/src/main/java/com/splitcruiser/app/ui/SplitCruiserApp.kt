@@ -7782,12 +7782,15 @@ fun LocationAutoCompleteTextField(
                     ).joinToString(" • "),
                     category = when {
                         photon.type.contains("university", ignoreCase = true) || photon.type.contains("college", ignoreCase = true) -> "Campus"
-                        photon.type.contains("aeroway", ignoreCase = true) || photon.name.contains("airport", ignoreCase = true) -> "Airport"
-                        photon.type.contains("station", ignoreCase = true) || photon.type.contains("bus", ignoreCase = true) -> "Transit"
+                        photon.type.contains("aeroway", ignoreCase = true) || photon.type.contains("airport", ignoreCase = true) || photon.name.contains("airport", ignoreCase = true) -> "Airport"
+                        photon.type.contains("station", ignoreCase = true) || photon.type.contains("bus", ignoreCase = true) || photon.type.contains("transit", ignoreCase = true) -> "Transit"
                         else -> "OSM Place"
                     },
                     lat = photon.lat,
-                    lng = photon.lon
+                    lng = photon.lon,
+                    // Carried so a Google prediction (no coordinates yet) can be resolved on tap.
+                    providerId = photon.providerId,
+                    sessionToken = photon.sessionToken,
                 )
             }
         } else if (value.isBlank()) {
@@ -7959,8 +7962,26 @@ fun LocationAutoCompleteTextField(
                                 .fillMaxWidth()
                                 .clickable {
                                     onValueChange(place.name)
-                                    onLocationSelected(place)
                                     expanded = false
+                                    // A Google prediction carries no coordinates until a Place
+                                    // Details call. Resolve it on tap (Photon results and seed
+                                    // places already have coordinates and skip this).
+                                    if (place.providerId.isNotEmpty() && place.lat == 0.0 && place.lng == 0.0) {
+                                        scope.launch {
+                                            val resolved = runCatching {
+                                                OsmLocationService.resolvePlace(place.providerId, place.sessionToken)
+                                            }.getOrNull()
+                                            if (resolved != null) {
+                                                onLocationSelected(
+                                                    place.copy(lat = resolved.lat, lng = resolved.lon)
+                                                )
+                                            } else {
+                                                PlatformContext.showMessage("Couldn't load that address — try another.")
+                                            }
+                                        }
+                                    } else {
+                                        onLocationSelected(place)
+                                    }
                                 }
                                 .padding(horizontal = 12.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically

@@ -155,6 +155,8 @@ jobs:
           GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_WEB_CLIENT_ID }}
           # Optional; only needed if Firestore was created with a non-"(default)" Database ID.
           FIRESTORE_DATABASE_ID: ${{ secrets.FIRESTORE_DATABASE_ID }}
+          # Optional Google Places (New) key for address autocomplete. Empty -> free Photon/OSM search.
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
         run: ./gradlew :shared:assembleSharedReleaseXCFramework --stacktrace
 
       # The Xcode project links ../shared/build/XCFrameworks/release/Shared.xcframework by

@@ -44,19 +44,35 @@ data class NominatimReverseResult(
 )
 
 /**
- * Place search and reverse geocoding over OpenStreetMap.
+ * Place search and reverse geocoding.
  *
- * Moved out of `:app` and off OkHttp so iOS gets location autocomplete too — it previously had
- * none. The parsing stays defensive: both APIs return sparsely populated features, and a missing
+ * Autocomplete has two providers behind one API. When [mapsApiKey] is set it uses Google's Places
+ * API (New) — see [GooglePlacesService]; otherwise it uses the free Photon/OSM search. The choice is
+ * per-instance and made from the presence of the key, so a build with no key behaves exactly as it
+ * did before Google was an option. Reverse geocoding stays on Nominatim regardless (it was out of
+ * scope for the Google migration and is free).
+ *
+ * The parsing stays defensive: every backend returns sparsely populated features, and a missing
  * field should degrade the result rather than fail the search.
  */
-class OsmLocationService(engine: HttpClientEngine?) {
+class OsmLocationService(
+    engine: HttpClientEngine?,
+    private val mapsApiKey: String = "",
+) {
 
     constructor() : this(null)
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
     private val http: HttpClient = createPlainHttpClient(engine)
+
+    /** Non-null only when a Google Places key is configured; that is also what selects the provider. */
+    private val google: GooglePlacesService? =
+        if (mapsApiKey.isNotBlank() && !mapsApiKey.contains("PLACEHOLDER")) {
+            GooglePlacesService(mapsApiKey, engine)
+        } else {
+            null
+        }
 
     suspend fun autocompletePhoton(query: String, limit: Int): List<PhotonPlaceResult> =
         fetchAutocomplete(query, limit, biasLat = null, biasLon = null)
@@ -177,6 +193,22 @@ class OsmLocationService(engine: HttpClientEngine?) {
         fromLat: Double,
         fromLon: Double,
     ): List<RankedPlace> {
+        // Google path: it ranks server-side with the location bias, and predictions carry no
+        // coordinates (the picker resolves them on selection via [resolvePlace]), so there is nothing
+        // to re-rank or measure here. When Google returns nothing (e.g. a transient error) fall
+        // through to Photon so the field is never left empty.
+        google?.let { places ->
+            val bias = if (fromLat != 0.0 || fromLon != 0.0) fromLat to fromLon else null
+            val predictions = places.autocomplete(
+                query = query,
+                biasLat = bias?.first,
+                biasLon = bias?.second,
+                sessionToken = places.newSessionToken(),
+                limit = limit,
+            )
+            if (predictions.isNotEmpty()) return predictions
+        }
+
         val anchored = fromLat != 0.0 || fromLon != 0.0
         val candidates = if (anchored) {
             fetchAutocomplete(query, CANDIDATE_LIMIT, fromLat, fromLon)
@@ -189,6 +221,19 @@ class OsmLocationService(engine: HttpClientEngine?) {
         } else {
             PlaceRanking.unranked(candidates, limit, preferAddresses)
         }
+    }
+
+    /**
+     * Resolves a picked prediction to its coordinates.
+     *
+     * Photon results already carry coordinates, so this is only needed for a Google prediction —
+     * [RankedPlace.providerId] non-empty with [RankedPlace.lat]/[lon] still `0.0`. Returns null for a
+     * result that needs no resolving (the caller then just uses the coordinates it already has) or
+     * when Google is not configured.
+     */
+    suspend fun resolvePlace(providerId: String, sessionToken: String): ResolvedPlace? {
+        if (providerId.isBlank()) return null
+        return google?.placeDetails(providerId, sessionToken)
     }
 
     suspend fun reverseGeocodeNominatim(lat: Double, lon: Double): NominatimReverseResult? =
@@ -223,7 +268,12 @@ class OsmLocationService(engine: HttpClientEngine?) {
      * class form still exists so tests can inject a MockEngine.
      */
     companion object {
-        private val shared by lazy { OsmLocationService(null) }
+        // Reads the Google Places key baked in at build time. Empty (the default for any build
+        // without the GOOGLE_MAPS_API_KEY secret) selects the free Photon path, so nothing changes
+        // until a key is supplied.
+        private val shared by lazy {
+            OsmLocationService(null, mapsApiKey = runCatching { FirebaseBuildConfig.MAPS_API_KEY }.getOrDefault(""))
+        }
 
         suspend fun autocompletePhoton(query: String, limit: Int): List<PhotonPlaceResult> =
             shared.autocompletePhoton(query, limit)
@@ -251,6 +301,14 @@ class OsmLocationService(engine: HttpClientEngine?) {
             fromLat: Double,
             fromLon: Double,
         ): List<RankedPlace> = shared.searchPlacesRanked(query, DISPLAY_LIMIT, fromLat, fromLon)
+
+        /**
+         * Resolves a picked [RankedPlace] to coordinates. Only Google predictions need this; a
+         * Photon result or seed place already has coordinates and returns null here (the caller keeps
+         * the coordinates it already has).
+         */
+        suspend fun resolvePlace(providerId: String, sessionToken: String): ResolvedPlace? =
+            shared.resolvePlace(providerId, sessionToken)
 
         suspend fun reverseGeocodeNominatim(lat: Double, lon: Double): NominatimReverseResult? =
             shared.reverseGeocodeNominatim(lat, lon)

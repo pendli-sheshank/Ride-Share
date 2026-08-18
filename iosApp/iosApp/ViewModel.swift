@@ -537,6 +537,15 @@ final class AppViewModel: ObservableObject {
         )) ?? []
     }
 
+    /// Resolves a Google prediction to coordinates (a Place Details lookup). Returns nil for a
+    /// result that already has coordinates — a Photon result or seed place — or when Google is off.
+    func resolvePlace(providerId: String, sessionToken: String) async -> ResolvedPlace? {
+        guard !providerId.isEmpty else { return nil }
+        return try? await OsmLocationService.companion.resolvePlace(
+            providerId: providerId, sessionToken: sessionToken
+        )
+    }
+
     // MARK: - Error handling
 
     func clearError() {
