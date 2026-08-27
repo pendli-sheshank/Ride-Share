@@ -321,11 +321,13 @@ registered under the verification requirements. Earlier releases published fine;
 after the fact, so it appeared on an unrelated merge.
 **Fix (Play Console, not the repo):** register the signing key's SHA-256 in the developer
 verification area. Nothing in Gradle/signing/the workflow is wrong — the artifact is valid.
-**Interim:** the publish step is marked `continue-on-error: true` so a merge to `main` does not show
-a red release while the key is being registered (the AAB still builds and uploads). A follow-up "Note
-Play publish outcome" step writes the outcome to the job summary so the swallowed failure stays
-visible. **Remove `continue-on-error` from the publish step once the key is registered**, so a real
-publish failure fails the job again.
+**RESOLVED (2026-08-27):** it was transient. The package `com.splitcruiser.app` and all four signing
+keys were already Registered + Verified on the Android developer verification page; a plain
+`workflow_dispatch` re-run (a *fresh* run — a new versionCode, since re-running the failed run reuses
+its code and Play rejects duplicates) published to internal testing with no key error. Nothing in the
+signing/build/workflow was wrong; Google's enforcement blipped mid-rollout. The interim
+`continue-on-error` on the publish step (and the temporary "Note Play publish outcome" step) have
+been removed, so a genuine publish failure fails the job again.
 
 ### 2026-08-09 — a Swift type error reached `main` because no PR job compiled Swift
 **Cause:** `build-ios.yml`'s "Validate Swift syntax" step ran `swiftc -parse` per file and ended
