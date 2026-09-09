@@ -6998,6 +6998,16 @@ fun EditProfileDialog(
     var lastInitial by remember { mutableStateOf(currentUser?.lastInitial ?: "") }
     var avatarUrl by remember { mutableStateOf(currentUser?.avatarUrl ?: "") }
 
+    // Vehicle details, collected once during onboarding and — until now — unreachable afterwards
+    // on either platform. A host who changed car had no way to say so, while the rider-facing
+    // driver card kept showing the old one.
+    val existingVehicle = remember(currentUser?.id) { viewModel.getVehicleInfo(currentUser?.id.orEmpty()) }
+    var vMake by rememberSaveable { mutableStateOf(existingVehicle?.make.orEmpty()) }
+    var vModel by rememberSaveable { mutableStateOf(existingVehicle?.model.orEmpty()) }
+    var vYear by rememberSaveable { mutableStateOf(existingVehicle?.year.orEmpty()) }
+    var vColor by rememberSaveable { mutableStateOf(existingVehicle?.color.orEmpty()) }
+    var vPlate by rememberSaveable { mutableStateOf(existingVehicle?.licensePlate.orEmpty()) }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -7100,6 +7110,45 @@ fun EditProfileDialog(
                     }
                 }
 
+                item {
+                    Text(
+                        "YOUR VEHICLE",
+                        color = SplitCruiserPrimary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                    Text(
+                        "Riders see this on the ride detail screen to identify your car.",
+                        color = SplitCruiserTextSecondary,
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                }
+                items(
+                    listOf(
+                        Triple("Make", vMake, { v: String -> vMake = v }),
+                        Triple("Model", vModel, { v: String -> vModel = v }),
+                        Triple("Year", vYear, { v: String -> vYear = v }),
+                        Triple("Colour", vColor, { v: String -> vColor = v }),
+                        Triple("Licence plate", vPlate, { v: String -> vPlate = v }),
+                    )
+                ) { (label, value, onChange) ->
+                    OutlinedTextField(
+                        value = value,
+                        onValueChange = onChange,
+                        label = { Text(label) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = SplitCruiserPrimary,
+                            unfocusedBorderColor = SplitCruiserOutline,
+                            focusedTextColor = SplitCruiserTextPrimary,
+                            unfocusedTextColor = SplitCruiserTextPrimary,
+                            focusedLabelColor = SplitCruiserPrimary,
+                            unfocusedLabelColor = SplitCruiserTextSecondary
+                        )
+                    )
+                }
             }
         },
         confirmButton = {
@@ -7109,7 +7158,15 @@ fun EditProfileDialog(
                         name = name,
                         lastInitial = lastInitial,
                         avatarUrl = avatarUrl,
-                        onSuccess = onDismiss
+                        onSuccess = {
+                            // Only write a vehicle if something was actually entered. An all-blank
+                            // record would render on the rider's driver card as a car with no
+                            // make, model or plate.
+                            if (listOf(vMake, vModel, vYear, vColor, vPlate).any { it.isNotBlank() }) {
+                                viewModel.saveVehicle(vMake, vModel, vYear, vColor, vPlate)
+                            }
+                            onDismiss()
+                        }
                     )
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserPrimary)

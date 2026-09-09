@@ -29,11 +29,15 @@ Automated CI/CD pipelines for Split Cruiser across Android and iOS platforms.
 - Manual: GitHub Actions → Build iOS → Run workflow
 
 **What it does:**
-- Builds `Shared.framework` for iOS (all targets)
-- Installs CocoaPods dependencies
-- Creates/validates Xcode project
-- Builds iOS app for simulator
-- Uploads artifacts (Shared.framework, iOS build logs)
+- Builds `Shared.xcframework` for iOS (all targets)
+- Verifies the pbxproj graph, the app icon set and Info.plist preflight
+- Regenerates the Xcode project and checks it matches the committed one
+- Builds the iOS app for the simulator (this is the only thing that compiles Swift before merge)
+- Uploads artifacts
+
+No CocoaPods step: the `Podfile` declares no pods, deliberately. The backend speaks Firebase's
+REST APIs over Ktor rather than the native SDK, which is what keeps the generated Xcode project
+free of CocoaPods and SPM entries.
 
 **For Windows users:**
 ✅ **YOU CAN TRIGGER iOS BUILDS FROM GITHUB!**
@@ -57,10 +61,9 @@ git push origin your-branch  # Push your changes
 5. Click **Run workflow** (green button)
 
 GitHub will:
-- Spin up a **macOS-14 runner** (Apple Silicon Mac in the cloud)
-- Build Shared.framework
-- Install CocoaPods
-- Build iOS app
+- Spin up a **macos-15 runner** (Apple Silicon Mac in the cloud)
+- Build Shared.xcframework
+- Build the iOS app for the simulator
 - Upload artifacts
 
 ### Method 3: Use GitHub CLI (if installed)
@@ -123,11 +126,10 @@ open iosApp.xcworkspace          # Open in Xcode
 1. Checkout code
 2. Install Java 21 (for Kotlin compilation)
 3. Setup Gradle
-4. Build Shared.framework (Kotlin → iOS framework)
-5. Install CocoaPods
-6. Create/validate Xcode project
-7. Build iOS app for simulator
-8. Upload artifacts
+4. Build Shared.xcframework (Kotlin → iOS framework)
+5. Create/validate Xcode project
+6. Build iOS app for simulator
+7. Upload artifacts
 9. Generate build summary
 ```
 
@@ -165,9 +167,12 @@ cd iosApp
 
 ## Current Status
 
-- ✅ **Android Release**: Working, publishes to Play Store
-- ✅ **iOS Build CI**: Working, builds framework and app
-- ⏳ **iOS Release Pipeline**: Coming soon (App Store/TestFlight)
+- ✅ **Android Release**: publishes to Play internal testing
+- ✅ **iOS Build CI**: builds the framework and compiles Swift for the simulator
+- ✅ **iOS Release Pipeline**: `ios-release.yml` ships to TestFlight, and has done for months
+- ✅ **Cloud Functions**: typechecked, built and tested by `ci.yml`
+- ✅ **Firestore rules**: executed against the emulator by `ci.yml`
+- ✅ **actionlint**: enforced by `ci.yml`, not by the honour system
 
 ---
 

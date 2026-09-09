@@ -467,6 +467,28 @@ final class AppViewModel: ObservableObject {
 
     // MARK: - Profile management
 
+    /// Saves or replaces the signed-in user's vehicle.
+    ///
+    /// `repository.saveVehicle` has existed since the backend moved to `:shared` and had no iOS
+    /// caller: vehicle details were collected once during onboarding and were then unreachable, so
+    /// a host who bought a different car had no way to say so. The post-offer screen even told
+    /// people they could change it in Profile, which was not true.
+    func saveVehicle(make: String, model: String, year: String, color: String, plate: String) async -> Bool {
+        guard let ownerId = currentUser?.id else { return false }
+        return await perform("Saving your vehicle…") {
+            try await self.repository.saveVehicle(
+                vehicle: Vehicle(
+                    ownerId: ownerId,
+                    make: make,
+                    model: model,
+                    year: year,
+                    color: color,
+                    licensePlate: plate
+                )
+            )
+        }
+    }
+
     func updateProfile(name: String, lastInitial: String, avatarUrl: String) async -> Bool {
         await perform("Saving your profile…") {
             try await self.repository.updateUserProfileDetails(

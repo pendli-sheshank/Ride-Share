@@ -529,6 +529,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .isSuccess
     }
 
+    /**
+     * Saves or replaces the signed-in user's vehicle.
+     *
+     * `repository.saveVehicle` has existed since the backend moved to `:shared` and had no caller
+     * on either platform outside onboarding, so vehicle details were write-once: a host who
+     * changed car had no way to say so, while the rider-facing driver card kept showing the old one.
+     */
+    fun saveVehicle(make: String, model: String, year: String, color: String, plate: String) {
+        val ownerId = currentUser.value?.id ?: return
+        viewModelScope.launch {
+            runCatching {
+                repository.saveVehicle(
+                    Vehicle(
+                        ownerId = ownerId,
+                        make = make.trim(),
+                        model = model.trim(),
+                        year = year.trim(),
+                        color = color.trim(),
+                        licensePlate = plate.trim(),
+                    )
+                )
+            }.onFailure { _uiError.value = it.message ?: "Could not save your vehicle." }
+        }
+    }
+
     fun blockUser(blockedUserId: String, onSuccess: () -> Unit) {
         runGuarded(
             block = { repository.blockUserResult(blockedUserId) },
