@@ -58,6 +58,19 @@ data class FirebaseConfig(
         get() = listOf(apiKey, projectId).all { it.isNotBlank() && !it.contains("PLACEHOLDER") }
 
     /**
+     * Whether the Storage bucket is set, checked separately from [isConfigured].
+     *
+     * Deliberately not folded into [isConfigured]: auth and Firestore work without a bucket, and
+     * gating the whole app on it would stop a project that has not enabled Storage from even
+     * logging in. But a blank bucket built [storageBase] as `https://…/v0/b//o`, so the first
+     * profile-picture upload failed against a malformed URL with whatever opaque error the server
+     * returned for it. [com.splitcruiser.app.data.firebase.FirebaseStorageClient] checks this and
+     * says what is actually wrong instead.
+     */
+    val isStorageConfigured: Boolean
+        get() = storageBucket.isNotBlank() && !storageBucket.contains("PLACEHOLDER")
+
+    /**
      * Whether to offer the Google button at all. Showing it without a client ID produces a
      * `DEVELOPER_ERROR` from Play Services at the tap, which says nothing to a user.
      */

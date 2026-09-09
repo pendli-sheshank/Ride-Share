@@ -227,6 +227,11 @@ struct ProfileSetupScreen: View {
     @State private var homeArea = ""
     @State private var phoneNumber = ""
     @State private var homeAddress = PlaceSelection()
+
+    /// Collected so "women only" can be an enforced restriction rather than a display filter. It
+    /// lives on the private profile document the Firestore rules read server-side, never on
+    /// `users/{uid}`, which every signed-in user can read.
+    @State private var gender = Gender.shared.defaultValue()
     @State private var isDriver = false
     @State private var make = ""
     @State private var model = ""
@@ -286,6 +291,19 @@ struct ProfileSetupScreen: View {
                         accessibilityID: "home_address_input"
                     )
                     Text("Private to you. Ride requests start from here so you don't retype it.")
+                        .font(BrandFont.eyebrow(.regular))
+                        .foregroundColor(Brand.textSecondary)
+                }
+
+                FormSection(title: "Gender") {
+                    Picker("Gender", selection: $gender) {
+                        ForEach(Gender.shared.SELECTABLE, id: \.self) { option in
+                            Text(Gender.shared.label(value: option)).tag(option)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityIdentifier("gender_picker")
+                    Text("Used only to offer women-only rides. Never shown on your profile.")
                         .font(BrandFont.eyebrow(.regular))
                         .foregroundColor(Brand.textSecondary)
                 }
@@ -376,6 +394,7 @@ struct ProfileSetupScreen: View {
                 homeAddress: homeAddress.name,
                 homeLat: homeAddress.lat,
                 homeLng: homeAddress.lon,
+                gender: gender,
                 vehicle: vehicle
             )
             isSubmitting = false

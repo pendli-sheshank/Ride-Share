@@ -25,6 +25,9 @@ final class AppViewModel: ObservableObject {
     @Published var myRideRequests: [RideRequest] = []
     @Published var userMatches: [TripMatch] = []
     @Published var isConnected = false
+
+    /// False until the first refresh completes, so a feed can tell "loading" from "empty".
+    @Published var hasLoadedFeeds = false
     @Published var isLoading = false
     @Published var errorMessage: String?
 
@@ -102,6 +105,9 @@ final class AppViewModel: ObservableObject {
         subscriptions.append(repository.observeUserMatches { [weak self] matches in
             self?.userMatches = matches
         })
+        subscriptions.append(repository.observeFirstSync { [weak self] loaded in
+            self?.hasLoadedFeeds = loaded.boolValue
+        })
         subscriptions.append(repository.observeConnection { [weak self] connected in
             // A Bool in a generic position arrives as KotlinBoolean.
             self?.isConnected = connected.boolValue
@@ -156,6 +162,7 @@ final class AppViewModel: ObservableObject {
         homeAddress: String,
         homeLat: Double,
         homeLng: Double,
+        gender: String,
         vehicle: Vehicle?
     ) async {
         await perform("Setting up your profile…") {
@@ -167,7 +174,8 @@ final class AppViewModel: ObservableObject {
                     phoneNumber: phoneNumber,
                     homeAddress: homeAddress,
                     homeLat: homeLat,
-                    homeLng: homeLng
+                    homeLng: homeLng,
+                    gender: gender
                 ),
                 vehicle: vehicle
             )
@@ -258,7 +266,9 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    func acceptMatch(matchId: String) async {
+    /// Returns whether the seat was actually taken, so a caller does not navigate on a failure.
+    @discardableResult
+    func acceptMatch(matchId: String) async -> Bool {
         await perform("Securing your ride…") {
             try await self.repository.acceptMatch(matchId: matchId)
         }
@@ -456,6 +466,28 @@ final class AppViewModel: ObservableObject {
     }
 
     // MARK: - Profile management
+
+    /// Saves or replaces the signed-in user's vehicle.
+    ///
+    /// `repository.saveVehicle` has existed since the backend moved to `:shared` and had no iOS
+    /// caller: vehicle details were collected once during onboarding and were then unreachable, so
+    /// a host who bought a different car had no way to say so. The post-offer screen even told
+    /// people they could change it in Profile, which was not true.
+    func saveVehicle(make: String, model: String, year: String, color: String, plate: String) async -> Bool {
+        guard let ownerId = currentUser?.id else { return false }
+        return await perform("Saving your vehicle…") {
+            try await self.repository.saveVehicle(
+                vehicle: Vehicle(
+                    ownerId: ownerId,
+                    make: make,
+                    model: model,
+                    year: year,
+                    color: color,
+                    licensePlate: plate
+                )
+            )
+        }
+    }
 
     func updateProfile(name: String, lastInitial: String, avatarUrl: String) async -> Bool {
         await perform("Saving your profile…") {

@@ -120,7 +120,12 @@ struct PostOfferScreen: View {
 
                 if viewModel.vehicleForCurrentUser == nil {
                     infoCard(
-                        "You haven't set up your vehicle details. We'll post using a standard Sedan. You can add a vehicle in Profile any time."
+                        // Do not promise a Profile vehicle editor: iOS has none. Vehicle details
+                        // are collected once during onboarding and are unreachable afterwards, so
+                        // "you can add a vehicle in Profile any time" sent people looking for a
+                        // screen that does not exist. Tracked as a real parity gap rather than
+                        // papered over in copy.
+                        "You haven't set up your vehicle details, so this ride will show as a standard Sedan."
                     )
                 }
 

@@ -88,6 +88,11 @@ struct ChatView: View {
             }
         }
         .onAppear {
+            // Cancel first. `onAppear` fires again after a sheet dismissal or a scene
+            // reactivation, and reassigning without cancelling left the previous subscription
+            // polling this conversation every 3 seconds for the life of the process, writing
+            // `messages` from a stale closure. `onDisappear` only ever cancelled the newest one.
+            subscription?.cancel()
             subscription = viewModel.observeChat(matchId: match.id) { messages = $0 }
         }
         .onDisappear {

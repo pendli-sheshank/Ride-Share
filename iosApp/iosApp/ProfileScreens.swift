@@ -189,6 +189,7 @@ struct ProfileScreen: View {
         subtitle: String,
         isOn: Bool,
         tint: Color,
+        isEnabled: Bool = true,
         onChange: @escaping (Bool) -> Void
     ) -> some View {
         Toggle(isOn: Binding(get: { isOn }, set: onChange)) {
@@ -205,6 +206,7 @@ struct ProfileScreen: View {
             }
         }
         .tint(tint)
+        .disabled(!isEnabled)
     }
 
     // MARK: Alerts
@@ -270,12 +272,23 @@ struct ProfileScreen: View {
 
     private func safetySection(_ user: User) -> some View {
         BrandCard(title: "Safety and privacy", tint: Brand.primary) {
+            // A preference, not the gate. Turning this on used to be the ONLY thing standing
+            // between any account and every women-only ride on the platform. Eligibility now comes
+            // from the private profile document and is enforced by the Firestore rules on the
+            // write that takes a seat; this only narrows what an eligible rider sees.
+            //
+            // Disabled rather than hidden: silently omitting it would leave someone who expected
+            // the control unable to tell whether it exists.
+            let eligible = viewModel.contactDetails?.isEligibleForWomenOnly == true
             toggleRow(
                 icon: "person.fill",
-                title: "Women-Only Filter",
-                subtitle: "Only match with other women",
-                isOn: user.isWomenOnlyFilterEnabled,
-                tint: Brand.accent
+                title: "Show only women-only rides",
+                subtitle: eligible
+                    ? "Hides every other ride from your feed"
+                    : "Available to riders who selected Woman during setup",
+                isOn: eligible && user.isWomenOnlyFilterEnabled,
+                tint: Brand.accent,
+                isEnabled: eligible
             ) { enabled in
                 Task { await viewModel.toggleWomenOnlyFilter(enabled) }
             }
@@ -473,6 +486,15 @@ struct EditProfileSheet: View {
     @State private var photoItem: PhotosPickerItem?
     @State private var isUploading = false
 
+    // Vehicle details. Collected once during onboarding and, until now, unreachable afterwards on
+    // this platform — a host who changed car had no way to say so, and the post-offer screen told
+    // them to come here to do it.
+    @State private var make = ""
+    @State private var model = ""
+    @State private var year = ""
+    @State private var colour = ""
+    @State private var plate = ""
+
     /// The twelve avatars, from the one list both platforms read.
     private var avatarKeys: [String] { SplitCruiserAvatars.shared.ALL }
 
@@ -530,6 +552,22 @@ struct EditProfileSheet: View {
                             .onChange(of: lastInitial) { lastInitial = String($0.prefix(1)).uppercased() }
                     }
 
+                    FormSection(title: "Your vehicle") {
+                        Text("Riders see this on the ride detail screen to identify your car.")
+                            .font(BrandFont.eyebrow(.regular))
+                            .foregroundColor(Brand.textSecondary)
+                        BrandTextField(title: "Make", placeholder: "Toyota",
+                                       text: $make, icon: "car.fill")
+                        BrandTextField(title: "Model", placeholder: "Corolla",
+                                       text: $model, icon: "car.fill")
+                        BrandTextField(title: "Year", placeholder: "2019",
+                                       text: $year, icon: "calendar", keyboard: .numberPad)
+                        BrandTextField(title: "Colour", placeholder: "Silver",
+                                       text: $colour, icon: "paintpalette.fill")
+                        BrandTextField(title: "Licence plate", placeholder: "ABC-1234",
+                                       text: $plate, icon: "textformat.abc")
+                    }
+
                     Button("Save Changes") { save() }
                         .buttonStyle(BrandButtonStyle())
 
@@ -552,6 +590,14 @@ struct EditProfileSheet: View {
             name = user.name
             lastInitial = user.lastInitial
             avatarUrl = user.avatarUrl
+
+            if let vehicle = viewModel.vehicleForCurrentUser {
+                make = vehicle.make
+                model = vehicle.model
+                year = vehicle.year
+                colour = vehicle.color
+                plate = vehicle.licensePlate
+            }
         }
         .onChange(of: photoItem) { item in
             guard let item else { return }
@@ -600,14 +646,26 @@ struct EditProfileSheet: View {
 
     private func save() {
         Task {
-            if await viewModel.updateProfile(
+            guard await viewModel.updateProfile(
                 name: name,
                 lastInitial: lastInitial,
                 avatarUrl: avatarUrl
-            ) {
-                viewModel.notify("Profile saved")
-                dismiss()
+            ) else { return }
+
+            // Only write a vehicle if the host actually entered one. Saving an all-blank vehicle
+            // would put an empty record on `vehicles/{uid}`, which the rider-facing driver card
+            // then renders as a car with no make, model or plate.
+            let hasVehicle = [make, model, year, colour, plate]
+                .contains { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            if hasVehicle,
+               await viewModel.saveVehicle(
+                   make: make, model: model, year: year, color: colour, plate: plate
+               ) == false {
+                return
             }
+
+            viewModel.notify("Profile saved")
+            dismiss()
         }
     }
 }

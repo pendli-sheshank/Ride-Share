@@ -133,7 +133,11 @@ struct ExploreFeed: View {
 
         let offers = filteredOffers
 
-        if viewModel.activeOffers.isEmpty && viewModel.isRefreshing {
+        // Gated on the first sync, not on `isRefreshing`: that flag is only set by
+        // pull-to-refresh, which this feed never calls, so the skeleton was unreachable and a
+        // cold start showed "Nobody else has offered a ride yet" while the first poll was still
+        // in flight.
+        if viewModel.activeOffers.isEmpty && !viewModel.hasLoadedFeeds {
             FeedLoadingSkeleton()
         } else if viewModel.activeOffers.isEmpty {
             // Naming the two reasons this list can be empty right after posting a ride: your own
@@ -256,7 +260,7 @@ struct ExploreFeed: View {
 
     @ViewBuilder
     private var hostFeed: some View {
-        if viewModel.activeRequests.isEmpty && viewModel.isRefreshing {
+        if viewModel.activeRequests.isEmpty && !viewModel.hasLoadedFeeds {
             FeedLoadingSkeleton()
         } else if viewModel.activeRequests.isEmpty {
             // Same rule as the rider side: no post button here, because the one at the bottom of
@@ -311,7 +315,9 @@ struct TripsTab: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: BrandScale.spaceMd) {
-                if !hasAnything {
+                if !hasAnything && !viewModel.hasLoadedFeeds {
+                    FeedLoadingSkeleton()
+                } else if !hasAnything {
                     BrandEmptyState(
                         icon: "calendar",
                         title: "Nothing on your schedule yet",

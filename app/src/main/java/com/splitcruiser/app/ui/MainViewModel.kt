@@ -71,6 +71,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val userMatches: StateFlow<List<TripMatch>> = repository.userMatches
     val notifications: StateFlow<List<NotificationAlert>> = repository.notifications
 
+    /**
+     * False until the first refresh completes.
+     *
+     * The feeds gated their skeleton on [isLoading], which is this ViewModel's *global action*
+     * flag — it tracks button presses, not feed loading — so before the first poll returned the
+     * user saw "No rides posted yet" rather than a skeleton.
+     */
+    val hasLoadedFeeds: StateFlow<Boolean> = repository.hasCompletedFirstSync
+
     /** What onboarding stored: the home address a ride request prefills from. */
     val contactDetails: StateFlow<ContactDetails?> = repository.contactDetails
 
@@ -87,7 +96,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             currentUser.collect { user ->
                 if (user != null) {
-                    refreshMyTrips()
+                    refreshMyTripsSilently()
                 } else {
                     _hostedRides.value = emptyList()
                     _joinedRides.value = emptyList()
@@ -102,14 +111,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun refreshMyTrips() {
+        val message = "Refreshing your trips…"
+        if (!beginLoading(message)) return
         viewModelScope.launch {
-            beginLoading("Refreshing your trips…")
             try {
                 loadMyTrips()
             } finally {
-                endLoading()
+                endLoading(message)
             }
         }
+    }
+
+    /**
+     * Reloads the schedule without raising the full-screen overlay.
+     *
+     * The `currentUser` collector in [init] used to call [refreshMyTrips], which raises a *modal*
+     * loader — so every profile save, photo upload and settings toggle put a blocking overlay over
+     * the app, because each of those re-emits the user. Rapid emissions also launched concurrent
+     * loads with no guard, and the last to finish won.
+     */
+    private fun refreshMyTripsSilently() {
+        viewModelScope.launch { loadMyTrips() }
     }
 
     /**
@@ -185,8 +207,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- Auth ---
     fun loginWithEmail(email: String, password: String, onFinished: (isNewUser: Boolean) -> Unit) {
+        val loadingMessage = "Logging you in…"
+        if (!beginLoading(loadingMessage)) return
         viewModelScope.launch {
-            beginLoading("Logging you in…")
             try {
                 val result = repository.logInWithEmailResult(email, password)
                 result.fold(
@@ -194,14 +217,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     onFailure = { _uiError.value = it.message ?: "Failed to log in." },
                 )
             } finally {
-                endLoading()
+                endLoading(loadingMessage)
             }
         }
     }
 
     fun signUpWithEmail(email: String, password: String, onFinished: (isNewUser: Boolean) -> Unit) {
+        val loadingMessage = "Creating your account…"
+        if (!beginLoading(loadingMessage)) return
         viewModelScope.launch {
-            beginLoading("Creating your account…")
             try {
                 val result = repository.signUpWithEmailResult(email, password)
                 result.fold(
@@ -209,7 +233,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     onFailure = { _uiError.value = it.message ?: "Failed to sign up." },
                 )
             } finally {
-                endLoading()
+                endLoading(loadingMessage)
             }
         }
     }
@@ -221,8 +245,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * A cancelled picker is not an error — the user closed a sheet — so it leaves no message.
      */
     fun signInWithGoogle(activityContext: Context, onFinished: (isNewUser: Boolean) -> Unit) {
+        val loadingMessage = "Signing you in with Google…"
+        if (!beginLoading(loadingMessage)) return
         viewModelScope.launch {
-            beginLoading("Signing you in with Google…")
             try {
                 val idToken = requestGoogleIdToken(activityContext, repository.googleWebClientId)
                 repository.signInWithGoogleResult(idToken).fold(
@@ -234,7 +259,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: Exception) {
                 _uiError.value = e.message ?: "Failed to sign in with Google."
             } finally {
-                endLoading()
+                endLoading(loadingMessage)
             }
         }
     }
@@ -504,6 +529,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .isSuccess
     }
 
+    /**
+     * Saves or replaces the signed-in user's vehicle.
+     *
+     * `repository.saveVehicle` has existed since the backend moved to `:shared` and had no caller
+     * on either platform outside onboarding, so vehicle details were write-once: a host who
+     * changed car had no way to say so, while the rider-facing driver card kept showing the old one.
+     */
+    fun saveVehicle(make: String, model: String, year: String, color: String, plate: String) {
+        val ownerId = currentUser.value?.id ?: return
+        viewModelScope.launch {
+            runCatching {
+                repository.saveVehicle(
+                    Vehicle(
+                        ownerId = ownerId,
+                        make = make.trim(),
+                        model = model.trim(),
+                        year = year.trim(),
+                        color = color.trim(),
+                        licensePlate = plate.trim(),
+                    )
+                )
+            }.onFailure { _uiError.value = it.message ?: "Could not save your vehicle." }
+        }
+    }
+
     fun blockUser(blockedUserId: String, onSuccess: () -> Unit) {
         runGuarded(
             block = { repository.blockUserResult(blockedUserId) },
@@ -520,7 +570,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun getBlockedUsers(): List<User> = repository.getBlockedUsers()
+    /**
+     * Observable, unlike [SplitCruiserRepository.getBlockedUsers].
+     *
+     * BlockedListScreen called the plain function from composition, so it had nothing to recompose
+     * on and an unblocked row stayed on screen until the screen was recreated.
+     */
+    val blockedUsers: StateFlow<List<User>> = repository.blockedUsers
 
     fun getUserPublicProfile(userId: String): User? = repository.getUserPublicProfile(userId)
 
@@ -573,6 +629,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         repository.logout()
     }
 
+    /**
+     * Tells the repository whether the app is on screen, so the refresh loops can back off.
+     *
+     * [SplitCruiserRepository.setForeground] existed, was documented as "Android calls this from
+     * the lifecycle, iOS from ScenePhase", and had **no caller on either platform** — so the flag
+     * was permanently true and a backgrounded app kept polling feeds and matches every 20s,
+     * notifications every 60s and chat every 3s, indefinitely. That is battery and Firestore
+     * read quota spent on a screen nobody is looking at, and it made the 5-minute and 10-minute
+     * background branches dead code.
+     *
+     * `onCleared()` is not a substitute: it fires when the Activity is finished, not when the user
+     * switches away.
+     */
+    fun setForeground(isForeground: Boolean) {
+        repository.setForeground(isForeground)
+    }
+
+    /**
+     * Actions currently running, keyed by [loadingMessage].
+     *
+     * Two jobs this does. It reference-counts the loading overlay: [beginLoading] and [endLoading]
+     * were a plain boolean, so with two actions overlapping the first to finish cleared the
+     * spinner and reset the message while the second was still in flight. And it dedupes: nothing
+     * stopped two concurrent `postOffer` coroutines, and the only thing between a double tap and
+     * two posted rides was a scrim built from `Modifier.clickable(enabled = false)`, which is not a
+     * dependable pointer-event consumer. A second tap of the same action is now dropped.
+     */
+    private val inFlight = mutableSetOf<String>()
+
     /** The load/error/success dance every one of these actions repeated verbatim. */
     private fun <T> runGuarded(
         block: suspend () -> Result<T>,
@@ -580,27 +665,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         loadingMessage: String = DEFAULT_LOADING_MESSAGE,
         onSuccess: (T) -> Unit,
     ) {
+        if (!beginLoading(loadingMessage)) return
         viewModelScope.launch {
-            beginLoading(loadingMessage)
             try {
                 block().fold(
                     onSuccess = { onSuccess(it) },
                     onFailure = { _uiError.value = it.message ?: fallbackMessage },
                 )
             } finally {
-                endLoading()
+                endLoading(loadingMessage)
             }
         }
     }
 
-    private fun beginLoading(message: String) {
+    /** Returns false when this action is already running, in which case the caller must not start. */
+    private fun beginLoading(message: String): Boolean {
+        if (!inFlight.add(message)) return false
         _loadingMessage.value = message
         _isLoading.value = true
+        return true
     }
 
-    private fun endLoading() {
-        _isLoading.value = false
-        _loadingMessage.value = DEFAULT_LOADING_MESSAGE
+    private fun endLoading(message: String) {
+        inFlight.remove(message)
+        if (inFlight.isEmpty()) {
+            _isLoading.value = false
+            _loadingMessage.value = DEFAULT_LOADING_MESSAGE
+        } else {
+            // Keep the overlay up, showing whatever is still running.
+            _loadingMessage.value = inFlight.first()
+        }
     }
 
     companion object {

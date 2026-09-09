@@ -10,6 +10,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.TextContent
 import io.ktor.http.headersOf
 import io.ktor.utils.io.ByteReadChannel
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runTest
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -19,6 +20,14 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 /**
  * Exercises the repository end to end against a scripted backend — the first tests in this project
@@ -39,6 +48,109 @@ class SplitCruiserRepositoryTest {
 
     /** Firestore documents by "<collection>/<id>", as the scripted backend sees them. */
     private val documents = mutableMapOf<String, String>()
+
+    /**
+     * Per-document version counters, standing in for Firestore's `updateTime`.
+     *
+     * Real Firestore returns an `updateTime` on every read and honours a `currentDocument.updateTime`
+     * precondition on a commit. The fake models both, because the seat-booking path now depends on
+     * them: without a version the conditional write cannot be exercised at all, and a fake that
+     * accepts every commit unconditionally would report the overbooking race as fixed while proving
+     * nothing.
+     */
+    private val documentVersions = mutableMapOf<String, Int>()
+
+    /**
+     * Fired just after a document GET is served, so a test can simulate another client writing in
+     * the window between our read and our commit — which is the whole point of the precondition.
+     * Sequential test code cannot otherwise produce that interleaving.
+     */
+    private var onDocumentRead: ((String) -> Unit)? = null
+
+    /** Writes to [documents] the way a competing client would, bumping the version. */
+    private fun competingWrite(key: String, fields: Map<String, String>) {
+        val existing = documents[key]
+            ?.let { Json.parseToJsonElement(it).jsonObject["fields"]?.jsonObject }
+            ?: JsonObject(emptyMap())
+        val merged = buildJsonObject {
+            existing.forEach { (k, v) -> put(k, v) }
+            fields.forEach { (k, v) -> put(k, Json.parseToJsonElement(v)) }
+        }
+        documents[key] = buildJsonObject { put("fields", merged) }.toString()
+        documentVersions[key] = (documentVersions[key] ?: 1) + 1
+    }
+
+    private fun versionTokenFor(key: String): String {
+        val version = documentVersions.getOrPut(key) { 1 }
+        return "2026-07-28T00:00:00.${version.toString().padStart(6, '0')}Z"
+    }
+
+    /** Serves a stored document the way Firestore does: fields plus the current `updateTime`. */
+    private fun documentWithVersion(key: String, stored: String): String {
+        val parsed = Json.parseToJsonElement(stored).jsonObject
+        val rebuilt = buildJsonObject {
+            parsed.forEach { (k, v) -> put(k, v) }
+            put("name", JsonPrimitive("projects/split-cruiser-test/databases/splitcruiser/documents/$key"))
+            put("updateTime", JsonPrimitive(versionTokenFor(key)))
+        }
+        return rebuilt.toString()
+    }
+
+    /**
+     * Applies a PATCH write to [documents], so a document the app just wrote is visible to the next
+     * read — as it is in Firestore.
+     *
+     * The fake used to accept writes and discard them, which was survivable while every read that
+     * mattered was served from the repository's own cache. The seat-booking path now reads the
+     * offer back from the server before claiming a seat, so a write-only fake would 404 on a ride
+     * the test had just posted.
+     */
+    private fun applyPatch(url: String, body: String) {
+        val key = url.substringAfter("/documents/").substringBefore('?')
+        val fields = Json.parseToJsonElement(body).jsonObject["fields"]?.jsonObject ?: return
+        val existing = documents[key]
+            ?.let { Json.parseToJsonElement(it).jsonObject["fields"]?.jsonObject }
+            ?: JsonObject(emptyMap())
+        val merged = buildJsonObject {
+            existing.forEach { (k, v) -> put(k, v) }
+            fields.forEach { (k, v) -> put(k, v) }
+        }
+        documents[key] = buildJsonObject { put("fields", merged) }.toString()
+        documentVersions[key] = (documentVersions[key] ?: 1) + 1
+    }
+
+    /**
+     * Applies a `documents:commit` body to [documents], honouring `currentDocument.updateTime`.
+     *
+     * Returns null when every precondition held (and the writes were applied), or a 412 the way
+     * Firestore reports a lost race.
+     */
+    private fun applyCommit(body: String): Pair<HttpStatusCode, String>? {
+        val writes = Json.parseToJsonElement(body).jsonObject["writes"]?.jsonArray ?: return null
+
+        // Firestore applies a commit atomically, so check every precondition before writing any of it.
+        val planned = writes.mapNotNull { write ->
+            val update = write.jsonObject["update"]?.jsonObject ?: return@mapNotNull null
+            val key = update["name"]!!.jsonPrimitive.content.substringAfter("/documents/")
+            val expected = write.jsonObject["currentDocument"]?.jsonObject?.get("updateTime")?.jsonPrimitive?.content
+            if (expected != null && expected != versionTokenFor(key)) return HttpStatusCode.PreconditionFailed to
+                """{"error":{"code":400,"status":"FAILED_PRECONDITION","message":"document has been modified"}}"""
+            key to update["fields"]!!.jsonObject
+        }
+
+        planned.forEach { (key, fields) ->
+            val existing = documents[key]
+                ?.let { Json.parseToJsonElement(it).jsonObject["fields"]?.jsonObject }
+                ?: JsonObject(emptyMap())
+            val merged = buildJsonObject {
+                existing.forEach { (k, v) -> put(k, v) }
+                fields.forEach { (k, v) -> put(k, v) }
+            }
+            documents[key] = buildJsonObject { put("fields", merged) }.toString()
+            documentVersions[key] = (documentVersions[key] ?: 1) + 1
+        }
+        return null
+    }
 
     @BeforeTest
     fun freezeTime() {
@@ -69,21 +181,46 @@ class SplitCruiserRepositoryTest {
     /** A backend that accepts writes, serves whatever is in [documents], and finds nothing else. */
     private fun scriptedBackend(): (HttpRequestData) -> Pair<HttpStatusCode, String> = { request ->
         val url = request.url.toString()
-        val stored = documents.entries.firstOrNull { (key, _) ->
+        val storedKey = documents.keys.firstOrNull { key ->
             url.contains("/documents/$key") && request.method.value == "GET"
-        }?.value
+        }
         when {
             url.contains("signInWithPassword") || url.contains("accounts:signUp") -> HttpStatusCode.OK to
                 """{"localId":"me","email":"ana@neu.edu","idToken":"tok","refreshToken":"ref","expiresIn":"3600"}"""
             url.contains(":runQuery") -> HttpStatusCode.OK to """[{"readTime":"2026-07-28T00:00:00Z"}]"""
-            stored != null -> HttpStatusCode.OK to stored
+            url.contains("documents:commit") ->
+                applyCommit((request.body as TextContent).text) ?: (HttpStatusCode.OK to """{"writeResults":[{}]}""")
+            storedKey != null -> {
+                val served = HttpStatusCode.OK to documentWithVersion(storedKey, documents.getValue(storedKey))
+                onDocumentRead?.invoke(storedKey)
+                served
+            }
             request.method.value == "GET" -> HttpStatusCode.NotFound to "{}"
+            request.method.value == "PATCH" -> {
+                applyPatch(url, (request.body as TextContent).text)
+                HttpStatusCode.OK to "{}"
+            }
             else -> HttpStatusCode.OK to "{}"
         }
     }
 
     private suspend fun signedIn(repo: SplitCruiserRepository): SplitCruiserRepository {
         repo.logInWithEmail("ana@neu.edu", "hunter2")
+        return repo
+    }
+
+    /** A second signed-in client over the same [documents], for contention tests. */
+    private suspend fun secondClientAs(uid: String): SplitCruiserRepository {
+        val repo = repository { request ->
+            val url = request.url.toString()
+            if (url.contains("signInWithPassword")) {
+                HttpStatusCode.OK to
+                    """{"localId":"$uid","email":"$uid@x.test","idToken":"tok","refreshToken":"ref","expiresIn":"3600"}"""
+            } else {
+                scriptedBackend()(request)
+            }
+        }
+        repo.logInWithEmail("$uid@x.test", "hunter2")
         return repo
     }
 
@@ -297,56 +434,320 @@ class SplitCruiserRepositoryTest {
     fun joiningARideTakesASeatAndNamesOnlyTheAllowedFields() = runTest {
         documents["users/me"] =
             """{"fields":{"id":{"stringValue":"me"},"name":{"stringValue":"Ana"}}}"""
-        val repo = repository { request ->
-            val url = request.url.toString()
-            when {
-                url.contains("signInWithPassword") -> HttpStatusCode.OK to
-                    """{"localId":"me","email":"a@b.c","idToken":"tok","refreshToken":"ref","expiresIn":"3600"}"""
-                url.contains(":runQuery") -> HttpStatusCode.OK to """[{"readTime":"x"}]"""
-                url.contains("/documents/users/me") && request.method.value == "GET" ->
-                    HttpStatusCode.OK to documents["users/me"]!!
-                url.contains("/documents/trip_offers/offer_1") && request.method.value == "GET" ->
-                    HttpStatusCode.OK to """
-                    {"fields":{"id":{"stringValue":"offer_1"},"hostId":{"stringValue":"bo"},
-                     "seatsLeft":{"integerValue":"2"},"totalSeats":{"integerValue":"4"},
-                     "status":{"stringValue":"active"},"origin":{"stringValue":"A"},
-                     "destination":{"stringValue":"B"}}}
-                    """.trimIndent()
-                else -> HttpStatusCode.OK to "{}"
-            }
-        }
-        signedIn(repo)
+        documents["trip_offers/offer_1"] = """
+            {"fields":{"id":{"stringValue":"offer_1"},"hostId":{"stringValue":"bo"},
+             "seatsLeft":{"integerValue":"2"},"totalSeats":{"integerValue":"4"},
+             "status":{"stringValue":"active"},"origin":{"stringValue":"A"},
+             "destination":{"stringValue":"B"}}}
+        """.trimIndent()
+        val repo = signedIn(repository(scriptedBackend()))
+
         repo.joinTripOfferDirect("offer_1")
 
-        val offerWrite = requests.last { it.url.toString().contains("/trip_offers/offer_1") && it.method.value == "PATCH" }
-        val mask = offerWrite.url.toString()
+        // The seat write is a conditional commit now, not a bare PATCH — see claimSeat.
+        val commit = requests.last { it.url.toString().contains("documents:commit") }
+        val body = (commit.body as TextContent).text
         // A non-host may only touch these four fields; a wider mask is denied by the rules.
-        assertContains(mask, "updateMask.fieldPaths=passengers")
-        assertContains(mask, "updateMask.fieldPaths=seatsLeft")
-        assertContains(mask, "updateMask.fieldPaths=status")
-        assertTrue(!mask.contains("fieldPaths=hostId"), "must not claim fields the rules forbid: $mask")
+        assertContains(body, "\"passengers\"")
+        assertContains(body, "\"seatsLeft\"")
+        assertContains(body, "\"status\"")
+        assertTrue(!body.contains("\"hostId\""), "must not claim fields the rules forbid: $body")
+        assertContains(body, "currentDocument", message = "the write must be conditional")
         assertEquals(1, repo.getTripOfferById("offer_1")?.seatsLeft)
+    }
+
+    // --- Ride validation bounds --------------------------------------------------------------
+    //
+    // The two forms that create money and capacity applied none of this. A bare `if (isNotEmpty())`
+    // with no else swallowed the tap, `costPerRider.toDoubleOrNull() ?: 10.0` posted a $10 ride for
+    // the input "abc", `totalSeats.toIntOrNull() ?: 4` accepted "0", and the date picker offered
+    // past dates. The forms now surface these; the bounds live here so both platforms share them.
+
+    @Test
+    fun anOfferCannotAskForMoreThanTheContributionCap() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+        val failure = assertFailsWith<SplitCruiserException> {
+            repo.postTripOffer(anOffer(costPerRider = 999_999.0))
+        }
+        assertContains(failure.message.orEmpty(), "cannot exceed")
+    }
+
+    @Test
+    fun anOfferCannotHaveZeroSeats() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+        // seatsLeft = 0 at creation is a ride nobody can ever join.
+        assertFailsWith<SplitCruiserException> { repo.postTripOffer(anOffer(totalSeats = 0)) }
+        assertFailsWith<SplitCruiserException> { repo.postTripOffer(anOffer(totalSeats = -1)) }
+    }
+
+    @Test
+    fun anOfferCannotHaveANegativePrice() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+        assertFailsWith<SplitCruiserException> { repo.postTripOffer(anOffer(costPerRider = -5.0)) }
+    }
+
+    @Test
+    fun anOfferCannotDepartInThePast() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+        val failure = assertFailsWith<SplitCruiserException> {
+            repo.postTripOffer(anOffer(departureTime = now - 3_600_000L))
+        }
+        assertContains(failure.message.orEmpty(), "future")
+    }
+
+    @Test
+    fun unboundedFreeTextIsRefused() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+        // Firestore charges by document size and the feed renders every one of these strings.
+        assertFailsWith<SplitCruiserException> { repo.postTripOffer(anOffer(origin = "x".repeat(201))) }
+        assertFailsWith<SplitCruiserException> {
+            repo.postTripOffer(anOffer(exitLocation = "x".repeat(501)))
+        }
+    }
+
+    @Test
+    fun aRequestCannotAskForZeroOrTooManySeats() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+        assertFailsWith<SplitCruiserException> { repo.postRideRequest(aRequest(seatsNeeded = 0)) }
+        assertFailsWith<SplitCruiserException> { repo.postRideRequest(aRequest(seatsNeeded = 9)) }
+    }
+
+    @Test
+    fun aRequestCannotCarryAnUnboundedNote() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+        assertFailsWith<SplitCruiserException> { repo.postRideRequest(aRequest(notes = "x".repeat(501))) }
+    }
+
+    @Test
+    fun aValidOfferAndRequestStillPost() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+        // The bounds must not have made an ordinary ride unpostable.
+        repo.postTripOffer(anOffer())
+        repo.postRideRequest(aRequest())
+        assertTrue(requests.any { it.url.toString().contains("/documents/trip_offers/") })
+        assertTrue(requests.any { it.url.toString().contains("/documents/ride_requests/") })
+    }
+
+    private fun anOffer(
+        origin: String = "Back Bay",
+        destination: String = "Providence",
+        costPerRider: Double = 12.0,
+        totalSeats: Int = 3,
+        departureTime: Long = future,
+        exitLocation: String = "",
+    ) = TripOffer(
+        origin = origin, destination = destination,
+        originLat = 42.3, originLng = -71.1, destLat = 41.8, destLng = -71.4,
+        costPerRider = costPerRider, totalSeats = totalSeats, seatsLeft = totalSeats,
+        departureTime = departureTime, exitLocation = exitLocation,
+    )
+
+    private fun aRequest(
+        seatsNeeded: Int = 1,
+        notes: String = "",
+    ) = RideRequest(
+        origin = "Back Bay", destination = "Providence",
+        originLat = 42.3, originLng = -71.1, destLat = 41.8, destLng = -71.4,
+        seatsNeeded = seatsNeeded, departureTime = future, notes = notes,
+    )
+
+    // --- Session lifecycle -------------------------------------------------------------------
+
+    /**
+     * logout() calls stop(), which cancels and clears every poll job, and no login path called
+     * start() again -- its only callers are the two ViewModels' `init`, once per process. Signing
+     * out and back in without killing the app left feeds, matches, notifications and chat
+     * permanently dead. The user sees a frozen app with no error anywhere.
+     */
+    @Test
+    fun signingBackInAfterALogoutResumesPolling() = runTest {
+        documents["users/me"] =
+            """{"fields":{"id":{"stringValue":"me"},"name":{"stringValue":"Ana"}}}"""
+        val repo = repository(scriptedBackend())
+        repo.start()
+        repo.logInWithEmail("ana@neu.edu", "hunter2")
+
+        repo.logout()
+        assertEquals(null, repo.currentUser.value, "logout clears the session")
+
+        val requestsBeforeSecondLogin = requests.size
+        repo.logInWithEmail("ana@neu.edu", "hunter2")
+
+        // Let the resumed loops tick at least once.
+        advanceTimeBy(25_000)
+
+        assertTrue(
+            requests.size > requestsBeforeSecondLogin + 2,
+            "the refresh loops must be running again after signing back in",
+        )
+        repo.stop()
+    }
+
+    @Test
+    fun startIsIdempotentSoADoubleCallDoesNotDoubleThePollRate() = runTest {
+        val repo = repository(scriptedBackend())
+        repo.start()
+        repo.start()
+        advanceTimeBy(25_000)
+        val afterTwoStarts = requests.size
+
+        repo.stop()
+        advanceTimeBy(25_000)
+        assertEquals(afterTwoStarts, requests.size, "stop() must actually stop every loop")
+    }
+
+    // --- Seat-booking concurrency ----------------------------------------------------------
+    //
+    // The overbooking race. joinTripOfferDirect read the offer through a cache-first fetch and
+    // PATCHed an absolute seatsLeft computed from it, so two riders taking the last seat inside the
+    // 20s poll window both read seatsLeft=1, both passed the check, and both wrote 0. The rules
+    // could not catch it: the non-host branch only bounds seatsLeft to 0..totalSeats, which both
+    // writes satisfy. The seat write is now a commit with a currentDocument.updateTime precondition.
+    //
+    // These tests interleave a competing write between our read and our commit, which is the only
+    // way to reach the losing branch from sequential test code.
+
+    @Test
+    fun losingTheRaceForTheLastSeatIsReportedAndDoesNotOverbook() = runTest {
+        documents["trip_offers/offer_1"] = """
+            {"fields":{"id":{"stringValue":"offer_1"},"hostId":{"stringValue":"bo"},
+             "seatsLeft":{"integerValue":"1"},"totalSeats":{"integerValue":"4"},
+             "passengers":{"arrayValue":{"values":[]}},
+             "passengerNames":{"arrayValue":{"values":[]}},
+             "status":{"stringValue":"active"}}}
+        """.trimIndent()
+        val repo = signedIn(repository(scriptedBackend()))
+
+        // Another rider takes the last seat immediately after we read, before we commit.
+        var interleaved = false
+        onDocumentRead = { key ->
+            if (key == "trip_offers/offer_1" && !interleaved) {
+                interleaved = true
+                competingWrite("trip_offers/offer_1", mapOf(
+                    "seatsLeft" to """{"integerValue":"0"}""",
+                    "status" to """{"stringValue":"full"}""",
+                    "passengers" to """{"arrayValue":{"values":[{"stringValue":"someone_else"}]}}""",
+                    "passengerNames" to """{"arrayValue":{"values":[{"stringValue":"Kai"}]}}""",
+                ))
+            }
+        }
+
+        val failure = assertFailsWith<SplitCruiserException> { repo.joinTripOfferDirect("offer_1") }
+        assertContains(failure.message.orEmpty(), "no seats left")
+
+        // The decisive assertion: the other rider is still the only passenger. Before the fix both
+        // riders ended up on the manifest with seatsLeft written to 0 by whichever wrote last.
+        val stored = Json.parseToJsonElement(documents.getValue("trip_offers/offer_1")).jsonObject
+        val fields = stored["fields"]!!.jsonObject
+        val passengers = fields["passengers"]!!.jsonObject["arrayValue"]!!.jsonObject["values"]!!.jsonArray
+        assertEquals(1, passengers.size, "the ride must not be overbooked")
+        assertEquals("someone_else", passengers[0].jsonObject["stringValue"]!!.jsonPrimitive.content)
+        assertEquals("0", fields["seatsLeft"]!!.jsonObject["integerValue"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun losingOneRaceButFindingASeatOnTheRetrySucceedsWithTheRightCount() = runTest {
+        documents["trip_offers/offer_1"] = """
+            {"fields":{"id":{"stringValue":"offer_1"},"hostId":{"stringValue":"bo"},
+             "seatsLeft":{"integerValue":"2"},"totalSeats":{"integerValue":"4"},
+             "passengers":{"arrayValue":{"values":[]}},
+             "passengerNames":{"arrayValue":{"values":[]}},
+             "status":{"stringValue":"active"}}}
+        """.trimIndent()
+        val repo = signedIn(repository(scriptedBackend()))
+
+        var interleaved = false
+        onDocumentRead = { key ->
+            if (key == "trip_offers/offer_1" && !interleaved) {
+                interleaved = true
+                competingWrite("trip_offers/offer_1", mapOf(
+                    "seatsLeft" to """{"integerValue":"1"}""",
+                    "passengers" to """{"arrayValue":{"values":[{"stringValue":"someone_else"}]}}""",
+                    "passengerNames" to """{"arrayValue":{"values":[{"stringValue":"Kai"}]}}""",
+                ))
+            }
+        }
+
+        repo.joinTripOfferDirect("offer_1")
+
+        val fields = Json.parseToJsonElement(documents.getValue("trip_offers/offer_1"))
+            .jsonObject["fields"]!!.jsonObject
+        val passengers = fields["passengers"]!!.jsonObject["arrayValue"]!!.jsonObject["values"]!!.jsonArray
+        // The retry re-read the *competitor's* state and appended to it, rather than overwriting it
+        // with a manifest computed from the stale copy.
+        assertEquals(2, passengers.size)
+        assertEquals("someone_else", passengers[0].jsonObject["stringValue"]!!.jsonPrimitive.content)
+        assertEquals("me", passengers[1].jsonObject["stringValue"]!!.jsonPrimitive.content)
+        assertEquals("0", fields["seatsLeft"]!!.jsonObject["integerValue"]!!.jsonPrimitive.content)
+        assertEquals("full", fields["status"]!!.jsonObject["stringValue"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun reservingASeatTwiceDoesNotSeatTheRiderTwice() = runTest {
+        documents["trip_offers/offer_1"] = """
+            {"fields":{"id":{"stringValue":"offer_1"},"hostId":{"stringValue":"bo"},
+             "seatsLeft":{"integerValue":"3"},"totalSeats":{"integerValue":"4"},
+             "passengers":{"arrayValue":{"values":[{"stringValue":"me"}]}},
+             "passengerNames":{"arrayValue":{"values":[{"stringValue":"Ana"}]}},
+             "status":{"stringValue":"active"}}}
+        """.trimIndent()
+        val repo = signedIn(repository(scriptedBackend()))
+
+        // `passengers + riderId` had no dedup guard at all, so a retry or a double tap could seat
+        // the same rider twice and consume two seats.
+        assertFailsWith<SplitCruiserException> { repo.joinTripOfferDirect("offer_1") }
+    }
+
+    @Test
+    fun decliningReturnsTheSeatAndDropsTheRightNameWhenTwoPassengersShareOne() = runTest {
+        // List.minus removes only the FIRST match, so `passengerNames - "Alex"` dropped the other
+        // Alex's name and left the two parallel arrays out of step. The UI zips them, which then
+        // pairs a name with the wrong id. Names are dropped by index now.
+        documents["trip_offers/offer_1"] = """
+            {"fields":{"id":{"stringValue":"offer_1"},"hostId":{"stringValue":"me"},
+             "seatsLeft":{"integerValue":"0"},"totalSeats":{"integerValue":"3"},
+             "passengers":{"arrayValue":{"values":[{"stringValue":"alex_one"},{"stringValue":"alex_two"},{"stringValue":"kai"}]}},
+             "passengerNames":{"arrayValue":{"values":[{"stringValue":"Alex"},{"stringValue":"Alex"},{"stringValue":"Kai"}]}},
+             "status":{"stringValue":"full"}}}
+        """.trimIndent()
+        documents["ride_requests/req_1"] = """
+            {"fields":{"id":{"stringValue":"req_1"},"riderId":{"stringValue":"alex_two"},
+             "seatsNeeded":{"integerValue":"1"},"status":{"stringValue":"matched"}}}
+        """.trimIndent()
+        documents["trip_matches/match_1"] = """
+            {"fields":{"id":{"stringValue":"match_1"},"hostId":{"stringValue":"me"},
+             "riderId":{"stringValue":"alex_two"},"riderName":{"stringValue":"Alex"},
+             "offerId":{"stringValue":"offer_1"},"requestId":{"stringValue":"req_1"},
+             "status":{"stringValue":"accepted"}}}
+        """.trimIndent()
+        val repo = signedIn(repository(scriptedBackend()))
+        repo.refreshNow()
+
+        repo.declineMatch("match_1")
+
+        val fields = Json.parseToJsonElement(documents.getValue("trip_offers/offer_1"))
+            .jsonObject["fields"]!!.jsonObject
+        val ids = fields["passengers"]!!.jsonObject["arrayValue"]!!.jsonObject["values"]!!.jsonArray
+            .map { it.jsonObject["stringValue"]!!.jsonPrimitive.content }
+        val names = fields["passengerNames"]!!.jsonObject["arrayValue"]!!.jsonObject["values"]!!.jsonArray
+            .map { it.jsonObject["stringValue"]!!.jsonPrimitive.content }
+        assertEquals(listOf("alex_one", "kai"), ids)
+        assertEquals(listOf("Alex", "Kai"), names, "the remaining Alex must keep their name")
+        assertEquals("1", fields["seatsLeft"]!!.jsonObject["integerValue"]!!.jsonPrimitive.content)
+        assertEquals("active", fields["status"]!!.jsonObject["stringValue"]!!.jsonPrimitive.content)
     }
 
     @Test
     fun theLastSeatMarksTheRideFull() = runTest {
-        val repo = repository { request ->
-            val url = request.url.toString()
-            when {
-                url.contains("signInWithPassword") -> HttpStatusCode.OK to
-                    """{"localId":"me","email":"a@b.c","idToken":"tok","refreshToken":"ref","expiresIn":"3600"}"""
-                url.contains(":runQuery") -> HttpStatusCode.OK to """[{"readTime":"x"}]"""
-                url.contains("/documents/trip_offers/offer_1") && request.method.value == "GET" ->
-                    HttpStatusCode.OK to """
-                    {"fields":{"id":{"stringValue":"offer_1"},"hostId":{"stringValue":"bo"},
-                     "seatsLeft":{"integerValue":"1"},"totalSeats":{"integerValue":"4"},
-                     "status":{"stringValue":"active"}}}
-                    """.trimIndent()
-                else -> HttpStatusCode.OK to "{}"
-            }
-        }
-        signedIn(repo)
+        documents["trip_offers/offer_1"] = """
+            {"fields":{"id":{"stringValue":"offer_1"},"hostId":{"stringValue":"bo"},
+             "seatsLeft":{"integerValue":"1"},"totalSeats":{"integerValue":"4"},
+             "status":{"stringValue":"active"}}}
+        """.trimIndent()
+        val repo = signedIn(repository(scriptedBackend()))
+
         repo.joinTripOfferDirect("offer_1")
+
         assertEquals("full", repo.getTripOfferById("offer_1")?.status)
     }
 
@@ -958,6 +1359,18 @@ class SplitCruiserRepositoryTest {
         assertContains(body, "\"participants\"")
     }
 
+    /**
+     * The second tap must issue no write at all.
+     *
+     * This test used to assert `2` here — "both taps are sent" — on the reasoning that they address
+     * the same deterministic id, so only one card renders. Against a real Firestore that is wrong:
+     * the second tap is an *update*, it carried a fresh `timestamp`, and the `messages` update rule
+     * forbids changing `timestamp` (along with matchId, senderId, participants and contribution, so
+     * neither party can repudiate a price both have seen). The second tap therefore came back
+     * PERMISSION_DENIED and the user was told they lacked permission to confirm their own pickup.
+     * The MockEngine accepts everything, so the suite could not see it; `client-writes.rules.test.ts`
+     * pins the rule half of this contract against the emulator.
+     */
     @Test
     fun confirmingTheSameProposalTwiceWritesOneMessage() = runTest {
         val repo = signedIn(repository(chatBackendServing(aProposalFrom = "bo")))
@@ -970,9 +1383,27 @@ class SplitCruiserRepositoryTest {
         val confirmationWrites = requests.filter {
             it.url.toString().contains("/documents/messages/msg_confirm_msg_proposal_me")
         }
-        assertEquals(2, confirmationWrites.size, "both taps are sent")
-        val distinctIds = confirmationWrites.map { it.url.toString() }.toSet()
-        assertEquals(1, distinctIds.size, "but they address one document, so one card is rendered")
+        assertEquals(1, confirmationWrites.size, "the repeat tap must not re-issue a denied write")
+    }
+
+    /**
+     * A message must never be written with only its sender in `participants`.
+     *
+     * The read rule is `uid in resource.data.participants`, so such a message is readable by its
+     * sender and nobody else, for ever — and the old cache-miss fallback produced exactly that
+     * shape with no error anywhere. Failing the send is the lesser harm.
+     */
+    @Test
+    fun sendingIntoAnUnresolvableMatchFailsInsteadOfWritingAnUnreadableMessage() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+
+        assertFailsWith<SplitCruiserException> {
+            repo.sendPickupProposal("match_unknown", "360 Huntington Ave", "700 Comm Ave", "5:45 PM", 14.5)
+        }
+        assertTrue(
+            requests.none { it.url.toString().contains("/documents/messages/") },
+            "no message document should have been written",
+        )
     }
 
     @Test
@@ -1000,6 +1431,7 @@ class SplitCruiserRepositoryTest {
 
     @Test
     fun aPickupProposalCarriesTheAddressesAndTheAmount() = runTest {
+        seedAcceptedMatch()
         val repo = signedIn(repository(scriptedBackend()))
 
         repo.sendPickupProposal("match_1", "360 Huntington Ave", "700 Comm Ave", "5:45 PM", 14.5)
@@ -1015,13 +1447,23 @@ class SplitCruiserRepositoryTest {
         assertContains(body, "for $14.50")
     }
 
-    /** Serves one conversation containing a single pickup proposal sent by [aProposalFrom]. */
-    private fun chatBackendServing(aProposalFrom: String): (HttpRequestData) -> Pair<HttpStatusCode, String> {
+    /**
+     * An accepted match between "bo" (host) and "me" (rider).
+     *
+     * Every message write resolves the thread's `participants` from the match, so a test that sends
+     * a message needs the match to exist — exactly as production does.
+     */
+    private fun seedAcceptedMatch() {
         documents["trip_matches/match_1"] = """
             {"fields":{"id":{"stringValue":"match_1"},"hostId":{"stringValue":"bo"},
              "riderId":{"stringValue":"me"},"contribution":{"doubleValue":9.0},
              "status":{"stringValue":"accepted"}}}
         """.trimIndent()
+    }
+
+    /** Serves one conversation containing a single pickup proposal sent by [aProposalFrom]. */
+    private fun chatBackendServing(aProposalFrom: String): (HttpRequestData) -> Pair<HttpStatusCode, String> {
+        seedAcceptedMatch()
         val proposal = """
             {"document":{"fields":{"id":{"stringValue":"msg_proposal"},
              "matchId":{"stringValue":"match_1"},"senderId":{"stringValue":"$aProposalFrom"},

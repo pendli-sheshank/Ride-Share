@@ -94,6 +94,17 @@ import com.splitcruiser.app.ui.theme.SplitCruiserWarning
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
+import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
+import androidx.compose.ui.semantics.Role
+import com.splitcruiser.app.data.Gender
+import androidx.compose.foundation.lazy.rememberLazyListState
 
 // --- Material 3 Animation Utilities ---
 
@@ -274,21 +285,46 @@ fun SplitCruiserApp(viewModel: MainViewModel = viewModel()) {
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
 
-    // Observe Auth changes to route properly
-    LaunchedEffect(currentUser) {
-        if (currentUser == null) {
-            navController.navigate("login") {
-                popUpTo(0) { inclusive = true }
-            }
-        } else if (currentUser?.name.isNullOrEmpty()) {
-            navController.navigate("profile_setup") {
-                popUpTo("login") { inclusive = true }
-            }
-        } else {
-            navController.navigate("dashboard") {
-                popUpTo(0) { inclusive = true }
+    // Which of the three top-level destinations the session belongs in. Only these three states
+    // are routing-relevant; everything else about the user is not.
+    val authPhase = when {
+        currentUser == null -> "login"
+        currentUser?.name.isNullOrEmpty() -> "profile_setup"
+        else -> "dashboard"
+    }
+
+    // Keyed on the phase, NOT on `currentUser`.
+    //
+    // Keying on the whole User object re-ran this on every emission, and `adoptUser` re-emits from
+    // updateUserProfileDetails, uploadProfilePicture, recordNoShow and all three settings toggles.
+    // Each of those called navigate(...) { popUpTo(0) }, so flipping the "Email notifications"
+    // switch on the Profile screen threw the user to the Dashboard with an empty back stack.
+    //
+    // Worse during onboarding: `currentUser?.name` is still empty there, so picking a profile photo
+    // re-navigated to "profile_setup" with no launchSingleTop, pushing a *second* copy of the screen
+    // and resetting every remembered field — name, address, and all five vehicle fields — while
+    // growing the back stack by one entry per photo pick.
+    LaunchedEffect(authPhase) {
+        navController.navigate(authPhase) {
+            popUpTo(0) { inclusive = true }
+            launchSingleTop = true
+        }
+    }
+
+    // Back off the poll loops when the app is not on screen. Without this the repository's
+    // `foreground` flag was permanently true and a backgrounded app polled feeds and matches every
+    // 20s, notifications every 60s and chat every 3s, for ever.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> viewModel.setForeground(true)
+                Lifecycle.Event.ON_STOP -> viewModel.setForeground(false)
+                else -> Unit
             }
         }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     Surface(
@@ -766,10 +802,14 @@ fun FirebaseStatusPill(isFirebaseEnabled: Boolean) {
 
 @Composable
 fun EmailPasswordLoginScreen(viewModel: MainViewModel, navController: NavController) {
-    var email by remember { mutableStateOf("") }
+    // Retyping an email address after a rotation is the most annoying way to lose a form, so it
+    // and the mode survive. The two password fields deliberately do NOT: rememberSaveable writes
+    // into the saved-instance Bundle, which the system may persist to disk for process death, and
+    // a password does not belong there. Losing it on rotation is the safer failure.
+    var email by rememberSaveable { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
-    var isSignUpMode by remember { mutableStateOf(false) }
+    var isSignUpMode by rememberSaveable { mutableStateOf(false) }
     var passwordVisible by remember { mutableStateOf(false) }
     var confirmPasswordVisible by remember { mutableStateOf(false) }
     var authButtonPressed by remember { mutableStateOf(false) }
@@ -1086,24 +1126,28 @@ fun EmailPasswordLoginScreen(viewModel: MainViewModel, navController: NavControl
 
 @Composable
 fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
-    var name by remember { mutableStateOf("") }
-    var lastInitial by remember { mutableStateOf("") }
-    var homeArea by remember { mutableStateOf("") }
+    var name by rememberSaveable { mutableStateOf("") }
+    var lastInitial by rememberSaveable { mutableStateOf("") }
+    var homeArea by rememberSaveable { mutableStateOf("") }
 
     // Contact and home location. The address is picked from autocomplete so it carries
     // coordinates, which is what lets a ride request fill its own pickup in later.
-    var phoneNumber by remember { mutableStateOf("") }
-    var homeAddress by remember { mutableStateOf("") }
-    var homeLat by remember { mutableStateOf(0.0) }
-    var homeLng by remember { mutableStateOf(0.0) }
+    var phoneNumber by rememberSaveable { mutableStateOf("") }
+    var homeAddress by rememberSaveable { mutableStateOf("") }
+    var homeLat by rememberSaveable { mutableStateOf(0.0) }
+    var homeLng by rememberSaveable { mutableStateOf(0.0) }
+
+    // Collected so "women only" can be a restriction rather than a display filter. Stored on the
+    // private profile document, never on `users/{uid}`, which every signed-in user can read.
+    var gender by rememberSaveable { mutableStateOf(Gender.UNSPECIFIED) }
 
     // Host Vehicle state (optional during setup)
-    var isHostExpanded by remember { mutableStateOf(false) }
-    var vMake by remember { mutableStateOf("") }
-    var vModel by remember { mutableStateOf("") }
-    var vYear by remember { mutableStateOf("") }
-    var vColor by remember { mutableStateOf("") }
-    var vPlate by remember { mutableStateOf("") }
+    var isHostExpanded by rememberSaveable { mutableStateOf(false) }
+    var vMake by rememberSaveable { mutableStateOf("") }
+    var vModel by rememberSaveable { mutableStateOf("") }
+    var vYear by rememberSaveable { mutableStateOf("") }
+    var vColor by rememberSaveable { mutableStateOf("") }
+    var vPlate by rememberSaveable { mutableStateOf("") }
 
     // Profile picture state
     var selectedAvatarUrl by remember { mutableStateOf("") }
@@ -1304,6 +1348,58 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
                 ),
                 shape = RoundedCornerShape(12.dp)
             )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Gender.
+            //
+            // Asked because "women only" is an enforced restriction, not a display filter: the
+            // Firestore rules read this (from the private profile, server-side) on the write that
+            // takes a seat. It is optional in the sense that "Prefer not to say" is a real answer —
+            // it just means women-only rides are not offered.
+            Text(
+                text = "Gender",
+                color = SplitCruiserTextSecondary,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(bottom = 6.dp)
+            )
+            Text(
+                text = "Used only to offer women-only rides. Never shown on your profile.",
+                color = SplitCruiserTextSecondary,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+            Column(modifier = Modifier.fillMaxWidth().selectableGroup()) {
+                Gender.SELECTABLE.forEach { option ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .selectable(
+                                selected = gender == option,
+                                onClick = { gender = option },
+                                role = Role.RadioButton,
+                            )
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = gender == option,
+                            // null: the whole row is the touch target, and a nested clickable
+                            // would announce itself separately to a screen reader.
+                            onClick = null,
+                            colors = RadioButtonDefaults.colors(selectedColor = SplitCruiserPrimary)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = Gender.label(option),
+                            color = SplitCruiserTextPrimary,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+            }
 
             Spacer(modifier = Modifier.height(12.dp))
 
@@ -1513,6 +1609,7 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
                                 homeAddress = homeAddress,
                                 homeLat = homeLat,
                                 homeLng = homeLng,
+                                gender = gender,
                             ),
                             vehicle = vehicle
                         ) {
@@ -1551,6 +1648,7 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
     val activeMode = viewModel.currentMode
     val isLoading by viewModel.isLoading.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
+    val hasLoadedFeeds by viewModel.hasLoadedFeeds.collectAsState()
     val currentUserId = currentUser?.id ?: ""
 
     // RideSchedule, not `status == "active"`: a ride whose last seat has gone is "full" and still
@@ -1874,7 +1972,7 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                                         fontSize = 14.sp
                                     )
                                     Text(
-                                        text = "Status: ${match.status.replaceFirstChar { it.uppercase() }} • Contribution: $${match.contribution}",
+                                        text = "Status: ${match.status.replaceFirstChar { it.uppercase() }} • Contribution: ${formatContribution(match.contribution)}",
                                         color = SplitCruiserTextSecondary,
                                         fontSize = 11.sp
                                     )
@@ -1914,7 +2012,7 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                         )
                     }
 
-                    if (isLoading && activeOffers.isEmpty()) {
+                    if (!hasLoadedFeeds && activeOffers.isEmpty()) {
                         item {
                             SplitCruiserFeedLoadingSkeleton()
                         }
@@ -1981,7 +2079,7 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                     }
                 } else {
                     // HOST FEED: List active rider requests
-                    if (isLoading && activeRequests.isEmpty()) {
+                    if (!hasLoadedFeeds && activeRequests.isEmpty()) {
                         item {
                             SplitCruiserFeedLoadingSkeleton()
                         }
@@ -2257,7 +2355,7 @@ fun HostDashboard(viewModel: MainViewModel, navController: NavController) {
                     )
                     HostStatCard(
                         label = "Chipped in",
-                        value = "$${String.format(Locale.US, "%.2f", totalContributions)}",
+                        value = formatContribution(totalContributions),
                         icon = Icons.Default.AttachMoney,
                         modifier = Modifier.weight(1f)
                     )
@@ -2656,7 +2754,7 @@ fun JoinedRideScheduleCard(
                 CardStat("DEPARTURE", dateStr, alignment = Alignment.CenterHorizontally)
                 CardStat(
                     label = "CONTRIBUTION",
-                    value = "$${offer.costPerRider}",
+                    value = formatContribution(offer.costPerRider),
                     alignment = Alignment.End,
                     valueColor = SplitCruiserPrimary
                 )
@@ -3314,7 +3412,7 @@ fun TripOfferCard(
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Column(horizontalAlignment = Alignment.End) {
-                            Text("$${offer.costPerRider}", color = SplitCruiserPrimary, fontWeight = FontWeight.Black, fontSize = 22.sp)
+                            Text(formatContribution(offer.costPerRider), color = SplitCruiserPrimary, fontWeight = FontWeight.Black, fontSize = 22.sp)
                             Text("per rider", color = SplitCruiserTextSecondary, fontSize = 10.sp)
                         }
 
@@ -3466,7 +3564,7 @@ fun TripOfferCard(
                         }
 
                         Column(horizontalAlignment = Alignment.End) {
-                            Text("$${offer.costPerRider}", color = SplitCruiserPrimary, fontWeight = FontWeight.Black, fontSize = 18.sp)
+                            Text(formatContribution(offer.costPerRider), color = SplitCruiserPrimary, fontWeight = FontWeight.Black, fontSize = 18.sp)
                             Text("per rider", color = SplitCruiserTextSecondary, fontSize = 9.sp)
                         }
                     }
@@ -3813,7 +3911,7 @@ fun JoinSuccessDialog(
                             }
 
                             Text(
-                                text = "$${offer.costPerRider}",
+                                text = formatContribution(offer.costPerRider),
                                 color = SplitCruiserPrimary,
                                 fontWeight = FontWeight.Black,
                                 fontSize = 16.sp
@@ -3982,25 +4080,25 @@ fun PostOfferScreen(viewModel: MainViewModel, navController: NavController) {
     val context = androidx.compose.ui.platform.LocalContext.current
     // Prefilled from onboarding, like the rider screen: a host's ride usually starts from home.
     val home by viewModel.contactDetails.collectAsState()
-    var origin by remember(home) { mutableStateOf(home?.homeAddress.orEmpty()) }
-    var destination by remember { mutableStateOf("") }
-    var exitLocation by remember { mutableStateOf("") }
-    var originLat by remember(home) { mutableStateOf(home?.homeLat?.takeIf { it != 0.0 } ?: 42.34) }
-    var originLng by remember(home) { mutableStateOf(home?.homeLng?.takeIf { it != 0.0 } ?: -71.10) }
-    var destLat by remember { mutableStateOf(42.33) }
-    var destLng by remember { mutableStateOf(-71.08) }
+    var origin by rememberSaveable(home) { mutableStateOf(home?.homeAddress.orEmpty()) }
+    var destination by rememberSaveable { mutableStateOf("") }
+    var exitLocation by rememberSaveable { mutableStateOf("") }
+    var originLat by rememberSaveable(home) { mutableStateOf(home?.homeLat?.takeIf { it != 0.0 } ?: 42.34) }
+    var originLng by rememberSaveable(home) { mutableStateOf(home?.homeLng?.takeIf { it != 0.0 } ?: -71.10) }
+    var destLat by rememberSaveable { mutableStateOf(42.33) }
+    var destLng by rememberSaveable { mutableStateOf(-71.08) }
 
     val calendar = remember { java.util.Calendar.getInstance().apply { add(java.util.Calendar.HOUR_OF_DAY, 4) } }
     val dateFormatter = remember { java.text.SimpleDateFormat("EEE, MMM d, yyyy", java.util.Locale.getDefault()) }
     val timeFormatter = remember { java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()) }
 
-    var dateInput by remember { mutableStateOf(dateFormatter.format(calendar.time)) }
-    var timeInput by remember { mutableStateOf(timeFormatter.format(calendar.time)) }
-    var departureEpoch by remember { mutableStateOf(calendar.timeInMillis) }
+    var dateInput by rememberSaveable { mutableStateOf(dateFormatter.format(calendar.time)) }
+    var timeInput by rememberSaveable { mutableStateOf(timeFormatter.format(calendar.time)) }
+    var departureEpoch by rememberSaveable { mutableStateOf(calendar.timeInMillis) }
 
-    var totalSeats by remember { mutableStateOf("4") }
-    var costPerRider by remember { mutableStateOf("15.00") }
-    var womenOnly by remember { mutableStateOf(false) }
+    var totalSeats by rememberSaveable { mutableStateOf("4") }
+    var costPerRider by rememberSaveable { mutableStateOf("15.00") }
+    var womenOnly by rememberSaveable { mutableStateOf(false) }
 
     val userVehicle = viewModel.getVehicleInfo(viewModel.currentUser.value?.id ?: "")
 
@@ -4017,7 +4115,12 @@ fun PostOfferScreen(viewModel: MainViewModel, navController: NavController) {
             calendar.get(java.util.Calendar.YEAR),
             calendar.get(java.util.Calendar.MONTH),
             calendar.get(java.util.Calendar.DAY_OF_MONTH)
-        )
+        ).apply {
+            // A ride departing yesterday could be posted: the picker offered past dates and
+            // nothing downstream rejected them until the repository, whose error the form never
+            // surfaced. Greying them out is the honest place to say no.
+            datePicker.minDate = System.currentTimeMillis()
+        }
         datePickerDialog.show()
     }
 
@@ -4307,9 +4410,36 @@ fun PostOfferScreen(viewModel: MainViewModel, navController: NavController) {
 
             Button(
                 onClick = {
-                    if (origin.isNotEmpty() && destination.isNotEmpty() && costPerRider.isNotEmpty()) {
-                        val cost = costPerRider.toDoubleOrNull() ?: 10.0
-                        val seats = totalSeats.toIntOrNull() ?: 4
+                    // Every branch below used to be inside a bare `if (...isNotEmpty())` with no
+                    // else, so tapping Post with a field empty did nothing at all — no message, no
+                    // indication the button had registered. And the two parses had silent defaults:
+                    // `costPerRider.toDoubleOrNull() ?: 10.0` posted a $10 ride for the input "abc",
+                    // and `totalSeats.toIntOrNull() ?: 4` accepted "0", producing a ride with zero
+                    // seats that nobody could ever join.
+                    val cost = costPerRider.trim().toDoubleOrNull()
+                    val seats = totalSeats.trim().toIntOrNull()
+                    val validationError = when {
+                        origin.isBlank() -> "Where does the ride start?"
+                        destination.isBlank() -> "Where is the ride going?"
+                        originLat == 0.0 || originLng == 0.0 ->
+                            "Pick the pickup point from the suggestions so riders can find it."
+                        destLat == 0.0 || destLng == 0.0 ->
+                            "Pick the destination from the suggestions so riders can find it."
+                        departureEpoch <= System.currentTimeMillis() ->
+                            "Choose a departure time in the future."
+                        costPerRider.isBlank() -> "What should each rider chip in?"
+                        cost == null -> "Enter the contribution as a number, like 12.50."
+                        cost < 0.0 -> "The contribution cannot be negative."
+                        cost > 500.0 -> "That contribution looks too high. The cap is $500."
+                        seats == null -> "Enter the number of seats as a whole number."
+                        seats !in 1..8 -> "A ride can offer between 1 and 8 seats."
+                        else -> null
+                    }
+                    if (validationError != null) {
+                        viewModel.setError(validationError)
+                    } else if (cost != null && seats != null) {
+                        // The `when` above already guarantees both are non-null; this restates it
+                        // so the values smart-cast rather than needing `!!`.
                         val vehicleLabel = if (userVehicle != null) {
                             "${userVehicle.color} ${userVehicle.make} ${userVehicle.model}"
                         } else {
@@ -4360,22 +4490,22 @@ fun PostRequestScreen(viewModel: MainViewModel, navController: NavController) {
     // What the home address in onboarding is for: the rider should not retype where they live.
     val home by viewModel.contactDetails.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
-    var origin by remember(home) { mutableStateOf(home?.homeAddress.orEmpty()) }
-    var destination by remember { mutableStateOf("") }
-    var exitLocation by remember { mutableStateOf("") }
-    var originLat by remember(home) { mutableStateOf(home?.homeLat?.takeIf { it != 0.0 } ?: 42.33) }
-    var originLng by remember(home) { mutableStateOf(home?.homeLng?.takeIf { it != 0.0 } ?: -71.08) }
-    var destLat by remember { mutableStateOf(42.36) }
-    var destLng by remember { mutableStateOf(-71.01) }
+    var origin by rememberSaveable(home) { mutableStateOf(home?.homeAddress.orEmpty()) }
+    var destination by rememberSaveable { mutableStateOf("") }
+    var exitLocation by rememberSaveable { mutableStateOf("") }
+    var originLat by rememberSaveable(home) { mutableStateOf(home?.homeLat?.takeIf { it != 0.0 } ?: 42.33) }
+    var originLng by rememberSaveable(home) { mutableStateOf(home?.homeLng?.takeIf { it != 0.0 } ?: -71.08) }
+    var destLat by rememberSaveable { mutableStateOf(42.36) }
+    var destLng by rememberSaveable { mutableStateOf(-71.01) }
     
     val calendar = remember { java.util.Calendar.getInstance().apply { add(java.util.Calendar.HOUR_OF_DAY, 6) } }
     val formatter = remember { java.text.SimpleDateFormat("EEE, MMM d, yyyy - h:mm a", java.util.Locale.getDefault()) }
-    var departureTimeInput by remember { mutableStateOf(formatter.format(calendar.time)) }
-    var departureEpoch by remember { mutableStateOf(calendar.timeInMillis) }
+    var departureTimeInput by rememberSaveable { mutableStateOf(formatter.format(calendar.time)) }
+    var departureEpoch by rememberSaveable { mutableStateOf(calendar.timeInMillis) }
 
-    var seatsNeeded by remember { mutableStateOf("1") }
-    var notes by remember { mutableStateOf("") }
-    var womenOnly by remember { mutableStateOf(false) }
+    var seatsNeeded by rememberSaveable { mutableStateOf("1") }
+    var notes by rememberSaveable { mutableStateOf("") }
+    var womenOnly by rememberSaveable { mutableStateOf(false) }
 
     fun showDateTimePicker() {
         val datePickerDialog = android.app.DatePickerDialog(
@@ -4405,7 +4535,12 @@ fun PostRequestScreen(viewModel: MainViewModel, navController: NavController) {
             calendar.get(java.util.Calendar.YEAR),
             calendar.get(java.util.Calendar.MONTH),
             calendar.get(java.util.Calendar.DAY_OF_MONTH)
-        )
+        ).apply {
+            // A ride departing yesterday could be posted: the picker offered past dates and
+            // nothing downstream rejected them until the repository, whose error the form never
+            // surfaced. Greying them out is the honest place to say no.
+            datePicker.minDate = System.currentTimeMillis()
+        }
         datePickerDialog.show()
     }
 
@@ -4612,8 +4747,27 @@ fun PostRequestScreen(viewModel: MainViewModel, navController: NavController) {
 
             Button(
                 onClick = {
-                    if (origin.isNotEmpty() && destination.isNotEmpty() && seatsNeeded.isNotEmpty()) {
-                        val needed = seatsNeeded.toIntOrNull() ?: 1
+                    // Same shape as the post-offer form: a bare `if` with no else swallowed the tap
+                    // silently, and `seatsNeeded.toIntOrNull() ?: 1` accepted "0" and negatives.
+                    val needed = seatsNeeded.trim().toIntOrNull()
+                    val validationError = when {
+                        origin.isBlank() -> "Where should we pick you up?"
+                        destination.isBlank() -> "Where are you going?"
+                        originLat == 0.0 || originLng == 0.0 ->
+                            "Pick the pickup point from the suggestions so hosts can find it."
+                        destLat == 0.0 || destLng == 0.0 ->
+                            "Pick the destination from the suggestions so hosts can find it."
+                        departureEpoch <= System.currentTimeMillis() ->
+                            "Choose a departure time in the future."
+                        seatsNeeded.isBlank() -> "How many seats do you need?"
+                        needed == null -> "Enter the number of seats as a whole number."
+                        needed !in 1..8 -> "You can request between 1 and 8 seats."
+                        notes.length > 500 -> "That note is too long — keep it under 500 characters."
+                        else -> null
+                    }
+                    if (validationError != null) {
+                        viewModel.setError(validationError)
+                    } else if (needed != null) {
                         val epoch = departureEpoch
 
                         val request = RideRequest(
@@ -4663,6 +4817,11 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
 
     var customContribution by remember { mutableStateOf("") }
     var showSuccessDialog by remember { mutableStateOf(false) }
+
+    // (riderId, displayName) of a no-show awaiting confirmation. Reporting one is irreversible —
+    // the report document is immutable by rule and drops the rider's verified badge — so it does
+    // not happen on a single tap.
+    var noShowTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
 
     if (type == "offer") {
         // `activeOffers` is deliberately filtered to exclude the viewer's own rides and anything
@@ -4738,14 +4897,27 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
         val hostUser = remember(offer.hostId) { viewModel.getUserPublicProfile(offer.hostId) }
         val hostVehicle = remember(offer.hostId) { viewModel.getVehicleInfo(offer.hostId) }
 
-        val hostEmail = hostUser?.email?.ifEmpty { null } ?: (offer.hostName.trim().lowercase().replace(" ", "") + "@example.com")
-        val hostPhone = hostUser?.phoneNumber?.ifEmpty { null } ?: "+1 (555) 722-2469"
-        val hostVerifiedTier = hostUser?.verifiedTier ?: (if (offer.hostRating >= 4.5f) "vouched" else "guest")
+        // Nothing here is invented.
+        //
+        // These fell back to a fabricated phone number ("+1 (555) 722-2469"), a fabricated licence
+        // plate ("STU-1829"), a made-up year and colour, and an @example.com address synthesised
+        // from the host's display name — all rendered as fact in the card a rider opens to identify
+        // the car they are about to get into, with a working "call" button wired to the fake
+        // number. `verifiedTier` was likewise synthesised from the rating whenever the host's
+        // profile had not loaded, so an unverified host could be shown as "vouched".
+        //
+        // A blank value now means "we don't know", and the card says so.
+        val hostEmail = hostUser?.email.orEmpty()
+        val hostPhone = hostUser?.phoneNumber.orEmpty()
+        val hostVerifiedTier = hostUser?.verifiedTier.orEmpty()
 
-        val vehicleMakeModel = hostVehicle?.let { "${it.color} ${it.make} ${it.model}" } ?: offer.vehicleInfo.ifEmpty { "Shared Sedan" }
-        val vehiclePlate = hostVehicle?.licensePlate?.ifEmpty { null } ?: "STU-1829"
-        val vehicleYear = hostVehicle?.year?.ifEmpty { null } ?: "2022"
-        val vehicleColor = hostVehicle?.color?.ifEmpty { null } ?: "Slate Gray"
+        val vehicleMakeModel = hostVehicle
+            ?.let { listOf(it.color, it.make, it.model).filter { part -> part.isNotBlank() }.joinToString(" ") }
+            ?.ifBlank { null }
+            ?: offer.vehicleInfo
+        val vehiclePlate = hostVehicle?.licensePlate.orEmpty()
+        val vehicleYear = hostVehicle?.year.orEmpty()
+        val vehicleColor = hostVehicle?.color.orEmpty()
 
         if (showDriverModal) {
             DriverContactModal(
@@ -4954,13 +5126,21 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Default.DirectionsCar, contentDescription = "Vehicle", tint = SplitCruiserTextSecondary, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Vehicle: $vehicleMakeModel", color = SplitCruiserTextPrimary, fontSize = 13.sp)
+                                    Text(
+                                        text = "Vehicle: ${vehicleMakeModel.ifBlank { NOT_PROVIDED }}",
+                                        color = SplitCruiserTextPrimary,
+                                        fontSize = 13.sp
+                                    )
                                 }
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Default.Phone, contentDescription = "Phone", tint = SplitCruiserTextSecondary, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Phone: $hostPhone", color = SplitCruiserTextPrimary, fontSize = 13.sp)
+                                    Text(
+                                        text = "Phone: ${hostPhone.ifBlank { NOT_PROVIDED }}",
+                                        color = SplitCruiserTextPrimary,
+                                        fontSize = 13.sp
+                                    )
                                 }
                                 
                                 Spacer(modifier = Modifier.height(12.dp))
@@ -4996,12 +5176,12 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                         
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Suggested Gas Contribution:", color = SplitCruiserTextPrimary, fontSize = 13.sp)
-                            Text("$${offer.costPerRider}", color = SplitCruiserTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Text(formatContribution(offer.costPerRider), color = SplitCruiserTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         }
 
                         Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Server Max Limit (2x Cost Cap):", color = SplitCruiserTextSecondary, fontSize = 12.sp)
-                            Text("$${costLimit}", color = SplitCruiserTextSecondary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text(formatContribution(costLimit), color = SplitCruiserTextSecondary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
 
                         Spacer(modifier = Modifier.height(14.dp))
@@ -5024,32 +5204,81 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                 Spacer(modifier = Modifier.height(24.dp))
 
                 if (offer.passengers.isNotEmpty()) {
-                    Text("RESERVED PASSENGERS", color = SplitCruiserPrimary, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                    val isHostViewing = offer.hostId == currentUser?.id
+                    Text(
+                        text = if (isHostViewing) "YOUR PASSENGERS" else "RESERVED PASSENGERS",
+                        color = SplitCruiserPrimary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Black
+                    )
                     Spacer(modifier = Modifier.height(8.dp))
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .border(1.dp, SplitCruiserOutline, RoundedCornerShape(16.dp))
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            offer.passengerNames.zip(offer.passengers).forEachIndexed { index, (name, id) ->
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-                                ) {
-                                    Icon(Icons.Default.Person, contentDescription = "Passenger", tint = SplitCruiserTextSecondary, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = if (id == currentUser?.id) "$name (You)" else name,
-                                        color = SplitCruiserTextPrimary,
-                                        fontWeight = if (id == currentUser?.id) FontWeight.Bold else FontWeight.Normal,
-                                        fontSize = 14.sp
+
+                    if (isHostViewing) {
+                        // The host's passenger management, finally reachable.
+                        //
+                        // PassengerManagementCard was written, complete, and never called from
+                        // anywhere — so hosts had no way to manage a manifest at all, and
+                        // `recordNoShow` had no caller on either platform even though the profile
+                        // screen renders a "No-shows" count. Three dead things that were really one
+                        // unfinished feature.
+                        //
+                        // Indexed rather than zipped: `zip` truncates to the shorter list, so a
+                        // manifest whose two parallel arrays had drifted silently dropped
+                        // passengers or paired a name with the wrong id.
+                        offer.passengers.forEachIndexed { index, id ->
+                            val name = offer.passengerNames.getOrNull(index) ?: "Passenger"
+                            val rider = viewModel.getUserPublicProfile(id)
+                            PassengerManagementCard(
+                                passengerName = name,
+                                passengerRating = rider?.ratingAvg ?: 0f,
+                                passengerId = id,
+                                offerRoute = "${offer.origin} → ${offer.destination}",
+                                onMessageClick = {
+                                    val match = viewModel.userMatches.value.firstOrNull {
+                                        it.offerId == offer.id && it.riderId == id
+                                    }
+                                    if (match != null) {
+                                        navController.navigate("chat/${match.id}")
+                                    } else {
+                                        viewModel.setError("There's no chat thread for this rider yet.")
+                                    }
+                                },
+                                onMarkNoShowClick = { noShowTarget = id to name },
+                                onViewProfileClick = {
+                                    viewModel.setError(
+                                        rider?.let { "${it.displayName} • ${it.ratingCount} ratings" }
+                                            ?: "That rider's profile hasn't loaded yet."
                                     )
-                                }
-                                if (index < offer.passengerNames.size - 1) {
-                                    HorizontalDivider(color = SplitCruiserOutline, modifier = Modifier.padding(vertical = 4.dp))
+                                },
+                            )
+                        }
+                    } else {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(1.dp, SplitCruiserOutline, RoundedCornerShape(16.dp))
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                offer.passengers.forEachIndexed { index, id ->
+                                    val name = offer.passengerNames.getOrNull(index) ?: "Passenger"
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                                    ) {
+                                        Icon(Icons.Default.Person, contentDescription = null, tint = SplitCruiserTextSecondary, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = if (id == currentUser?.id) "$name (You)" else name,
+                                            color = SplitCruiserTextPrimary,
+                                            fontWeight = if (id == currentUser?.id) FontWeight.Bold else FontWeight.Normal,
+                                            fontSize = 14.sp
+                                        )
+                                    }
+                                    if (index < offer.passengers.size - 1) {
+                                        HorizontalDivider(color = SplitCruiserOutline, modifier = Modifier.padding(vertical = 4.dp))
+                                    }
                                 }
                             }
                         }
@@ -5292,7 +5521,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                         Text("Join Ride (Reserve Seat)", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                                     }
                                     Text(
-                                        text = "Reserves your seat immediately at $${offer.costPerRider} — no host approval needed.",
+                                        text = "Reserves your seat immediately at ${formatContribution(offer.costPerRider)} — no host approval needed.",
                                         color = SplitCruiserTextSecondary,
                                         fontSize = 11.sp,
                                         textAlign = TextAlign.Center,
@@ -5610,7 +5839,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text("Rider offered gas contribution split:", color = SplitCruiserTextSecondary, fontSize = 12.sp)
-                            Text("$${activePendingMatch.contribution}", color = SplitCruiserTextPrimary, fontWeight = FontWeight.Black, fontSize = 24.sp)
+                            Text(formatContribution(activePendingMatch.contribution), color = SplitCruiserTextPrimary, fontWeight = FontWeight.Black, fontSize = 24.sp)
                             
                             Spacer(modifier = Modifier.height(16.dp))
                             
@@ -5780,6 +6009,43 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
             )
         }
     }
+
+    noShowTarget?.let { (riderId, riderName) ->
+        AlertDialog(
+            onDismissRequest = { noShowTarget = null },
+            containerColor = SplitCruiserSurfaceCard,
+            shape = RoundedCornerShape(SplitCruiserRadius.Lg),
+            title = {
+                Text(
+                    "Report $riderName as a no-show?",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = SplitCruiserTextPrimary
+                )
+            },
+            text = {
+                Text(
+                    "This is permanent. The report can't be edited or withdrawn, and it removes " +
+                        "their verified badge. Only report someone who genuinely didn't turn up.",
+                    color = SplitCruiserTextSecondary,
+                    fontSize = 13.sp
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.recordNoShow(riderId)
+                    noShowTarget = null
+                }) {
+                    Text("Report", color = SplitCruiserDanger, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { noShowTarget = null }) {
+                    Text("Cancel", color = SplitCruiserTextSecondary)
+                }
+            }
+        )
+    }
 }
 
 // --- Screen 7: Real-time Coordinate & Coordination Chat ---
@@ -5791,7 +6057,8 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
     // Flow each time it is invoked, so an unremembered call restarts the collection on every frame.
     val messageFlow = remember(matchId) { viewModel.getChatMessages(matchId) }
     val messageList by messageFlow.collectAsState(initial = emptyList())
-    var currentMsgText by remember { mutableStateOf("") }
+    // A half-typed message is real user work; rotating the device threw it away.
+    var currentMsgText by rememberSaveable { mutableStateOf("") }
     val currentUser by viewModel.currentUser.collectAsState()
     val matches by viewModel.userMatches.collectAsState()
 
@@ -5846,7 +6113,8 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
                 actions = {
                     // Fast OS Share sheet button to share trip coordination details
                     IconButton(onClick = {
-                        val shareText = "Hey! I'm carpooling on Split Cruiser. Match details: contribution $${currentMatch?.contribution}, status: ${currentMatch?.status}. Coordinate on app!"
+                        val shareText = "Hey! I'm carpooling on Split Cruiser. Match details: contribution " +
+                            "${formatContribution(currentMatch?.contribution ?: 0.0)}, status: ${currentMatch?.status}. Coordinate on app!"
                         val intent = Intent().apply {
                             action = Intent.ACTION_SEND
                             putExtra(Intent.EXTRA_TEXT, shareText)
@@ -6090,14 +6358,30 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
                 }
             }
 
+            // Keep the newest message in view.
+            //
+            // The list had no LazyListState at all — `Arrangement.Bottom` only bottom-aligns the
+            // content when it is shorter than the viewport. Once a conversation exceeded one
+            // screen the list stayed pinned at item 0, so sending a message, or receiving one,
+            // left it off-screen with no indication anything had happened.
+            val chatListState = rememberLazyListState()
+            LaunchedEffect(messageList.size) {
+                if (messageList.isNotEmpty()) {
+                    chatListState.animateScrollToItem(messageList.lastIndex)
+                }
+            }
+
             LazyColumn(
+                state = chatListState,
                 modifier = Modifier
                     .fillMaxSize()
                     .weight(1f)
                     .padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.Bottom
             ) {
-                items(messageList) { msg ->
+                // Keyed by message id: without it, item state and animations are index-bound and
+                // mis-associate when a message arrives at the top of the list.
+                items(messageList, key = { it.id }) { msg ->
                     val isMe = (msg.senderId == currentUser?.id)
                     val isSystem = msg.isSystem
                     // Read off the message's own type. This used to be `text.startsWith
@@ -6344,7 +6628,18 @@ private fun PickupDetailRow(label: String, value: String) {
 }
 
 /** `12.5` -> `"$12.50"`. */
-private fun formatContribution(amount: Double): String =
+/**
+ * Every money value the user sees goes through this.
+ *
+ * `costPerRider` and `contribution` are Doubles, so string interpolation renders "$15.0" and, for
+ * anything computed by `calculateCostSplit`, "$33.333333333333336". On a product whose entire
+ * premise is splitting a cost, that was the primary surface. This helper already existed and was
+ * correct — it was just private to the chat pickup cards while ten other sites interpolated raw.
+ *
+ * Locale.US deliberately: the amount is paired with a hardcoded "$" everywhere, so formatting the
+ * number in a comma-decimal locale would render "$12,50".
+ */
+fun formatContribution(amount: Double): String =
     "$" + String.format(Locale.US, "%.2f", amount)
 
 /**
@@ -6703,6 +6998,16 @@ fun EditProfileDialog(
     var lastInitial by remember { mutableStateOf(currentUser?.lastInitial ?: "") }
     var avatarUrl by remember { mutableStateOf(currentUser?.avatarUrl ?: "") }
 
+    // Vehicle details, collected once during onboarding and — until now — unreachable afterwards
+    // on either platform. A host who changed car had no way to say so, while the rider-facing
+    // driver card kept showing the old one.
+    val existingVehicle = remember(currentUser?.id) { viewModel.getVehicleInfo(currentUser?.id.orEmpty()) }
+    var vMake by rememberSaveable { mutableStateOf(existingVehicle?.make.orEmpty()) }
+    var vModel by rememberSaveable { mutableStateOf(existingVehicle?.model.orEmpty()) }
+    var vYear by rememberSaveable { mutableStateOf(existingVehicle?.year.orEmpty()) }
+    var vColor by rememberSaveable { mutableStateOf(existingVehicle?.color.orEmpty()) }
+    var vPlate by rememberSaveable { mutableStateOf(existingVehicle?.licensePlate.orEmpty()) }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -6805,6 +7110,45 @@ fun EditProfileDialog(
                     }
                 }
 
+                item {
+                    Text(
+                        "YOUR VEHICLE",
+                        color = SplitCruiserPrimary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                    Text(
+                        "Riders see this on the ride detail screen to identify your car.",
+                        color = SplitCruiserTextSecondary,
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                }
+                items(
+                    listOf(
+                        Triple("Make", vMake, { v: String -> vMake = v }),
+                        Triple("Model", vModel, { v: String -> vModel = v }),
+                        Triple("Year", vYear, { v: String -> vYear = v }),
+                        Triple("Colour", vColor, { v: String -> vColor = v }),
+                        Triple("Licence plate", vPlate, { v: String -> vPlate = v }),
+                    )
+                ) { (label, value, onChange) ->
+                    OutlinedTextField(
+                        value = value,
+                        onValueChange = onChange,
+                        label = { Text(label) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = SplitCruiserPrimary,
+                            unfocusedBorderColor = SplitCruiserOutline,
+                            focusedTextColor = SplitCruiserTextPrimary,
+                            unfocusedTextColor = SplitCruiserTextPrimary,
+                            focusedLabelColor = SplitCruiserPrimary,
+                            unfocusedLabelColor = SplitCruiserTextSecondary
+                        )
+                    )
+                }
             }
         },
         confirmButton = {
@@ -6814,7 +7158,15 @@ fun EditProfileDialog(
                         name = name,
                         lastInitial = lastInitial,
                         avatarUrl = avatarUrl,
-                        onSuccess = onDismiss
+                        onSuccess = {
+                            // Only write a vehicle if something was actually entered. An all-blank
+                            // record would render on the rider's driver card as a car with no
+                            // make, model or plate.
+                            if (listOf(vMake, vModel, vYear, vColor, vPlate).any { it.isNotBlank() }) {
+                                viewModel.saveVehicle(vMake, vModel, vYear, vColor, vPlate)
+                            }
+                            onDismiss()
+                        }
                     )
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = SplitCruiserPrimary)
@@ -6837,6 +7189,11 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
     val currentUser by viewModel.currentUser.collectAsState()
     val isFirebaseEnabled = viewModel.repository.isFirebaseEnabled
     val userAlerts by viewModel.notifications.collectAsState()
+
+    // From the private profile document, not from `User` — gender does not belong on a document
+    // every signed-in user can read.
+    val contactDetails by viewModel.contactDetails.collectAsState()
+    val isEligibleForWomenOnly = contactDetails?.isEligibleForWomenOnly == true
 
     var showEditProfileDialog by remember { mutableStateOf(false) }
 
@@ -7310,16 +7667,31 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Female, contentDescription = "Women Filter", tint = SplitCruiserAccent)
+                            Icon(Icons.Default.Female, contentDescription = null, tint = SplitCruiserAccent)
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
-                                Text("Women-Only Filter", color = SplitCruiserTextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                Text("Only match with other women", color = SplitCruiserTextSecondary, fontSize = 10.sp)
+                                // A preference, not the gate. Turning this on used to be the ONLY
+                                // thing standing between any account and every women-only ride on
+                                // the platform; eligibility now comes from the private profile and
+                                // is enforced by the Firestore rules on the write that takes a seat.
+                                Text("Show only women-only rides", color = SplitCruiserTextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text(
+                                    text = if (isEligibleForWomenOnly) {
+                                        "Hides every other ride from your feed"
+                                    } else {
+                                        "Available to riders who selected Woman during setup"
+                                    },
+                                    color = SplitCruiserTextSecondary,
+                                    fontSize = 10.sp
+                                )
                             }
                         }
                         Switch(
-                            checked = currentUser?.isWomenOnlyFilterEnabled ?: false,
+                            checked = isEligibleForWomenOnly && (currentUser?.isWomenOnlyFilterEnabled ?: false),
                             onCheckedChange = { viewModel.toggleWomenOnlyFilter(it) },
+                            // Disabled rather than hidden: silently omitting it would leave someone
+                            // who expected the control unable to tell whether it exists.
+                            enabled = isEligibleForWomenOnly,
                             colors = SwitchDefaults.colors(checkedThumbColor = SplitCruiserAccent)
                         )
                     }
@@ -7396,7 +7768,7 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
 
 @Composable
 fun BlockedListScreen(viewModel: MainViewModel, navController: NavController) {
-    val blockedUsers = viewModel.getBlockedUsers()
+    val blockedUsers by viewModel.blockedUsers.collectAsState()
 
     Column(
         modifier = Modifier
@@ -7460,6 +7832,9 @@ fun BlockedListScreen(viewModel: MainViewModel, navController: NavController) {
         }
     }
 }
+/** What the driver card shows for a field the host has not filled in. */
+private const val NOT_PROVIDED = "Not provided"
+
 
 @Composable
 fun DriverContactModal(
@@ -7565,7 +7940,11 @@ fun DriverContactModal(
                     }
 
                     // Vouched badge
+                    // Blank means the host's profile has not loaded, which is not the same as
+                    // "unverified" — and this used to be synthesised from the rating, so a host
+                    // with no loaded profile and a 4.5 average was shown as vouched outright.
                     val isVouched = verifiedTier.lowercase() == "vouched"
+                    val tierKnown = verifiedTier.isNotBlank()
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
@@ -7573,7 +7952,11 @@ fun DriverContactModal(
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
-                            text = if (isVouched) "VERIFIED" else "UNVERIFIED",
+                            text = when {
+                                !tierKnown -> "VERIFICATION UNKNOWN"
+                                isVouched -> "VERIFIED"
+                                else -> "UNVERIFIED"
+                            },
                             color = if (isVouched) SplitCruiserSuccess else SplitCruiserTextSecondary,
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Bold
@@ -7604,7 +7987,12 @@ fun DriverContactModal(
                 ) {
                     Column {
                         Text("Phone Number", color = SplitCruiserTextSecondary, fontSize = 11.sp)
-                        Text(hostPhone, color = SplitCruiserTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            text = hostPhone.ifBlank { NOT_PROVIDED },
+                            color = if (hostPhone.isBlank()) SplitCruiserTextSecondary else SplitCruiserTextPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
                     IconButton(
                         onClick = {
@@ -7615,9 +8003,16 @@ fun DriverContactModal(
                                 Toast.makeText(context, "Cannot dial: ${e.message}", Toast.LENGTH_SHORT).show()
                             }
                         },
+                        // Dialling a number we do not have used to place a call to a hardcoded
+                        // placeholder that belongs to nobody on this ride.
+                        enabled = hostPhone.isNotBlank(),
                         colors = IconButtonDefaults.iconButtonColors(containerColor = SplitCruiserPrimaryContainer)
                     ) {
-                        Icon(imageVector = Icons.Default.Phone, contentDescription = "Call", tint = SplitCruiserPrimary)
+                        Icon(
+                            imageVector = Icons.Default.Phone,
+                            contentDescription = "Call",
+                            tint = if (hostPhone.isBlank()) SplitCruiserTextSecondary else SplitCruiserPrimary
+                        )
                     }
                 }
 
@@ -7631,7 +8026,12 @@ fun DriverContactModal(
                 ) {
                     Column {
                         Text("Email Address", color = SplitCruiserTextSecondary, fontSize = 11.sp)
-                        Text(hostEmail, color = SplitCruiserTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            text = hostEmail.ifBlank { NOT_PROVIDED },
+                            color = if (hostEmail.isBlank()) SplitCruiserTextSecondary else SplitCruiserTextPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
                     IconButton(
                         onClick = {
@@ -7642,6 +8042,7 @@ fun DriverContactModal(
                                 Toast.makeText(context, "Cannot email: ${e.message}", Toast.LENGTH_SHORT).show()
                             }
                         },
+                        enabled = hostEmail.isNotBlank(),
                         colors = IconButtonDefaults.iconButtonColors(containerColor = SplitCruiserPrimaryContainer)
                     ) {
                         Icon(imageVector = Icons.Default.Email, contentDescription = "Email", tint = SplitCruiserPrimary)
@@ -7683,16 +8084,24 @@ fun DriverContactModal(
                     Spacer(modifier = Modifier.width(16.dp))
                     Column {
                         Text(
-                            text = vehicleMakeModel,
-                            color = SplitCruiserTextPrimary,
+                            text = vehicleMakeModel.ifBlank { "Vehicle details not provided" },
+                            color = if (vehicleMakeModel.isBlank()) SplitCruiserTextSecondary else SplitCruiserTextPrimary,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold
                         )
-                        Text(
-                            text = "Color: $vehicleColor • Year: $vehicleYear",
-                            color = SplitCruiserTextSecondary,
-                            fontSize = 11.sp
-                        )
+                        // Only state what the host actually told us. Colour and year used to fall
+                        // back to "Slate Gray" and "2022" for every host who had not filled them in.
+                        val vehicleDetail = listOfNotNull(
+                            vehicleColor.takeIf { it.isNotBlank() }?.let { "Color: $it" },
+                            vehicleYear.takeIf { it.isNotBlank() }?.let { "Year: $it" },
+                        ).joinToString(" • ")
+                        if (vehicleDetail.isNotEmpty()) {
+                            Text(
+                                text = vehicleDetail,
+                                color = SplitCruiserTextSecondary,
+                                fontSize = 11.sp
+                            )
+                        }
                         Box(
                             modifier = Modifier
                                 .padding(top = 4.dp)
@@ -7700,9 +8109,15 @@ fun DriverContactModal(
                                 .background(SplitCruiserPrimaryContainer.copy(alpha = 0.3f))
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         ) {
+                            // A licence plate is the one thing a rider checks against the car at
+                            // the kerb. Showing a made-up one is worse than showing none.
                             Text(
-                                text = "License Plate: $vehiclePlate",
-                                color = SplitCruiserPrimary,
+                                text = if (vehiclePlate.isBlank()) {
+                                    "License plate not provided"
+                                } else {
+                                    "License Plate: $vehiclePlate"
+                                },
+                                color = if (vehiclePlate.isBlank()) SplitCruiserTextSecondary else SplitCruiserPrimary,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold
                             )

@@ -12,7 +12,11 @@ data class User(
     val name: String = "",
     val lastInitial: String = "",
     val avatarUrl: String = "",
-    val verifiedTier: String = "vouched", // "vouched" or "guest"
+    // "guest" or "vouched". Server-owned: the Firestore rules forbid any client from writing it,
+    // and the `aggregateRating`/`aggregateNoShow` Cloud Functions derive it from real ratings and
+    // no-show reports. It defaults to "guest" because a brand-new account has earned nothing —
+    // this used to default to "vouched", so every account displayed a trust badge from creation.
+    val verifiedTier: String = "guest",
     val invitedBy: String = "",
     val ratingAvg: Float = 0.0f,
     val ratingCount: Int = 0,
@@ -41,10 +45,56 @@ data class ContactDetails(
     val homeAddress: String = "",
     val homeLat: Double = 0.0,
     val homeLng: Double = 0.0,
+    /**
+     * One of [Gender]. Lives on the *private* profile document, alongside the home address, because
+     * `users/{uid}` is readable by every signed-in user and this is not something to publish.
+     *
+     * Collected so "women only" can be a restriction rather than a display filter. It used to be
+     * gated on `isWomenOnlyFilterEnabled`, a self-service boolean any account could flip, with no
+     * gender recorded anywhere and no rule enforcement — so a women-only ride was visible and
+     * joinable by anyone who found the toggle, while the UI presented it as a safety control.
+     *
+     * This is self-declared and is not identity verification. It raises the bar from "flip a
+     * switch" to "state something false in onboarding and have the server enforce it", which is
+     * what this app can honestly offer without an ID check.
+     */
+    val gender: String = Gender.UNSPECIFIED,
 ) {
     /** False when onboarding was skipped or predates this, in which case nothing is prefilled. */
     val hasHomeLocation: Boolean
         get() = homeAddress.isNotBlank() && homeLat != 0.0 && homeLng != 0.0
+
+    /** Whether this user may see and join rides marked women-only. */
+    val isEligibleForWomenOnly: Boolean
+        get() = gender == Gender.WOMAN
+}
+
+/** The gender values onboarding offers. Stored as strings so the set can grow without a migration. */
+object Gender {
+    const val WOMAN = "woman"
+    const val MAN = "man"
+    const val NONBINARY = "nonbinary"
+    const val UNSPECIFIED = "unspecified"
+
+    /** What onboarding renders, in order. */
+    val SELECTABLE = listOf(WOMAN, MAN, NONBINARY, UNSPECIFIED)
+
+    /**
+     * The value onboarding starts on.
+     *
+     * A function rather than reading [UNSPECIFIED] directly from Swift: how a Kotlin `const val`
+     * inside an object surfaces through the ObjC export is exactly the kind of detail this project
+     * has been bitten by before (see the release skill's Kotlin/Native cluster), and it cannot be
+     * compile-checked on Linux. Functions and regular `val`s export predictably.
+     */
+    fun defaultValue(): String = UNSPECIFIED
+
+    fun label(value: String): String = when (value) {
+        WOMAN -> "Woman"
+        MAN -> "Man"
+        NONBINARY -> "Non-binary"
+        else -> "Prefer not to say"
+    }
 }
 
 @Serializable

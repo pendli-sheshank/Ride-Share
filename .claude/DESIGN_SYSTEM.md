@@ -197,6 +197,20 @@ Not everything is at parity, and that is fine as long as it is deliberate:
 - **Google sign-in is Android-only.** The token exchange is shared, but only Android acquires a
   Google ID token (Credential Manager). iOS would need `ASWebAuthenticationSession` and a URL
   scheme in the generated Xcode project.
+- **Route distance and duration are Android-only.** `GoogleMapsMatrixCard` renders at four sites in
+  `SplitCruiserApp.kt` (post offer, post request, and both trip-detail branches); nothing in
+  `iosApp/` shows distance or duration at all. The service behind it (`OsrmRouteService`) is
+  already shared, so this is a missing SwiftUI card rather than missing logic — but `README.md`
+  advertises the feature and the parity table above marks those screens ✅/✅, which is how it went
+  unrecorded. Adding it means a new Swift file, so `SWIFT_SOURCES` and the regenerated
+  `project.pbxproj` both have to change.
+(Vehicle editing used to be the second entry here — collected once at onboarding and unreachable
+afterwards on both platforms, while the iOS post-offer screen told people to change it in Profile.
+Both edit-profile screens now carry the five vehicle fields and write through the shared
+`saveVehicle`, so it is at parity.)
+- **Host passenger management is Android-only.** `PassengerManagementCard` (message, report a
+  no-show, view profile) renders on the Android trip-detail screen for the host. iOS has no
+  equivalent, and `recordNoShow` has no iOS wrapper, so an iOS host cannot report a no-show.
 (The fake "use my location" chip used to be the second entry here — Android-only, with
 Northeastern's campus hardcoded into it. Both platforms now read a real fix and the chip is at
 parity.)

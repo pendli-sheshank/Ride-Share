@@ -24,6 +24,7 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
@@ -60,6 +61,36 @@ internal class FirestoreClient(
         response.requireSuccess("Reading $path/$id", config.projectId)
         val document: JsonObject = response.body()
         return FirestoreCodec.decode(deserializer, document.fieldsOrEmpty())
+    }
+
+    /**
+     * Reads a document together with its `updateTime`, so a subsequent write can be made
+     * conditional on nothing else having changed it. See [FirestoreWrite.Update.expectedUpdateTime].
+     */
+    suspend fun <T> getVersionedDocument(
+        path: String,
+        id: String,
+        deserializer: DeserializationStrategy<T>,
+    ): VersionedDocument<T>? {
+        val response = authorized { token ->
+            http.get("${config.firestoreBase}/${path.encodePath()}/${id.encodeURLPathPart()}") {
+                bearer(token)
+            }
+        }
+        if (response.status == HttpStatusCode.NotFound) {
+            val body = runCatching { response.bodyAsText() }.getOrDefault("")
+            if (!isMissingDatabase(body)) return null
+            throw SplitCruiserException(
+                firestoreErrorMessage("NOT_FOUND", body, config.projectId),
+                code = "NOT_FOUND",
+            )
+        }
+        response.requireSuccess("Reading $path/$id", config.projectId)
+        val document: JsonObject = response.body()
+        val value = FirestoreCodec.decode(deserializer, document.fieldsOrEmpty()) ?: return null
+        val updateTime = document["updateTime"]?.jsonPrimitive?.content
+            ?: return null
+        return VersionedDocument(value, updateTime)
     }
 
     /**
@@ -189,7 +220,16 @@ internal class FirestoreClient(
                     }
                 )
             }
-        }.requireSuccess("Committing ${writes.size} writes", config.projectId)
+        }.let { response ->
+            // A precondition that no longer holds is not a failure to report to the user — it means
+            // someone else wrote first and the caller should re-read and retry. Distinguish it.
+            if (response.status == HttpStatusCode.PreconditionFailed ||
+                response.status == HttpStatusCode.Conflict
+            ) {
+                throw FirestoreConflictException()
+            }
+            response.requireSuccess("Committing ${writes.size} writes", config.projectId)
+        }
     }
 
     /**
@@ -291,6 +331,15 @@ internal fun arrayOfStrings(values: List<String>): JsonElement = buildJsonObject
     }
 }
 
+/** A document plus the `updateTime` a conditional write can be pinned to. */
+internal data class VersionedDocument<T>(val value: T, val updateTime: String)
+
+/**
+ * Thrown when a conditional commit lost a race: the document changed between the read that computed
+ * the write and the write itself. Callers re-read and retry rather than surfacing this.
+ */
+internal class FirestoreConflictException : Exception("The ride changed while you were booking it.")
+
 // --- Batched writes ------------------------------------------------------------------------
 
 internal sealed interface FirestoreWrite {
@@ -300,6 +349,15 @@ internal sealed interface FirestoreWrite {
         val path: String,
         val id: String,
         val fields: JsonObject,
+        /**
+         * Optimistic-concurrency guard: the document's `updateTime` as it was when this write was
+         * computed. Firestore rejects the whole commit with FAILED_PRECONDITION if the document has
+         * changed since, which is what turns a read-modify-write into a safe one.
+         *
+         * Null means "write unconditionally" — correct for writes that are not derived from the
+         * document's current contents.
+         */
+        val expectedUpdateTime: String? = null,
     ) : FirestoreWrite {
         override fun toJson(config: FirebaseConfig): JsonObject = buildJsonObject {
             putJsonObject("update") {
@@ -308,6 +366,9 @@ internal sealed interface FirestoreWrite {
             }
             putJsonObject("updateMask") {
                 putJsonArray("fieldPaths") { fields.keys.forEach { add(JsonPrimitive(it)) } }
+            }
+            if (expectedUpdateTime != null) {
+                putJsonObject("currentDocument") { put("updateTime", expectedUpdateTime) }
             }
         }
     }

@@ -16,13 +16,19 @@ class FeedProjectorTest {
 
     private val me = User(id = "me", name = "Ana")
 
+    private val womenOnlyOffer =
+        TripOffer(id = "wo", hostId = "bo", status = "active", departureTime = soon, womenOnly = true)
+    private val openOffer =
+        TripOffer(id = "open", hostId = "bo", status = "active", departureTime = soon)
+
     private fun project(
         user: User? = me,
         offers: List<TripOffer> = emptyList(),
         requests: List<RideRequest> = emptyList(),
         matches: List<TripMatch> = emptyList(),
         blocks: List<Block> = emptyList(),
-    ) = FeedProjector.project(user, offers, requests, matches, blocks, now)
+        eligibleForWomenOnly: Boolean = false,
+    ) = FeedProjector.project(user, offers, requests, matches, blocks, now, eligibleForWomenOnly)
 
     @Test
     fun myOwnOfferIsNotInTheFeedIAmBrowsing() {
@@ -73,14 +79,68 @@ class FeedProjectorTest {
         assertEquals(listOf("byOther"), feeds.activeOffers.map { it.id })
     }
 
-    @Test
-    fun womenOnlyRidesAreHiddenUnlessTheFilterIsOn() {
-        val offers = listOf(TripOffer(id = "wo", hostId = "bo", status = "active", departureTime = soon, womenOnly = true))
+    // "Women only" is a restriction on who may see and join a ride, and is separate from the
+    // viewer's preference about which rides to show. Those two were conflated: the ride was gated
+    // solely on `isWomenOnlyFilterEnabled`, a self-service boolean any account could set from its
+    // own settings screen, with no gender recorded anywhere and no rule behind it. Flipping a
+    // switch was all it took to see every women-only ride on the platform.
+    //
+    // Eligibility comes from the viewer's private profile (ContactDetails.isEligibleForWomenOnly),
+    // not from `User`, because gender does not belong on a document every signed-in user can read.
+    // The half with teeth is in firestore.rules, on the write that takes a seat.
 
-        assertTrue(project(user = me, offers = offers).activeOffers.isEmpty())
+    @Test
+    fun anIneligibleViewerNeverSeesAWomenOnlyRide() {
+        val offers = listOf(womenOnlyOffer)
+
+        assertTrue(project(offers = offers).activeOffers.isEmpty())
+        // Not even by turning the settings switch on: that used to be the whole gate.
+        assertTrue(
+            project(user = me.copy(isWomenOnlyFilterEnabled = true), offers = offers)
+                .activeOffers.isEmpty(),
+        )
+    }
+
+    @Test
+    fun anEligibleViewerSeesWomenOnlyRidesAlongsideEverythingElse() {
+        val feeds = project(
+            offers = listOf(womenOnlyOffer, openOffer),
+            eligibleForWomenOnly = true,
+        )
+        assertEquals(setOf("wo", "open"), feeds.activeOffers.map { it.id }.toSet())
+    }
+
+    @Test
+    fun theFilterNarrowsAnEligibleViewerToWomenOnlyRides() {
+        // This is the preference half: "show me only women-only rides".
+        val feeds = project(
+            user = me.copy(isWomenOnlyFilterEnabled = true),
+            offers = listOf(womenOnlyOffer, openOffer),
+            eligibleForWomenOnly = true,
+        )
+        assertEquals(listOf("wo"), feeds.activeOffers.map { it.id })
+    }
+
+    @Test
+    fun theFilterIsInertForSomeoneWhoIsNotEligible() {
+        // Otherwise an ineligible viewer who flips the switch gets an empty feed and no explanation.
+        val feeds = project(
+            user = me.copy(isWomenOnlyFilterEnabled = true),
+            offers = listOf(openOffer),
+        )
+        assertEquals(listOf("open"), feeds.activeOffers.map { it.id })
+    }
+
+    @Test
+    fun theSameRestrictionAppliesToRideRequests() {
+        val requests = listOf(
+            RideRequest(id = "wo", riderId = "bo", status = "active", departureTime = soon, womenOnly = true),
+            RideRequest(id = "open", riderId = "bo", status = "active", departureTime = soon),
+        )
+        assertEquals(listOf("open"), project(requests = requests).activeRequests.map { it.id })
         assertEquals(
-            listOf("wo"),
-            project(user = me.copy(isWomenOnlyFilterEnabled = true), offers = offers).activeOffers.map { it.id },
+            setOf("wo", "open"),
+            project(requests = requests, eligibleForWomenOnly = true).activeRequests.map { it.id }.toSet(),
         )
     }
 

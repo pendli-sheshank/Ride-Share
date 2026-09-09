@@ -140,6 +140,21 @@ jobs:
       - name: Verify the app icon set is complete
         run: python3 .github/scripts/verify-app-icons.py iosApp/iosApp/Assets.xcassets/AppIcon.appiconset
 
+      # Same class as the icon check: a bundle problem xcodebuild is perfectly happy with, that
+      # only surfaces at `altool --validate-app` -- after a build number has been consumed and
+      # cannot be reused. The app declared `UIRequiredDeviceCapabilities = armv7` on an arm64-only
+      # iOS 16 binary, which is an "Invalid Bundle" rejection, and had no
+      # ITSAppUsesNonExemptEncryption, so every upload stalled on the manual export-compliance
+      # question. Milliseconds to check.
+      - name: Verify Info.plist passes App Store preflight
+        run: python3 .github/scripts/verify-info-plist.py iosApp/iosApp/Info.plist
+
+      # build-ios.yml runs this on every PR, but the release job did not -- so a hand-edited
+      # pbxproj that the PR job would reject could still reach `xcodebuild archive` on main, where
+      # a dangling object reference surfaces only as "the project is damaged".
+      - name: Verify the Xcode project graph is intact
+        run: python3 .github/scripts/verify-xcodeproj.py iosApp/iosApp.xcodeproj/project.pbxproj iosApp/iosApp
+
       # --- Shared Kotlin framework ------------------------------------------------------
       # assembleSharedReleaseXCFramework, NOT linkReleaseFrameworkIosFat: the latter lipos
       # device (iosArm64) and simulator (iosX64) slices into one binary, and App Store upload

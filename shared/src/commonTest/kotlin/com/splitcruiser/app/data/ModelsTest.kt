@@ -206,8 +206,12 @@ class ModelsTest {
         val user = User()
         assertEquals("", user.id)
         assertEquals("", user.name)
-        // Models.kt defaults new users to "vouched", not "guest".
-        assertEquals("vouched", user.verifiedTier)
+        // A new account has earned nothing, so it starts as "guest". This defaulted to "vouched",
+        // which — combined with nothing ever writing the field — meant every account in the app
+        // displayed a trust badge from the moment it was created. It is now server-owned: the
+        // rules forbid clients writing it and the aggregate Cloud Functions derive it from real
+        // ratings and no-show reports.
+        assertEquals("guest", user.verifiedTier)
 
         val offer = TripOffer()
         assertEquals("active", offer.status)
