@@ -51,6 +51,26 @@ jobs:
       - name: Unit tests
         run: ./gradlew :app:testDebugUnitTest --stacktrace
 
+      # Compiles the instrumented suite. It does not run it — that needs an emulator — but a
+      # compile is what was missing: SplitCruiserAppUITest called ProposePickupDialog with two of
+      # its seven parameters and asserted on button text that did not match, and the file sat
+      # broken and invisible because no job ever built it.
+      - name: Compile instrumented tests
+        run: ./gradlew :app:assembleAndroidTest --stacktrace
+
+      # Six real errors were outstanding when this was added, including a missing VIBRATE
+      # permission that made every haptic call throw into a bare catch.
+      - name: Android lint
+        run: ./gradlew :app:lintDebug --stacktrace
+
+      - name: Upload lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-lint-report
+          path: app/build/reports/lint-results-debug.html
+          if-no-files-found: ignore
+
       - name: Upload test report
         if: always()
         uses: actions/upload-artifact@v4

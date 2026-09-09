@@ -48,6 +48,11 @@ object DeviceLocationProvider {
      * a location recently has no last one, which is exactly the state a fresh install is in. The
      * cached value is still used as a fallback because it returns instantly.
      */
+    // The permission IS checked, on the first line — lint cannot see through `hasPermission`, and
+    // every call below is additionally inside a runCatching, so a revoked permission returns null
+    // rather than throwing. Suppressed here rather than baselined so the annotation sits next to
+    // the guard that justifies it.
+    @android.annotation.SuppressLint("MissingPermission")
     suspend fun current(context: Context): DeviceCoordinate? {
         if (!hasPermission(context)) return null
         val client = runCatching { LocationServices.getFusedLocationProviderClient(context) }

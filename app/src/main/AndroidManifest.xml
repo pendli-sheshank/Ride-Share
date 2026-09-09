@@ -6,6 +6,13 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <!--
+      The app has had haptic feedback helpers since the start and never declared this, so every
+      vibrate() call threw a SecurityException straight into the `catch (e: Exception) {}` that
+      wraps it: the feature has silently never worked. A normal permission, so no runtime prompt.
+    -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!--
       Address suggestions are ranked by how far each result is from the user. Coarse is all the
       ranking needs, so the app requests coarse only — asking for ACCESS_FINE_LOCATION would be an
       over-request of a more sensitive permission the code never uses. The app asks the first time an

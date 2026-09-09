@@ -151,20 +151,47 @@ class SplitCruiserAppUITest {
         composeTestRule.onNodeWithText("Pickup").assertIsDisplayed()
     }
 
+    /**
+     * This test did not compile, and nothing noticed.
+     *
+     * It called `ProposePickupDialog(onDismiss:onPropose:)` — the real signature takes seven
+     * parameters, five of them without defaults — with an `onPropose` of the wrong arity, and
+     * asserted on "Send Proposal" where the button reads "Send proposal". No workflow ran
+     * `assembleAndroidTest`, so the whole file was dead weight while its own doc comment presented
+     * it as the replacement for the fake suite before it. CI now builds it.
+     */
     @Test
     fun proposePickupDialog_returnsWhatWasTyped() {
-        var proposed: Pair<String, String>? = null
+        var pickup: String? = null
+        var dropoff: String? = null
+        var time: String? = null
+        var contribution: Double? = null
+
         setContent {
             ProposePickupDialog(
+                initialPickup = "Back Bay",
+                initialDropoff = "Providence",
+                initialContribution = 12.0,
+                biasLat = null,
+                biasLng = null,
                 onDismiss = {},
-                onPropose = { location, time -> proposed = location to time }
+                onPropose = { p, d, t, c ->
+                    pickup = p
+                    dropoff = d
+                    time = t
+                    contribution = c
+                },
             )
         }
 
-        composeTestRule.onNodeWithTag("propose_location_input").performTextInput("Main entrance")
         composeTestRule.onNodeWithTag("propose_time_input").performTextInput("8:15 am")
-        composeTestRule.onNodeWithText("Send Proposal").performClick()
+        composeTestRule.onNodeWithText("Send proposal").performClick()
 
-        assert(proposed == "Main entrance" to "8:15 am") { "Got $proposed" }
+        // The addresses prefill from the ride, which is the point of those initial* parameters:
+        // a proposal usually only sharpens them rather than being typed from nothing.
+        assert(pickup == "Back Bay") { "pickup was $pickup" }
+        assert(dropoff == "Providence") { "dropoff was $dropoff" }
+        assert(time == "8:15 am") { "time was $time" }
+        assert(contribution == 12.0) { "contribution was $contribution" }
     }
 }
