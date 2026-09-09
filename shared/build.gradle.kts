@@ -188,4 +188,15 @@ android {
     sourceCompatibility = JavaVersion.VERSION_11
     targetCompatibility = JavaVersion.VERSION_11
   }
+
+  testOptions {
+    unitTests {
+      // commonTest runs on the JVM through the Android variant, where every android.* method throws
+      // "not mocked" by default. logWarn() lands on android.util.Log, so any test that exercises a
+      // code path which logs -- the poll loops above all do, on the failure branch -- died with a
+      // RuntimeException that had nothing to do with what it was testing. That is a large part of
+      // why start()/stop(), the backoff and the whole refresh lifecycle had no coverage at all.
+      isReturnDefaultValues = true
+    }
+  }
 }

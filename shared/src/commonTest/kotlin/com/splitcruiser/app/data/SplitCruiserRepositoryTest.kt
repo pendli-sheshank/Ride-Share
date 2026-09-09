@@ -10,6 +10,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.TextContent
 import io.ktor.http.headersOf
 import io.ktor.utils.io.ByteReadChannel
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runTest
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -453,6 +454,146 @@ class SplitCruiserRepositoryTest {
         assertTrue(!body.contains("\"hostId\""), "must not claim fields the rules forbid: $body")
         assertContains(body, "currentDocument", message = "the write must be conditional")
         assertEquals(1, repo.getTripOfferById("offer_1")?.seatsLeft)
+    }
+
+    // --- Ride validation bounds --------------------------------------------------------------
+    //
+    // The two forms that create money and capacity applied none of this. A bare `if (isNotEmpty())`
+    // with no else swallowed the tap, `costPerRider.toDoubleOrNull() ?: 10.0` posted a $10 ride for
+    // the input "abc", `totalSeats.toIntOrNull() ?: 4` accepted "0", and the date picker offered
+    // past dates. The forms now surface these; the bounds live here so both platforms share them.
+
+    @Test
+    fun anOfferCannotAskForMoreThanTheContributionCap() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+        val failure = assertFailsWith<SplitCruiserException> {
+            repo.postTripOffer(anOffer(costPerRider = 999_999.0))
+        }
+        assertContains(failure.message.orEmpty(), "cannot exceed")
+    }
+
+    @Test
+    fun anOfferCannotHaveZeroSeats() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+        // seatsLeft = 0 at creation is a ride nobody can ever join.
+        assertFailsWith<SplitCruiserException> { repo.postTripOffer(anOffer(totalSeats = 0)) }
+        assertFailsWith<SplitCruiserException> { repo.postTripOffer(anOffer(totalSeats = -1)) }
+    }
+
+    @Test
+    fun anOfferCannotHaveANegativePrice() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+        assertFailsWith<SplitCruiserException> { repo.postTripOffer(anOffer(costPerRider = -5.0)) }
+    }
+
+    @Test
+    fun anOfferCannotDepartInThePast() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+        val failure = assertFailsWith<SplitCruiserException> {
+            repo.postTripOffer(anOffer(departureTime = now - 3_600_000L))
+        }
+        assertContains(failure.message.orEmpty(), "future")
+    }
+
+    @Test
+    fun unboundedFreeTextIsRefused() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+        // Firestore charges by document size and the feed renders every one of these strings.
+        assertFailsWith<SplitCruiserException> { repo.postTripOffer(anOffer(origin = "x".repeat(201))) }
+        assertFailsWith<SplitCruiserException> {
+            repo.postTripOffer(anOffer(exitLocation = "x".repeat(501)))
+        }
+    }
+
+    @Test
+    fun aRequestCannotAskForZeroOrTooManySeats() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+        assertFailsWith<SplitCruiserException> { repo.postRideRequest(aRequest(seatsNeeded = 0)) }
+        assertFailsWith<SplitCruiserException> { repo.postRideRequest(aRequest(seatsNeeded = 9)) }
+    }
+
+    @Test
+    fun aRequestCannotCarryAnUnboundedNote() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+        assertFailsWith<SplitCruiserException> { repo.postRideRequest(aRequest(notes = "x".repeat(501))) }
+    }
+
+    @Test
+    fun aValidOfferAndRequestStillPost() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+        // The bounds must not have made an ordinary ride unpostable.
+        repo.postTripOffer(anOffer())
+        repo.postRideRequest(aRequest())
+        assertTrue(requests.any { it.url.toString().contains("/documents/trip_offers/") })
+        assertTrue(requests.any { it.url.toString().contains("/documents/ride_requests/") })
+    }
+
+    private fun anOffer(
+        origin: String = "Back Bay",
+        destination: String = "Providence",
+        costPerRider: Double = 12.0,
+        totalSeats: Int = 3,
+        departureTime: Long = future,
+        exitLocation: String = "",
+    ) = TripOffer(
+        origin = origin, destination = destination,
+        originLat = 42.3, originLng = -71.1, destLat = 41.8, destLng = -71.4,
+        costPerRider = costPerRider, totalSeats = totalSeats, seatsLeft = totalSeats,
+        departureTime = departureTime, exitLocation = exitLocation,
+    )
+
+    private fun aRequest(
+        seatsNeeded: Int = 1,
+        notes: String = "",
+    ) = RideRequest(
+        origin = "Back Bay", destination = "Providence",
+        originLat = 42.3, originLng = -71.1, destLat = 41.8, destLng = -71.4,
+        seatsNeeded = seatsNeeded, departureTime = future, notes = notes,
+    )
+
+    // --- Session lifecycle -------------------------------------------------------------------
+
+    /**
+     * logout() calls stop(), which cancels and clears every poll job, and no login path called
+     * start() again -- its only callers are the two ViewModels' `init`, once per process. Signing
+     * out and back in without killing the app left feeds, matches, notifications and chat
+     * permanently dead. The user sees a frozen app with no error anywhere.
+     */
+    @Test
+    fun signingBackInAfterALogoutResumesPolling() = runTest {
+        documents["users/me"] =
+            """{"fields":{"id":{"stringValue":"me"},"name":{"stringValue":"Ana"}}}"""
+        val repo = repository(scriptedBackend())
+        repo.start()
+        repo.logInWithEmail("ana@neu.edu", "hunter2")
+
+        repo.logout()
+        assertEquals(null, repo.currentUser.value, "logout clears the session")
+
+        val requestsBeforeSecondLogin = requests.size
+        repo.logInWithEmail("ana@neu.edu", "hunter2")
+
+        // Let the resumed loops tick at least once.
+        advanceTimeBy(25_000)
+
+        assertTrue(
+            requests.size > requestsBeforeSecondLogin + 2,
+            "the refresh loops must be running again after signing back in",
+        )
+        repo.stop()
+    }
+
+    @Test
+    fun startIsIdempotentSoADoubleCallDoesNotDoubleThePollRate() = runTest {
+        val repo = repository(scriptedBackend())
+        repo.start()
+        repo.start()
+        advanceTimeBy(25_000)
+        val afterTwoStarts = requests.size
+
+        repo.stop()
+        advanceTimeBy(25_000)
+        assertEquals(afterTwoStarts, requests.size, "stop() must actually stop every loop")
     }
 
     // --- Seat-booking concurrency ----------------------------------------------------------

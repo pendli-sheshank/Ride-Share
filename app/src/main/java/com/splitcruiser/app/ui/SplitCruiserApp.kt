@@ -94,6 +94,10 @@ import com.splitcruiser.app.ui.theme.SplitCruiserWarning
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
+import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 
 // --- Material 3 Animation Utilities ---
 
@@ -274,21 +278,46 @@ fun SplitCruiserApp(viewModel: MainViewModel = viewModel()) {
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
 
-    // Observe Auth changes to route properly
-    LaunchedEffect(currentUser) {
-        if (currentUser == null) {
-            navController.navigate("login") {
-                popUpTo(0) { inclusive = true }
-            }
-        } else if (currentUser?.name.isNullOrEmpty()) {
-            navController.navigate("profile_setup") {
-                popUpTo("login") { inclusive = true }
-            }
-        } else {
-            navController.navigate("dashboard") {
-                popUpTo(0) { inclusive = true }
+    // Which of the three top-level destinations the session belongs in. Only these three states
+    // are routing-relevant; everything else about the user is not.
+    val authPhase = when {
+        currentUser == null -> "login"
+        currentUser?.name.isNullOrEmpty() -> "profile_setup"
+        else -> "dashboard"
+    }
+
+    // Keyed on the phase, NOT on `currentUser`.
+    //
+    // Keying on the whole User object re-ran this on every emission, and `adoptUser` re-emits from
+    // updateUserProfileDetails, uploadProfilePicture, recordNoShow and all three settings toggles.
+    // Each of those called navigate(...) { popUpTo(0) }, so flipping the "Email notifications"
+    // switch on the Profile screen threw the user to the Dashboard with an empty back stack.
+    //
+    // Worse during onboarding: `currentUser?.name` is still empty there, so picking a profile photo
+    // re-navigated to "profile_setup" with no launchSingleTop, pushing a *second* copy of the screen
+    // and resetting every remembered field — name, address, and all five vehicle fields — while
+    // growing the back stack by one entry per photo pick.
+    LaunchedEffect(authPhase) {
+        navController.navigate(authPhase) {
+            popUpTo(0) { inclusive = true }
+            launchSingleTop = true
+        }
+    }
+
+    // Back off the poll loops when the app is not on screen. Without this the repository's
+    // `foreground` flag was permanently true and a backgrounded app polled feeds and matches every
+    // 20s, notifications every 60s and chat every 3s, for ever.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> viewModel.setForeground(true)
+                Lifecycle.Event.ON_STOP -> viewModel.setForeground(false)
+                else -> Unit
             }
         }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     Surface(
@@ -4017,7 +4046,12 @@ fun PostOfferScreen(viewModel: MainViewModel, navController: NavController) {
             calendar.get(java.util.Calendar.YEAR),
             calendar.get(java.util.Calendar.MONTH),
             calendar.get(java.util.Calendar.DAY_OF_MONTH)
-        )
+        ).apply {
+            // A ride departing yesterday could be posted: the picker offered past dates and
+            // nothing downstream rejected them until the repository, whose error the form never
+            // surfaced. Greying them out is the honest place to say no.
+            datePicker.minDate = System.currentTimeMillis()
+        }
         datePickerDialog.show()
     }
 
@@ -4307,9 +4341,36 @@ fun PostOfferScreen(viewModel: MainViewModel, navController: NavController) {
 
             Button(
                 onClick = {
-                    if (origin.isNotEmpty() && destination.isNotEmpty() && costPerRider.isNotEmpty()) {
-                        val cost = costPerRider.toDoubleOrNull() ?: 10.0
-                        val seats = totalSeats.toIntOrNull() ?: 4
+                    // Every branch below used to be inside a bare `if (...isNotEmpty())` with no
+                    // else, so tapping Post with a field empty did nothing at all — no message, no
+                    // indication the button had registered. And the two parses had silent defaults:
+                    // `costPerRider.toDoubleOrNull() ?: 10.0` posted a $10 ride for the input "abc",
+                    // and `totalSeats.toIntOrNull() ?: 4` accepted "0", producing a ride with zero
+                    // seats that nobody could ever join.
+                    val cost = costPerRider.trim().toDoubleOrNull()
+                    val seats = totalSeats.trim().toIntOrNull()
+                    val validationError = when {
+                        origin.isBlank() -> "Where does the ride start?"
+                        destination.isBlank() -> "Where is the ride going?"
+                        originLat == 0.0 || originLng == 0.0 ->
+                            "Pick the pickup point from the suggestions so riders can find it."
+                        destLat == 0.0 || destLng == 0.0 ->
+                            "Pick the destination from the suggestions so riders can find it."
+                        departureEpoch <= System.currentTimeMillis() ->
+                            "Choose a departure time in the future."
+                        costPerRider.isBlank() -> "What should each rider chip in?"
+                        cost == null -> "Enter the contribution as a number, like 12.50."
+                        cost < 0.0 -> "The contribution cannot be negative."
+                        cost > 500.0 -> "That contribution looks too high. The cap is $500."
+                        seats == null -> "Enter the number of seats as a whole number."
+                        seats !in 1..8 -> "A ride can offer between 1 and 8 seats."
+                        else -> null
+                    }
+                    if (validationError != null) {
+                        viewModel.setError(validationError)
+                    } else if (cost != null && seats != null) {
+                        // The `when` above already guarantees both are non-null; this restates it
+                        // so the values smart-cast rather than needing `!!`.
                         val vehicleLabel = if (userVehicle != null) {
                             "${userVehicle.color} ${userVehicle.make} ${userVehicle.model}"
                         } else {
@@ -4405,7 +4466,12 @@ fun PostRequestScreen(viewModel: MainViewModel, navController: NavController) {
             calendar.get(java.util.Calendar.YEAR),
             calendar.get(java.util.Calendar.MONTH),
             calendar.get(java.util.Calendar.DAY_OF_MONTH)
-        )
+        ).apply {
+            // A ride departing yesterday could be posted: the picker offered past dates and
+            // nothing downstream rejected them until the repository, whose error the form never
+            // surfaced. Greying them out is the honest place to say no.
+            datePicker.minDate = System.currentTimeMillis()
+        }
         datePickerDialog.show()
     }
 
@@ -4612,8 +4678,27 @@ fun PostRequestScreen(viewModel: MainViewModel, navController: NavController) {
 
             Button(
                 onClick = {
-                    if (origin.isNotEmpty() && destination.isNotEmpty() && seatsNeeded.isNotEmpty()) {
-                        val needed = seatsNeeded.toIntOrNull() ?: 1
+                    // Same shape as the post-offer form: a bare `if` with no else swallowed the tap
+                    // silently, and `seatsNeeded.toIntOrNull() ?: 1` accepted "0" and negatives.
+                    val needed = seatsNeeded.trim().toIntOrNull()
+                    val validationError = when {
+                        origin.isBlank() -> "Where should we pick you up?"
+                        destination.isBlank() -> "Where are you going?"
+                        originLat == 0.0 || originLng == 0.0 ->
+                            "Pick the pickup point from the suggestions so hosts can find it."
+                        destLat == 0.0 || destLng == 0.0 ->
+                            "Pick the destination from the suggestions so hosts can find it."
+                        departureEpoch <= System.currentTimeMillis() ->
+                            "Choose a departure time in the future."
+                        seatsNeeded.isBlank() -> "How many seats do you need?"
+                        needed == null -> "Enter the number of seats as a whole number."
+                        needed !in 1..8 -> "You can request between 1 and 8 seats."
+                        notes.length > 500 -> "That note is too long — keep it under 500 characters."
+                        else -> null
+                    }
+                    if (validationError != null) {
+                        viewModel.setError(validationError)
+                    } else if (needed != null) {
                         val epoch = departureEpoch
 
                         val request = RideRequest(
@@ -4738,14 +4823,27 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
         val hostUser = remember(offer.hostId) { viewModel.getUserPublicProfile(offer.hostId) }
         val hostVehicle = remember(offer.hostId) { viewModel.getVehicleInfo(offer.hostId) }
 
-        val hostEmail = hostUser?.email?.ifEmpty { null } ?: (offer.hostName.trim().lowercase().replace(" ", "") + "@example.com")
-        val hostPhone = hostUser?.phoneNumber?.ifEmpty { null } ?: "+1 (555) 722-2469"
-        val hostVerifiedTier = hostUser?.verifiedTier ?: (if (offer.hostRating >= 4.5f) "vouched" else "guest")
+        // Nothing here is invented.
+        //
+        // These fell back to a fabricated phone number ("+1 (555) 722-2469"), a fabricated licence
+        // plate ("STU-1829"), a made-up year and colour, and an @example.com address synthesised
+        // from the host's display name — all rendered as fact in the card a rider opens to identify
+        // the car they are about to get into, with a working "call" button wired to the fake
+        // number. `verifiedTier` was likewise synthesised from the rating whenever the host's
+        // profile had not loaded, so an unverified host could be shown as "vouched".
+        //
+        // A blank value now means "we don't know", and the card says so.
+        val hostEmail = hostUser?.email.orEmpty()
+        val hostPhone = hostUser?.phoneNumber.orEmpty()
+        val hostVerifiedTier = hostUser?.verifiedTier.orEmpty()
 
-        val vehicleMakeModel = hostVehicle?.let { "${it.color} ${it.make} ${it.model}" } ?: offer.vehicleInfo.ifEmpty { "Shared Sedan" }
-        val vehiclePlate = hostVehicle?.licensePlate?.ifEmpty { null } ?: "STU-1829"
-        val vehicleYear = hostVehicle?.year?.ifEmpty { null } ?: "2022"
-        val vehicleColor = hostVehicle?.color?.ifEmpty { null } ?: "Slate Gray"
+        val vehicleMakeModel = hostVehicle
+            ?.let { listOf(it.color, it.make, it.model).filter { part -> part.isNotBlank() }.joinToString(" ") }
+            ?.ifBlank { null }
+            ?: offer.vehicleInfo
+        val vehiclePlate = hostVehicle?.licensePlate.orEmpty()
+        val vehicleYear = hostVehicle?.year.orEmpty()
+        val vehicleColor = hostVehicle?.color.orEmpty()
 
         if (showDriverModal) {
             DriverContactModal(
@@ -4954,13 +5052,21 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Default.DirectionsCar, contentDescription = "Vehicle", tint = SplitCruiserTextSecondary, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Vehicle: $vehicleMakeModel", color = SplitCruiserTextPrimary, fontSize = 13.sp)
+                                    Text(
+                                        text = "Vehicle: ${vehicleMakeModel.ifBlank { NOT_PROVIDED }}",
+                                        color = SplitCruiserTextPrimary,
+                                        fontSize = 13.sp
+                                    )
                                 }
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Default.Phone, contentDescription = "Phone", tint = SplitCruiserTextSecondary, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Phone: $hostPhone", color = SplitCruiserTextPrimary, fontSize = 13.sp)
+                                    Text(
+                                        text = "Phone: ${hostPhone.ifBlank { NOT_PROVIDED }}",
+                                        color = SplitCruiserTextPrimary,
+                                        fontSize = 13.sp
+                                    )
                                 }
                                 
                                 Spacer(modifier = Modifier.height(12.dp))
@@ -7460,6 +7566,9 @@ fun BlockedListScreen(viewModel: MainViewModel, navController: NavController) {
         }
     }
 }
+/** What the driver card shows for a field the host has not filled in. */
+private const val NOT_PROVIDED = "Not provided"
+
 
 @Composable
 fun DriverContactModal(
@@ -7565,7 +7674,11 @@ fun DriverContactModal(
                     }
 
                     // Vouched badge
+                    // Blank means the host's profile has not loaded, which is not the same as
+                    // "unverified" — and this used to be synthesised from the rating, so a host
+                    // with no loaded profile and a 4.5 average was shown as vouched outright.
                     val isVouched = verifiedTier.lowercase() == "vouched"
+                    val tierKnown = verifiedTier.isNotBlank()
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
@@ -7573,7 +7686,11 @@ fun DriverContactModal(
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
-                            text = if (isVouched) "VERIFIED" else "UNVERIFIED",
+                            text = when {
+                                !tierKnown -> "VERIFICATION UNKNOWN"
+                                isVouched -> "VERIFIED"
+                                else -> "UNVERIFIED"
+                            },
                             color = if (isVouched) SplitCruiserSuccess else SplitCruiserTextSecondary,
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Bold
@@ -7604,7 +7721,12 @@ fun DriverContactModal(
                 ) {
                     Column {
                         Text("Phone Number", color = SplitCruiserTextSecondary, fontSize = 11.sp)
-                        Text(hostPhone, color = SplitCruiserTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            text = hostPhone.ifBlank { NOT_PROVIDED },
+                            color = if (hostPhone.isBlank()) SplitCruiserTextSecondary else SplitCruiserTextPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
                     IconButton(
                         onClick = {
@@ -7615,9 +7737,16 @@ fun DriverContactModal(
                                 Toast.makeText(context, "Cannot dial: ${e.message}", Toast.LENGTH_SHORT).show()
                             }
                         },
+                        // Dialling a number we do not have used to place a call to a hardcoded
+                        // placeholder that belongs to nobody on this ride.
+                        enabled = hostPhone.isNotBlank(),
                         colors = IconButtonDefaults.iconButtonColors(containerColor = SplitCruiserPrimaryContainer)
                     ) {
-                        Icon(imageVector = Icons.Default.Phone, contentDescription = "Call", tint = SplitCruiserPrimary)
+                        Icon(
+                            imageVector = Icons.Default.Phone,
+                            contentDescription = "Call",
+                            tint = if (hostPhone.isBlank()) SplitCruiserTextSecondary else SplitCruiserPrimary
+                        )
                     }
                 }
 
@@ -7631,7 +7760,12 @@ fun DriverContactModal(
                 ) {
                     Column {
                         Text("Email Address", color = SplitCruiserTextSecondary, fontSize = 11.sp)
-                        Text(hostEmail, color = SplitCruiserTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            text = hostEmail.ifBlank { NOT_PROVIDED },
+                            color = if (hostEmail.isBlank()) SplitCruiserTextSecondary else SplitCruiserTextPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
                     IconButton(
                         onClick = {
@@ -7642,6 +7776,7 @@ fun DriverContactModal(
                                 Toast.makeText(context, "Cannot email: ${e.message}", Toast.LENGTH_SHORT).show()
                             }
                         },
+                        enabled = hostEmail.isNotBlank(),
                         colors = IconButtonDefaults.iconButtonColors(containerColor = SplitCruiserPrimaryContainer)
                     ) {
                         Icon(imageVector = Icons.Default.Email, contentDescription = "Email", tint = SplitCruiserPrimary)
@@ -7683,16 +7818,24 @@ fun DriverContactModal(
                     Spacer(modifier = Modifier.width(16.dp))
                     Column {
                         Text(
-                            text = vehicleMakeModel,
-                            color = SplitCruiserTextPrimary,
+                            text = vehicleMakeModel.ifBlank { "Vehicle details not provided" },
+                            color = if (vehicleMakeModel.isBlank()) SplitCruiserTextSecondary else SplitCruiserTextPrimary,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold
                         )
-                        Text(
-                            text = "Color: $vehicleColor • Year: $vehicleYear",
-                            color = SplitCruiserTextSecondary,
-                            fontSize = 11.sp
-                        )
+                        // Only state what the host actually told us. Colour and year used to fall
+                        // back to "Slate Gray" and "2022" for every host who had not filled them in.
+                        val vehicleDetail = listOfNotNull(
+                            vehicleColor.takeIf { it.isNotBlank() }?.let { "Color: $it" },
+                            vehicleYear.takeIf { it.isNotBlank() }?.let { "Year: $it" },
+                        ).joinToString(" • ")
+                        if (vehicleDetail.isNotEmpty()) {
+                            Text(
+                                text = vehicleDetail,
+                                color = SplitCruiserTextSecondary,
+                                fontSize = 11.sp
+                            )
+                        }
                         Box(
                             modifier = Modifier
                                 .padding(top = 4.dp)
@@ -7700,9 +7843,15 @@ fun DriverContactModal(
                                 .background(SplitCruiserPrimaryContainer.copy(alpha = 0.3f))
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         ) {
+                            // A licence plate is the one thing a rider checks against the car at
+                            // the kerb. Showing a made-up one is worse than showing none.
                             Text(
-                                text = "License Plate: $vehiclePlate",
-                                color = SplitCruiserPrimary,
+                                text = if (vehiclePlate.isBlank()) {
+                                    "License plate not provided"
+                                } else {
+                                    "License Plate: $vehiclePlate"
+                                },
+                                color = if (vehiclePlate.isBlank()) SplitCruiserTextSecondary else SplitCruiserPrimary,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold
                             )

@@ -155,6 +155,22 @@ class SplitCruiserRepository internal constructor(
             scope.launch { runCatching { loadSignedInUser(restored) } }
         }
 
+        startPolling()
+    }
+
+    /**
+     * Starts the refresh loops if they are not already running. Idempotent.
+     *
+     * Split out of [start] because [logout] calls [stop], which cancels and clears every job, and
+     * **no login path called [start] again** — its only callers are the two ViewModels' `init`, once
+     * per process. Signing out and back in without killing the app left feeds, matches,
+     * notifications and chat permanently dead, with only the single `refreshNow()` inside
+     * [loadSignedInUser] to show for it. Calling this from [loadSignedInUser] covers every entry
+     * point: email, Google, sign-up and session restore.
+     */
+    private fun startPolling() {
+        if (!config.isConfigured || syncJobs.isNotEmpty()) return
+
         syncJobs += scope.launch { pollLoop(::refreshFeeds) { if (foreground) 20_000L else 300_000L } }
         syncJobs += scope.launch { pollLoop(::refreshMatches) { if (foreground) 20_000L else 300_000L } }
         syncJobs += scope.launch { pollLoop(::refreshNotifications) { if (foreground) 60_000L else 600_000L } }
@@ -192,7 +208,13 @@ class SplitCruiserRepository internal constructor(
             // tick since the app started looked identical to one that was simply quiet — the chat
             // query was denied for months with nothing to show for it but a connection dot.
             val ok = runCatching { tick() }
-                .onFailure { logWarn(LOG_TAG, "A background refresh failed; backing off", it) }
+                .onFailure {
+                    // Cancellation is how stop() ends this loop, not a failure. Catching it here
+                    // logged a spurious "background refresh failed" and dropped the connection
+                    // indicator on the way out, and swallowing it breaks structured concurrency.
+                    if (it is kotlinx.coroutines.CancellationException) throw it
+                    logWarn(LOG_TAG, "A background refresh failed; backing off", it)
+                }
                 .isSuccess.also { succeeded ->
                     _isConnected.value = succeeded
                     if (succeeded) _lastSyncTime.value = nowMs()
@@ -448,6 +470,8 @@ class SplitCruiserRepository internal constructor(
 
         adoptUser(user)
         loadContactDetails(session.uid)
+        // logout() cancels every poll loop, so signing back in has to start them again.
+        startPolling()
         runCatching { refreshNow() }
             .onFailure { logWarn(LOG_TAG, "First sync after login failed", it) }
         return user.name.isEmpty()
@@ -1995,6 +2019,17 @@ class SplitCruiserRepository internal constructor(
         requireValid(offer.departureTime > nowMs()) { "Departure time must be in the future." }
         requireValid(offer.totalSeats in 1..8) { "Total seats must be between 1 and 8." }
         requireValid(offer.costPerRider >= 0.0) { "Cost per rider cannot be negative." }
+        // An upper bound as well as a lower one. The post-offer form parsed the price with
+        // `toDoubleOrNull() ?: 10.0` and applied no ceiling, so "999999" posted a ride asking each
+        // rider for a million dollars, and a typo silently became a $10 ride the host never agreed
+        // to. This is a cost-split between neighbours, not a fare.
+        requireValid(offer.costPerRider <= MAX_CONTRIBUTION) {
+            "Cost per rider cannot exceed $${MAX_CONTRIBUTION.toInt()}."
+        }
+        requireValid(offer.origin.length <= MAX_PLACE_LENGTH && offer.destination.length <= MAX_PLACE_LENGTH) {
+            "That address is too long."
+        }
+        requireValid(offer.exitLocation.length <= MAX_NOTE_LENGTH) { "That pickup note is too long." }
     }
 
     private fun validateRideRequestOrThrow(request: RideRequest) {
@@ -2007,6 +2042,11 @@ class SplitCruiserRepository internal constructor(
         ) { "Valid pickup and dropoff coordinates required." }
         requireValid(request.departureTime > nowMs()) { "Departure time must be in the future." }
         requireValid(request.seatsNeeded in 1..8) { "Seats needed must be between 1 and 8." }
+        requireValid(
+            request.origin.length <= MAX_PLACE_LENGTH && request.destination.length <= MAX_PLACE_LENGTH
+        ) { "That address is too long." }
+        requireValid(request.notes.length <= MAX_NOTE_LENGTH) { "That note is too long." }
+        requireValid(request.exitLocation.length <= MAX_NOTE_LENGTH) { "That dropoff note is too long." }
     }
 
     // --- Swift observation --------------------------------------------------------------------
@@ -2145,6 +2185,17 @@ class SplitCruiserRepository internal constructor(
          * continuously. Exhausting it is reported as "try again", not as a lost seat.
          */
         const val SEAT_CLAIM_ATTEMPTS = 3
+
+        /**
+         * Bounds on the free-text and money fields a ride carries.
+         *
+         * These exist because the two forms that create rides applied none: unbounded notes and
+         * addresses, and a price parsed with a silent default. Firestore charges by document size
+         * and the feed renders every one of these strings.
+         */
+        const val MAX_CONTRIBUTION = 500.0
+        const val MAX_PLACE_LENGTH = 200
+        const val MAX_NOTE_LENGTH = 500
         val AUTO_CLOSEABLE_REQUEST_STATUSES = setOf("active")
 
         /**
