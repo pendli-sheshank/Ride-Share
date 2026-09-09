@@ -109,14 +109,22 @@ not evidence. Verify against a build.
   `SWIFT_SOURCES` list; a file on disk is not enough. Add the filename, re-run the generator, and
   commit the regenerated `project.pbxproj`. CI checks both halves, and `swiftc` does not exist on
   Linux — the PR job's simulator build is the only thing that compiles Swift before merge.
-- **iOS keeps the refresh token in `NSUserDefaults`, not the Keychain.** It is a long-lived
-  credential sitting in a plaintext plist that is included in unencrypted backups. `KeychainStore`
-  is the fix; it was deferred because Keychain cinterop cannot be compile-checked on Linux.
-- **Rating aggregation is client-written and spoofable.** The rules narrow a non-owner to
-  `ratingAvg`/`ratingCount`/`noShowCount`, but anyone can still inflate anyone's rating. The real
-  fix is a Cloud Function with the Admin SDK; there is no `functions/` directory yet.
-- **The Firestore rules have never been executed anywhere.** No CI job exercises them and there is
-  no emulator setup. Validate against a throwaway project before pointing the live one at them.
+- **Reputation is server-owned.** `ratingAvg`, `ratingCount`, `noShowCount` and `verifiedTier` are
+  written only by the Admin SDK in `functions/`; the rules forbid every client from touching them.
+  `aggregateRating`/`aggregateNoShow` recount with a server-side aggregation query inside a
+  transaction. **Every function must bind to the `splitcruiser` database** — `getFirestore()` with
+  no argument and `onDocumentWritten("path", …)` with no `database` option both resolve to
+  `(default)`, which is how all three shipped inert and froze every user's reputation at zero.
+  `functions/src/database.ts` is the single place that id is defined; use `db()` from it.
+  `firebase.json` has to name the database too, or rules and indexes deploy to `(default)`.
+- **`firestore.rules` is executed by CI.** `rules-tests/` runs it against the Firebase emulator on
+  every PR. Add a case there for any rule you change — a Ktor `MockEngine` accepts every write, so
+  the repository suite cannot tell you a rule would have rejected it. Four client writes shipped
+  that a live Firestore denies, three of them swallowed by `runCatching`, for exactly that reason.
+- **Seat changes are conditional writes.** `claimSeat`/`releaseSeat` read the offer *and its
+  `updateTime`*, then commit with a `currentDocument` precondition and retry on conflict. Anything
+  that mutates `seatsLeft`/`passengers` must go through them; a plain `updateFields` reintroduces
+  the overbooking race, and the rules cannot catch it because both writers satisfy the bounds.
 - **The launcher icon and the in-app logo are both real artwork now**, generated from
   `assets/app-icon-source.png` by `scripts/generate-app-icon.py` — 41 files, byte-stable, so
   replacing the brand means replacing that one PNG and re-running it. The logo asset is inset so
@@ -137,8 +145,12 @@ not evidence. Verify against a build.
 - **`Theme.swift` reads the shared tokens through the Kotlin/Native ObjC export**
   (`SplitCruiserColors.shared.Primary`). That cannot be compile-checked on Linux; if the exported
   property names turn out to differ, it is a one-token fix, and the whole mapping is in one file.
-- Test coverage: 142 tests in `:shared` cover the codec, the REST clients, token refresh, the feed
-  rules, the repository and chat message types. `:app` has three unit tests (a Robolectric label
-  check, a Roborazzi screenshot, and an arithmetic placeholder). The androidTest suite now renders
-  real composables instead of asserting on local variables — but **no CI job runs it**, so it is
-  only as good as whoever remembers to run it locally.
+- Test coverage: 216 tests in `:shared`, 54 rules tests against the emulator (`rules-tests/`), 8 in
+  `functions/`, and 3 unit tests in `:app` (a Robolectric label check, a Roborazzi screenshot, and
+  an arithmetic placeholder). CI compiles the androidTest suite and runs lint, but **nothing runs
+  the instrumented tests** — that needs an emulator job, and the suite spent a long time not even
+  compiling because no job built it.
+- **`women-only` is enforced, not filtered.** Eligibility comes from `gender` on
+  `users/{uid}/private/profile` and is checked by `firestore.rules` on the write that takes a seat.
+  `FeedProjector` does the visibility half. It is self-declared, so treat it as a meaningful
+  barrier, not identity verification.

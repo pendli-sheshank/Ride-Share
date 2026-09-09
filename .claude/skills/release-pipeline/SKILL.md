@@ -307,6 +307,68 @@ account state.
 
 Append-only log. Format: symptom as logged → cause → fix.
 
+### 2026-09-09 — every Cloud Function was inert, and the repo's rules had never reached the database
+**Symptom:** no user's `ratingAvg` ever moved off 0, no expired ride was ever auto-closed, and the
+rules deployed from this repo did not match what the app was being denied by.
+**Cause:** the app reads `…/databases/splitcruiser/documents`, but `getFirestore()` with no argument
+and `onDocumentWritten("ratings/{id}", …)` with no `database` option **both resolve to
+`(default)`**. All three functions were bound to a database nothing writes to. `firebase.json` used
+the single-object `firestore` form, which also targets `(default)`, so `firestore.rules` and
+`firestore.indexes.json` had never been deployed to the database in use either.
+**Fix:** `functions/src/database.ts` defines the id once; every trigger takes
+`{ document, database: databaseId }` and uses `db()`. `firebase.json` uses the array form with
+`"database": "splitcruiser"`. **Check both halves together** — a function bound correctly against
+rules deployed elsewhere still fails.
+
+### 2026-09-09 — `firestore.rules` had never been executed by anything
+**Symptom:** four client writes shipped that a live Firestore rejects — a repeat pickup-confirm
+resending `timestamp`, a non-host writing `status: "closed"`, a re-filed no-show against
+`allow update: if false`, and notification timestamps from a skewed device clock. Three were
+swallowed by `runCatching`, so nothing surfaced at all.
+**Cause:** every repository test runs against a Ktor `MockEngine` that accepts whatever it is
+handed, and no job ran the rules. `SplitCruiserRepositoryTest` even asserted the denied
+double-confirm as correct behaviour ("both taps are sent").
+**Fix:** `rules-tests/` runs the rules against the Firebase emulator, wired into `ci.yml`. Add a
+case there for any rule change. A green repository suite says nothing about whether the rules would
+have allowed the write.
+
+### 2026-09-09 — `UIRequiredDeviceCapabilities = armv7` on an arm64-only binary
+**Symptom:** would have failed App Store validation as an "Invalid Bundle" — the same shape as the
+icon-set failure that burned build 12, surfacing at `altool --validate-app` after the build number
+is spent.
+**Cause:** a 32-bit-only required capability on a binary built arm64-only for iOS 16.
+`ITSAppUsesNonExemptEncryption` was also absent, so every upload stalled on the manual
+export-compliance question.
+**Fix:** `arm64`, plus the encryption key. Added `.github/scripts/verify-info-plist.py`, run by both
+iOS workflows. **Pattern worth repeating:** when a failure costs an irreversible resource, move the
+check into a millisecond-cost preflight.
+
+### 2026-09-09 — `build-ios.yml` reported a green summary on a red run
+**Symptom:** the job's summary tab claimed "✅ Swift Code: Compiled for the iOS Simulator" and
+"✅ Xcode Project: Generated and valid" on runs that had failed.
+**Cause:** the final summary step was `if: always()` writing an unconditional wall of checkmarks.
+**Fix:** it now reads `job.status`. Same family as the per-file `swiftc -parse … || true` loop that
+let a Swift type error reach `main`: a check that cannot fail is worse than no check.
+
+### 2026-09-09 — the release path ran no tests, and passed secrets through the shell
+**Symptom:** a merge to `main` published to Play internal testing without a single test executing on
+the merge commit.
+**Cause:** `ci.yml` is `push: branches-ignore: [main]` plus `pull_request`, and
+`release-android.yml` ran only `bundleRelease`. Separately, three steps interpolated
+`${{ secrets.* }}` directly into shell scripts, including an **unquoted** `<<EOF` heredoc — GitHub
+substitutes before bash parses, so `$`, backticks and backslashes inside a secret value were
+expanded, and a value containing the delimiter would end the heredoc early.
+**Fix:** the release job runs the shared and app unit suites first; all three steps route secrets
+through `env:` and `printf`, as `ios-release.yml` already did.
+
+### 2026-09-09 — `:shared` tests could not exercise anything that logs
+**Symptom:** any `commonTest` touching a code path that calls `logWarn` died with
+`RuntimeException: Method w in android.util.Log not mocked`, unrelated to what was under test.
+**Cause:** `commonTest` runs on the JVM through the Android variant, where every `android.*` method
+throws by default. The poll loops all log on their failure branch, so `start()`/`stop()`, the
+backoff and the whole refresh lifecycle were untestable — and untested.
+**Fix:** `testOptions { unitTests { isReturnDefaultValues = true } }` in `shared/build.gradle.kts`.
+
 ### 2026-08-18 — Play publish fails: "all keys should be registered to meet the Android Developer Verification requirements"
 **Symptom:** `release-android.yml` → "Build AAB & publish to internal testing" is red. The Gradle
 build is `BUILD SUCCESSFUL`, the signed AAB uploads as an artifact, and the failure is only the

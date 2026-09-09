@@ -317,7 +317,14 @@ class OsmLocationService(
          * Nominatim's usage policy requires a request to identify itself; an anonymous client gets
          * blocked. Keep this string meaningful if the app is ever renamed again.
          */
-        internal const val OSM_USER_AGENT = "SplitCruiser/1.0 (student.carpool@app.com)"
+        /**
+         * Nominatim and Photon both require a User-Agent identifying the application, with a
+         * contact address that actually reaches someone — an unreachable one is grounds for being
+         * blocked, and the placeholder that used to be here ("student.carpool@app.com") is not a
+         * real address. Point this at a mailbox the maintainers read before shipping.
+         */
+        internal const val OSM_USER_AGENT =
+            "SplitCruiser/1.0 (+https://github.com/pendli-sheshank/Ride-Share)"
 
         /** How many suggestions a field shows. */
         const val DISPLAY_LIMIT = 8

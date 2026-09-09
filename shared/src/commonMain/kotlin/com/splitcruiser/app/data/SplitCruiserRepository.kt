@@ -1066,42 +1066,6 @@ class SplitCruiserRepository internal constructor(
     }
 
     @Throws(Exception::class)
-    suspend fun createTripMatch(offerId: String, requestId: String): String {
-        requireUser()
-        val offer = loadOffer(offerId)
-        val request = requests.value[requestId]
-            ?: firestore.getDocument("ride_requests", requestId, serializer<RideRequest>())
-            ?: throw SplitCruiserException("Request not found")
-
-        if (offer.status != "active" && offer.status != "full") {
-            throw SplitCruiserException("Offer is no longer active")
-        }
-        if (offer.seatsLeft < request.seatsNeeded) throw SplitCruiserException("Not enough seats available")
-        if (request.status != "active") throw SplitCruiserException("Request is no longer active")
-        if (matches.value.values.any { it.offerId == offerId && it.requestId == requestId }) {
-            throw SplitCruiserException("Already matched")
-        }
-
-        val match = TripMatch(
-            id = newId("match"),
-            offerId = offerId,
-            requestId = requestId,
-            hostId = offer.hostId,
-            riderId = request.riderId,
-            riderName = request.riderName,
-            riderRating = request.riderRating,
-            contribution = offer.costPerRider * request.seatsNeeded,
-            status = "pending",
-            timestamp = nowMs(),
-            participants = listOf(offer.hostId, request.riderId),
-        )
-        firestore.setDocument("trip_matches", match.id, match, serializer<TripMatch>())
-        matches.value = matches.value + (match.id to match)
-        recomputeFeeds()
-        return match.id
-    }
-
-    @Throws(Exception::class)
     suspend fun acceptMatch(matchId: String) {
         val match = loadMatch(matchId)
         applyAcceptedMatch(

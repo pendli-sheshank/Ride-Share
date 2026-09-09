@@ -802,10 +802,14 @@ fun FirebaseStatusPill(isFirebaseEnabled: Boolean) {
 
 @Composable
 fun EmailPasswordLoginScreen(viewModel: MainViewModel, navController: NavController) {
-    var email by remember { mutableStateOf("") }
+    // Retyping an email address after a rotation is the most annoying way to lose a form, so it
+    // and the mode survive. The two password fields deliberately do NOT: rememberSaveable writes
+    // into the saved-instance Bundle, which the system may persist to disk for process death, and
+    // a password does not belong there. Losing it on rotation is the safer failure.
+    var email by rememberSaveable { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
-    var isSignUpMode by remember { mutableStateOf(false) }
+    var isSignUpMode by rememberSaveable { mutableStateOf(false) }
     var passwordVisible by remember { mutableStateOf(false) }
     var confirmPasswordVisible by remember { mutableStateOf(false) }
     var authButtonPressed by remember { mutableStateOf(false) }
@@ -1122,28 +1126,28 @@ fun EmailPasswordLoginScreen(viewModel: MainViewModel, navController: NavControl
 
 @Composable
 fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
-    var name by remember { mutableStateOf("") }
-    var lastInitial by remember { mutableStateOf("") }
-    var homeArea by remember { mutableStateOf("") }
+    var name by rememberSaveable { mutableStateOf("") }
+    var lastInitial by rememberSaveable { mutableStateOf("") }
+    var homeArea by rememberSaveable { mutableStateOf("") }
 
     // Contact and home location. The address is picked from autocomplete so it carries
     // coordinates, which is what lets a ride request fill its own pickup in later.
-    var phoneNumber by remember { mutableStateOf("") }
-    var homeAddress by remember { mutableStateOf("") }
-    var homeLat by remember { mutableStateOf(0.0) }
-    var homeLng by remember { mutableStateOf(0.0) }
+    var phoneNumber by rememberSaveable { mutableStateOf("") }
+    var homeAddress by rememberSaveable { mutableStateOf("") }
+    var homeLat by rememberSaveable { mutableStateOf(0.0) }
+    var homeLng by rememberSaveable { mutableStateOf(0.0) }
 
     // Collected so "women only" can be a restriction rather than a display filter. Stored on the
     // private profile document, never on `users/{uid}`, which every signed-in user can read.
     var gender by rememberSaveable { mutableStateOf(Gender.UNSPECIFIED) }
 
     // Host Vehicle state (optional during setup)
-    var isHostExpanded by remember { mutableStateOf(false) }
-    var vMake by remember { mutableStateOf("") }
-    var vModel by remember { mutableStateOf("") }
-    var vYear by remember { mutableStateOf("") }
-    var vColor by remember { mutableStateOf("") }
-    var vPlate by remember { mutableStateOf("") }
+    var isHostExpanded by rememberSaveable { mutableStateOf(false) }
+    var vMake by rememberSaveable { mutableStateOf("") }
+    var vModel by rememberSaveable { mutableStateOf("") }
+    var vYear by rememberSaveable { mutableStateOf("") }
+    var vColor by rememberSaveable { mutableStateOf("") }
+    var vPlate by rememberSaveable { mutableStateOf("") }
 
     // Profile picture state
     var selectedAvatarUrl by remember { mutableStateOf("") }
@@ -4076,25 +4080,25 @@ fun PostOfferScreen(viewModel: MainViewModel, navController: NavController) {
     val context = androidx.compose.ui.platform.LocalContext.current
     // Prefilled from onboarding, like the rider screen: a host's ride usually starts from home.
     val home by viewModel.contactDetails.collectAsState()
-    var origin by remember(home) { mutableStateOf(home?.homeAddress.orEmpty()) }
-    var destination by remember { mutableStateOf("") }
-    var exitLocation by remember { mutableStateOf("") }
-    var originLat by remember(home) { mutableStateOf(home?.homeLat?.takeIf { it != 0.0 } ?: 42.34) }
-    var originLng by remember(home) { mutableStateOf(home?.homeLng?.takeIf { it != 0.0 } ?: -71.10) }
-    var destLat by remember { mutableStateOf(42.33) }
-    var destLng by remember { mutableStateOf(-71.08) }
+    var origin by rememberSaveable(home) { mutableStateOf(home?.homeAddress.orEmpty()) }
+    var destination by rememberSaveable { mutableStateOf("") }
+    var exitLocation by rememberSaveable { mutableStateOf("") }
+    var originLat by rememberSaveable(home) { mutableStateOf(home?.homeLat?.takeIf { it != 0.0 } ?: 42.34) }
+    var originLng by rememberSaveable(home) { mutableStateOf(home?.homeLng?.takeIf { it != 0.0 } ?: -71.10) }
+    var destLat by rememberSaveable { mutableStateOf(42.33) }
+    var destLng by rememberSaveable { mutableStateOf(-71.08) }
 
     val calendar = remember { java.util.Calendar.getInstance().apply { add(java.util.Calendar.HOUR_OF_DAY, 4) } }
     val dateFormatter = remember { java.text.SimpleDateFormat("EEE, MMM d, yyyy", java.util.Locale.getDefault()) }
     val timeFormatter = remember { java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()) }
 
-    var dateInput by remember { mutableStateOf(dateFormatter.format(calendar.time)) }
-    var timeInput by remember { mutableStateOf(timeFormatter.format(calendar.time)) }
-    var departureEpoch by remember { mutableStateOf(calendar.timeInMillis) }
+    var dateInput by rememberSaveable { mutableStateOf(dateFormatter.format(calendar.time)) }
+    var timeInput by rememberSaveable { mutableStateOf(timeFormatter.format(calendar.time)) }
+    var departureEpoch by rememberSaveable { mutableStateOf(calendar.timeInMillis) }
 
-    var totalSeats by remember { mutableStateOf("4") }
-    var costPerRider by remember { mutableStateOf("15.00") }
-    var womenOnly by remember { mutableStateOf(false) }
+    var totalSeats by rememberSaveable { mutableStateOf("4") }
+    var costPerRider by rememberSaveable { mutableStateOf("15.00") }
+    var womenOnly by rememberSaveable { mutableStateOf(false) }
 
     val userVehicle = viewModel.getVehicleInfo(viewModel.currentUser.value?.id ?: "")
 
@@ -4486,22 +4490,22 @@ fun PostRequestScreen(viewModel: MainViewModel, navController: NavController) {
     // What the home address in onboarding is for: the rider should not retype where they live.
     val home by viewModel.contactDetails.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
-    var origin by remember(home) { mutableStateOf(home?.homeAddress.orEmpty()) }
-    var destination by remember { mutableStateOf("") }
-    var exitLocation by remember { mutableStateOf("") }
-    var originLat by remember(home) { mutableStateOf(home?.homeLat?.takeIf { it != 0.0 } ?: 42.33) }
-    var originLng by remember(home) { mutableStateOf(home?.homeLng?.takeIf { it != 0.0 } ?: -71.08) }
-    var destLat by remember { mutableStateOf(42.36) }
-    var destLng by remember { mutableStateOf(-71.01) }
+    var origin by rememberSaveable(home) { mutableStateOf(home?.homeAddress.orEmpty()) }
+    var destination by rememberSaveable { mutableStateOf("") }
+    var exitLocation by rememberSaveable { mutableStateOf("") }
+    var originLat by rememberSaveable(home) { mutableStateOf(home?.homeLat?.takeIf { it != 0.0 } ?: 42.33) }
+    var originLng by rememberSaveable(home) { mutableStateOf(home?.homeLng?.takeIf { it != 0.0 } ?: -71.08) }
+    var destLat by rememberSaveable { mutableStateOf(42.36) }
+    var destLng by rememberSaveable { mutableStateOf(-71.01) }
     
     val calendar = remember { java.util.Calendar.getInstance().apply { add(java.util.Calendar.HOUR_OF_DAY, 6) } }
     val formatter = remember { java.text.SimpleDateFormat("EEE, MMM d, yyyy - h:mm a", java.util.Locale.getDefault()) }
-    var departureTimeInput by remember { mutableStateOf(formatter.format(calendar.time)) }
-    var departureEpoch by remember { mutableStateOf(calendar.timeInMillis) }
+    var departureTimeInput by rememberSaveable { mutableStateOf(formatter.format(calendar.time)) }
+    var departureEpoch by rememberSaveable { mutableStateOf(calendar.timeInMillis) }
 
-    var seatsNeeded by remember { mutableStateOf("1") }
-    var notes by remember { mutableStateOf("") }
-    var womenOnly by remember { mutableStateOf(false) }
+    var seatsNeeded by rememberSaveable { mutableStateOf("1") }
+    var notes by rememberSaveable { mutableStateOf("") }
+    var womenOnly by rememberSaveable { mutableStateOf(false) }
 
     fun showDateTimePicker() {
         val datePickerDialog = android.app.DatePickerDialog(
@@ -4813,6 +4817,11 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
 
     var customContribution by remember { mutableStateOf("") }
     var showSuccessDialog by remember { mutableStateOf(false) }
+
+    // (riderId, displayName) of a no-show awaiting confirmation. Reporting one is irreversible —
+    // the report document is immutable by rule and drops the rider's verified badge — so it does
+    // not happen on a single tap.
+    var noShowTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
 
     if (type == "offer") {
         // `activeOffers` is deliberately filtered to exclude the viewer's own rides and anything
@@ -5195,32 +5204,81 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                 Spacer(modifier = Modifier.height(24.dp))
 
                 if (offer.passengers.isNotEmpty()) {
-                    Text("RESERVED PASSENGERS", color = SplitCruiserPrimary, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                    val isHostViewing = offer.hostId == currentUser?.id
+                    Text(
+                        text = if (isHostViewing) "YOUR PASSENGERS" else "RESERVED PASSENGERS",
+                        color = SplitCruiserPrimary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Black
+                    )
                     Spacer(modifier = Modifier.height(8.dp))
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .border(1.dp, SplitCruiserOutline, RoundedCornerShape(16.dp))
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            offer.passengerNames.zip(offer.passengers).forEachIndexed { index, (name, id) ->
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-                                ) {
-                                    Icon(Icons.Default.Person, contentDescription = "Passenger", tint = SplitCruiserTextSecondary, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = if (id == currentUser?.id) "$name (You)" else name,
-                                        color = SplitCruiserTextPrimary,
-                                        fontWeight = if (id == currentUser?.id) FontWeight.Bold else FontWeight.Normal,
-                                        fontSize = 14.sp
+
+                    if (isHostViewing) {
+                        // The host's passenger management, finally reachable.
+                        //
+                        // PassengerManagementCard was written, complete, and never called from
+                        // anywhere — so hosts had no way to manage a manifest at all, and
+                        // `recordNoShow` had no caller on either platform even though the profile
+                        // screen renders a "No-shows" count. Three dead things that were really one
+                        // unfinished feature.
+                        //
+                        // Indexed rather than zipped: `zip` truncates to the shorter list, so a
+                        // manifest whose two parallel arrays had drifted silently dropped
+                        // passengers or paired a name with the wrong id.
+                        offer.passengers.forEachIndexed { index, id ->
+                            val name = offer.passengerNames.getOrNull(index) ?: "Passenger"
+                            val rider = viewModel.getUserPublicProfile(id)
+                            PassengerManagementCard(
+                                passengerName = name,
+                                passengerRating = rider?.ratingAvg ?: 0f,
+                                passengerId = id,
+                                offerRoute = "${offer.origin} → ${offer.destination}",
+                                onMessageClick = {
+                                    val match = viewModel.userMatches.value.firstOrNull {
+                                        it.offerId == offer.id && it.riderId == id
+                                    }
+                                    if (match != null) {
+                                        navController.navigate("chat/${match.id}")
+                                    } else {
+                                        viewModel.setError("There's no chat thread for this rider yet.")
+                                    }
+                                },
+                                onMarkNoShowClick = { noShowTarget = id to name },
+                                onViewProfileClick = {
+                                    viewModel.setError(
+                                        rider?.let { "${it.displayName} • ${it.ratingCount} ratings" }
+                                            ?: "That rider's profile hasn't loaded yet."
                                     )
-                                }
-                                if (index < offer.passengerNames.size - 1) {
-                                    HorizontalDivider(color = SplitCruiserOutline, modifier = Modifier.padding(vertical = 4.dp))
+                                },
+                            )
+                        }
+                    } else {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(1.dp, SplitCruiserOutline, RoundedCornerShape(16.dp))
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                offer.passengers.forEachIndexed { index, id ->
+                                    val name = offer.passengerNames.getOrNull(index) ?: "Passenger"
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                                    ) {
+                                        Icon(Icons.Default.Person, contentDescription = null, tint = SplitCruiserTextSecondary, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = if (id == currentUser?.id) "$name (You)" else name,
+                                            color = SplitCruiserTextPrimary,
+                                            fontWeight = if (id == currentUser?.id) FontWeight.Bold else FontWeight.Normal,
+                                            fontSize = 14.sp
+                                        )
+                                    }
+                                    if (index < offer.passengers.size - 1) {
+                                        HorizontalDivider(color = SplitCruiserOutline, modifier = Modifier.padding(vertical = 4.dp))
+                                    }
                                 }
                             }
                         }
@@ -5951,6 +6009,43 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
             )
         }
     }
+
+    noShowTarget?.let { (riderId, riderName) ->
+        AlertDialog(
+            onDismissRequest = { noShowTarget = null },
+            containerColor = SplitCruiserSurfaceCard,
+            shape = RoundedCornerShape(SplitCruiserRadius.Lg),
+            title = {
+                Text(
+                    "Report $riderName as a no-show?",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = SplitCruiserTextPrimary
+                )
+            },
+            text = {
+                Text(
+                    "This is permanent. The report can't be edited or withdrawn, and it removes " +
+                        "their verified badge. Only report someone who genuinely didn't turn up.",
+                    color = SplitCruiserTextSecondary,
+                    fontSize = 13.sp
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.recordNoShow(riderId)
+                    noShowTarget = null
+                }) {
+                    Text("Report", color = SplitCruiserDanger, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { noShowTarget = null }) {
+                    Text("Cancel", color = SplitCruiserTextSecondary)
+                }
+            }
+        )
+    }
 }
 
 // --- Screen 7: Real-time Coordinate & Coordination Chat ---
@@ -5962,7 +6057,8 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
     // Flow each time it is invoked, so an unremembered call restarts the collection on every frame.
     val messageFlow = remember(matchId) { viewModel.getChatMessages(matchId) }
     val messageList by messageFlow.collectAsState(initial = emptyList())
-    var currentMsgText by remember { mutableStateOf("") }
+    // A half-typed message is real user work; rotating the device threw it away.
+    var currentMsgText by rememberSaveable { mutableStateOf("") }
     val currentUser by viewModel.currentUser.collectAsState()
     val matches by viewModel.userMatches.collectAsState()
 
