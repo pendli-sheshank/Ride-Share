@@ -6,6 +6,7 @@ import io.ktor.client.plugins.HttpRequestRetry
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.defaultRequest
+import io.ktor.client.plugins.observer.ResponseObserver
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.header
 import io.ktor.client.statement.HttpResponse
@@ -32,7 +33,10 @@ internal val firebaseJson: Json = Json {
  * [engine] is null in production so Ktor picks the platform engine — OkHttp on Android, Darwin on
  * iOS — and is a `MockEngine` in tests, which is what lets the whole backend be exercised on Linux.
  */
-internal fun createFirebaseHttpClient(engine: HttpClientEngine?): HttpClient {
+internal fun createFirebaseHttpClient(
+    engine: HttpClientEngine?,
+    serverClock: ServerClock? = null,
+): HttpClient {
     val configure: io.ktor.client.HttpClientConfig<*>.() -> Unit = {
         // Firebase signals failure with a 4xx and a JSON error body worth reading, so handle
         // statuses explicitly rather than letting Ktor throw a bare exception.
@@ -49,6 +53,13 @@ internal fun createFirebaseHttpClient(engine: HttpClientEngine?): HttpClient {
         }
         defaultRequest {
             header(HttpHeaders.UserAgent, "SplitCruiser/1.0")
+        }
+        if (serverClock != null) {
+            // Every Firebase response carries a `Date`, so the server-time offset comes for free on
+            // traffic the app already makes. See ServerClock for why the offset matters.
+            install(ResponseObserver) {
+                onResponse { response -> serverClock.observe(response.headers[HttpHeaders.Date]) }
+            }
         }
     }
     return if (engine != null) HttpClient(engine, configure) else HttpClient(configure)

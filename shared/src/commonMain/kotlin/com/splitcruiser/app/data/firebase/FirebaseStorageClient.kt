@@ -27,8 +27,15 @@ internal class FirebaseStorageClient(
 
     /** Uploads [bytes] and returns the public download URL, matching what the Android SDK produced. */
     suspend fun uploadBytes(path: String, bytes: ByteArray, contentType: String): String {
-        require(bytes.size <= MAX_UPLOAD_BYTES) {
-            "Image is ${bytes.size / 1024}KB; the storage rules cap uploads at 5MB."
+        requireStorageConfigured()
+        // A SplitCruiserException, not `require`: an IllegalArgumentException crosses the Swift
+        // boundary as an unmapped KotlinIllegalArgumentException with no user-facing message, and
+        // every other failure in this layer is already a SplitCruiserException.
+        if (bytes.size > MAX_UPLOAD_BYTES) {
+            throw SplitCruiserException(
+                "That image is ${bytes.size / 1024}KB. Please pick one under 5MB.",
+                code = "IMAGE_TOO_LARGE",
+            )
         }
         val token = requireToken()
         val encodedPath = path.encodeURLParameter()
@@ -46,6 +53,7 @@ internal class FirebaseStorageClient(
     }
 
     suspend fun delete(path: String) {
+        requireStorageConfigured()
         val token = requireToken()
         val response = http.delete("${config.storageBase}/${path.encodeURLParameter()}") {
             firebaseAuth(token)
@@ -61,6 +69,19 @@ internal class FirebaseStorageClient(
 
     private suspend fun requireToken(): String = tokens.idToken()
         ?: throw SplitCruiserException("You need to be logged in.", code = "UNAUTHENTICATED")
+
+    /**
+     * A blank bucket builds [FirebaseConfig.storageBase] as `https://…/v0/b//o`, which the server
+     * rejects with something that reads like a permissions problem. Say what is actually wrong.
+     */
+    private fun requireStorageConfigured() {
+        if (!config.isStorageConfigured) {
+            throw SplitCruiserException(
+                "Photo uploads aren't available: this build has no Firebase Storage bucket configured.",
+                code = "STORAGE_NOT_CONFIGURED",
+            )
+        }
+    }
 
     private companion object {
         const val MAX_UPLOAD_BYTES = 5 * 1024 * 1024

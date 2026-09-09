@@ -27,3 +27,9 @@ session-end-summary.txt
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Rules-test and Cloud Functions dependencies
+rules-tests/node_modules/
+functions/node_modules/
+functions/lib/
+rules-tests/*.log

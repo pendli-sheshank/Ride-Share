@@ -14,6 +14,7 @@ import com.splitcruiser.app.data.firebase.TokenProvider
 import com.splitcruiser.app.data.firebase.arrayOfStrings
 import com.splitcruiser.app.data.firebase.booleanValue
 import com.splitcruiser.app.data.firebase.buildFields
+import com.splitcruiser.app.data.firebase.ServerClock
 import com.splitcruiser.app.data.firebase.createFirebaseHttpClient
 import com.splitcruiser.app.data.firebase.doubleValue
 import com.splitcruiser.app.data.firebase.firebaseJson
@@ -61,7 +62,13 @@ class SplitCruiserRepository internal constructor(
     constructor(config: FirebaseConfig, store: KeyValueStore) : this(config, store, null)
 
     private val scope = CoroutineScope(SupervisorJob())
-    private val http = createFirebaseHttpClient(engine)
+
+    /**
+     * Tracks server-vs-device clock skew from Firebase's response `Date` headers. Used for
+     * timestamps a Firestore rule checks against `request.time` — see [sendNotificationAlert].
+     */
+    private val serverClock = ServerClock()
+    private val http = createFirebaseHttpClient(engine, serverClock)
     private val auth = FirebaseAuthClient(http, config)
     private val tokens = TokenProvider(store, firebaseJson) { auth.refresh(it) }
     private val firestore = FirestoreClient(http, config, tokens)
@@ -373,7 +380,7 @@ class SplitCruiserRepository internal constructor(
         runCatching { auth.sendEmailVerification(session.idToken) }
             .onFailure { logWarn(LOG_TAG, "Could not send the verification email", it) }
 
-        val newUser = User(id = session.uid, email = trimmedEmail, verifiedTier = "vouched")
+        val newUser = User(id = session.uid, email = trimmedEmail)
         firestore.setDocument("users", session.uid, newUser, serializer<User>())
         adoptUser(newUser)
         return true
@@ -434,7 +441,6 @@ class SplitCruiserRepository internal constructor(
                 id = session.uid,
                 email = session.email,
                 avatarUrl = avatarUrl,
-                verifiedTier = "vouched",
             ).also { firestore.setDocument("users", session.uid, it, serializer<User>()) }
         }
 
@@ -1338,8 +1344,19 @@ class SplitCruiserRepository internal constructor(
             ?: throw SplitCruiserException("That pickup proposal is no longer available.")
         requireValid(proposal.senderId != user.id) { "You cannot confirm your own proposal." }
 
+        val confirmationId = "msg_confirm_${proposalMessageId}_${user.id}"
+
+        // Confirming twice is a no-op, not a second write. The id is deterministic so a repeat tap
+        // is an UPDATE, and this message carried a fresh `timestamp` every time — which the
+        // `messages` update rule forbids changing (it also pins matchId, senderId, participants and
+        // contribution, so a party cannot repudiate a price both sides have seen). The second tap
+        // therefore came back PERMISSION_DENIED and the user was told they lacked permission to
+        // confirm their own pickup. Nothing about the confirmation changes on a repeat, so the
+        // cheapest correct answer is to not issue the write at all.
+        if (messages.value.containsKey(confirmationId)) return
+
         val confirmation = Message(
-            id = "msg_confirm_${proposalMessageId}_${user.id}",
+            id = confirmationId,
             matchId = proposal.matchId,
             senderId = user.id,
             senderName = user.displayName,
@@ -1387,10 +1404,24 @@ class SplitCruiserRepository internal constructor(
      * Denormalised onto every message, because the `messages` read rule tests membership against
      * this array rather than following [Message.matchId] to the match.
      */
-    private fun participantsFor(matchId: String, userId: String): List<String> {
+    private suspend fun participantsFor(matchId: String, userId: String): List<String> {
+        // Cache-first, then the network. This used to fall back to `listOf(userId)` on a cache
+        // miss, which writes a message whose `participants` contains only its sender — and the
+        // messages read rule tests membership in exactly that array, so the other party could
+        // never read it. Not "delivered late": unreadable, permanently, with no error anywhere.
+        // Reachable on any cold start where a chat opens before the matches poll has run.
         val match = matches.value[matchId]
-        return match?.participants?.takeIf { it.isNotEmpty() }
-            ?: listOfNotNull(match?.hostId, match?.riderId).ifEmpty { listOf(userId) }
+            ?: runCatching { firestore.getDocument("trip_matches", matchId, serializer<TripMatch>()) }
+                .getOrNull()
+
+        val participants = match?.participants?.takeIf { it.isNotEmpty() }
+            ?: listOfNotNull(match?.hostId, match?.riderId).filter { it.isNotEmpty() }
+
+        // Better to fail the send than to silently drop the message into a thread nobody can read.
+        requireValid(participants.size >= 2 && userId in participants) {
+            "Couldn't work out who this conversation is with. Please reopen the ride and try again."
+        }
+        return participants
     }
 
     /** Writes a message, caches it, and tells the other participant about it. */
@@ -1584,6 +1615,17 @@ class SplitCruiserRepository internal constructor(
             targetId = userId,
             timestamp = nowMs(),
         )
+        // `no_show_reports` is `allow update, delete: if false` — one immutable document per
+        // (reporter, target) pair, which is what makes the count un-inflatable. The id is
+        // deterministic, so reporting the same person after a second missed ride is an UPDATE and
+        // comes back PERMISSION_DENIED. Filing twice is semantically a no-op (the Cloud Function
+        // counts distinct reporters), so treat an existing report as success rather than surfacing
+        // a permissions error for something the user did nothing wrong to trigger.
+        val alreadyFiled = runCatching {
+            firestore.getDocument("no_show_reports", report.id, serializer<NoShowReport>()) != null
+        }.getOrDefault(false)
+
+        if (alreadyFiled) return
         firestore.setDocument("no_show_reports", report.id, report, serializer<NoShowReport>())
 
         val user = users.value[userId] ?: runCatching { fetchUserProfile(userId) }.getOrNull() ?: return
@@ -1641,7 +1683,10 @@ class SplitCruiserRepository internal constructor(
             title = title,
             message = message,
             type = type,
-            timestamp = nowMs(),
+            // Server-anchored, not the device clock. The notifications rule binds this to
+            // `request.time` with a minute of slack, so a phone whose clock is even slightly fast
+            // had every notification it sent denied — silently, because of the runCatching below.
+            timestamp = serverClock.nowMs(),
             isRead = false,
         )
         runCatching {
@@ -1733,9 +1778,18 @@ class SplitCruiserRepository internal constructor(
      */
     private suspend fun closeIfExpired(offer: TripOffer): TripOffer {
         if (offer.status !in AUTO_CLOSEABLE_OFFER_STATUSES || offer.departureTime > nowMs()) return offer
-        runCatching {
-            firestore.updateFields("trip_offers", offer.id, buildFields("status" to stringValue("closed")))
-        }.onFailure { logWarn(LOG_TAG, "Could not auto-close expired trip offer ${offer.id}", it) }
+
+        // Only the host may write this. The non-host branch of the trip_offers update rule confines
+        // `status` to ['active','full'], so "closed" from a rider was *always* denied — every rider
+        // opening an expired ride they had joined fired a guaranteed-denied write, once per offer,
+        // on every fetchMyTrips. The status shown is still derived locally, because expiry is a
+        // pure function of departureTime and the same derivation runs on every read path; what
+        // changes is that the client no longer claims to have persisted it.
+        if (offer.hostId == _currentUser.value?.id) {
+            runCatching {
+                firestore.updateFields("trip_offers", offer.id, buildFields("status" to stringValue("closed")))
+            }.onFailure { logWarn(LOG_TAG, "Could not auto-close expired trip offer ${offer.id}", it) }
+        }
         return offer.copy(status = "closed")
     }
 

@@ -12,7 +12,11 @@ data class User(
     val name: String = "",
     val lastInitial: String = "",
     val avatarUrl: String = "",
-    val verifiedTier: String = "vouched", // "vouched" or "guest"
+    // "guest" or "vouched". Server-owned: the Firestore rules forbid any client from writing it,
+    // and the `aggregateRating`/`aggregateNoShow` Cloud Functions derive it from real ratings and
+    // no-show reports. It defaults to "guest" because a brand-new account has earned nothing —
+    // this used to default to "vouched", so every account displayed a trust badge from creation.
+    val verifiedTier: String = "guest",
     val invitedBy: String = "",
     val ratingAvg: Float = 0.0f,
     val ratingCount: Int = 0,

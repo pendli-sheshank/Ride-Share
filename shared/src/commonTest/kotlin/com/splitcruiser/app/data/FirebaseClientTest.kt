@@ -556,10 +556,27 @@ class FirebaseClientTest {
     @Test
     fun uploadRejectsAnOversizedImageBeforeHittingTheNetwork() = runTest {
         val http = createFirebaseHttpClient(engine { HttpStatusCode.OK to "{}" })
-        assertFailsWith<IllegalArgumentException> {
+        // A SplitCruiserException, not the IllegalArgumentException `require` used to throw: Swift
+        // sees an unmapped KotlinIllegalArgumentException with no message it can show a user.
+        val error = assertFailsWith<SplitCruiserException> {
             FirebaseStorageClient(http, config, tokenProvider())
                 .uploadBytes("profile_pictures/u1.jpg", ByteArray(6 * 1024 * 1024), "image/jpeg")
         }
+        assertEquals("IMAGE_TOO_LARGE", error.code)
+        assertContains(error.message.orEmpty(), "5MB")
+        assertTrue(requests.isEmpty(), "the request should never have been sent")
+    }
+
+    @Test
+    fun uploadWithNoStorageBucketSaysSoInsteadOfBuildingAMalformedUrl() = runTest {
+        val http = createFirebaseHttpClient(engine { HttpStatusCode.OK to "{}" })
+        // A blank bucket built `https://firebasestorage.googleapis.com/v0/b//o`, which failed with
+        // whatever the server returned for that URL — it read like a permissions problem.
+        val error = assertFailsWith<SplitCruiserException> {
+            FirebaseStorageClient(http, config.copy(storageBucket = ""), tokenProvider())
+                .uploadBytes("profile_pictures/u1.jpg", ByteArray(16), "image/jpeg")
+        }
+        assertEquals("STORAGE_NOT_CONFIGURED", error.code)
         assertTrue(requests.isEmpty(), "the request should never have been sent")
     }
 

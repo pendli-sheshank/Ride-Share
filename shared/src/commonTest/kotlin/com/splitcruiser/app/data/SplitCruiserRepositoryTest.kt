@@ -958,6 +958,18 @@ class SplitCruiserRepositoryTest {
         assertContains(body, "\"participants\"")
     }
 
+    /**
+     * The second tap must issue no write at all.
+     *
+     * This test used to assert `2` here — "both taps are sent" — on the reasoning that they address
+     * the same deterministic id, so only one card renders. Against a real Firestore that is wrong:
+     * the second tap is an *update*, it carried a fresh `timestamp`, and the `messages` update rule
+     * forbids changing `timestamp` (along with matchId, senderId, participants and contribution, so
+     * neither party can repudiate a price both have seen). The second tap therefore came back
+     * PERMISSION_DENIED and the user was told they lacked permission to confirm their own pickup.
+     * The MockEngine accepts everything, so the suite could not see it; `client-writes.rules.test.ts`
+     * pins the rule half of this contract against the emulator.
+     */
     @Test
     fun confirmingTheSameProposalTwiceWritesOneMessage() = runTest {
         val repo = signedIn(repository(chatBackendServing(aProposalFrom = "bo")))
@@ -970,9 +982,27 @@ class SplitCruiserRepositoryTest {
         val confirmationWrites = requests.filter {
             it.url.toString().contains("/documents/messages/msg_confirm_msg_proposal_me")
         }
-        assertEquals(2, confirmationWrites.size, "both taps are sent")
-        val distinctIds = confirmationWrites.map { it.url.toString() }.toSet()
-        assertEquals(1, distinctIds.size, "but they address one document, so one card is rendered")
+        assertEquals(1, confirmationWrites.size, "the repeat tap must not re-issue a denied write")
+    }
+
+    /**
+     * A message must never be written with only its sender in `participants`.
+     *
+     * The read rule is `uid in resource.data.participants`, so such a message is readable by its
+     * sender and nobody else, for ever — and the old cache-miss fallback produced exactly that
+     * shape with no error anywhere. Failing the send is the lesser harm.
+     */
+    @Test
+    fun sendingIntoAnUnresolvableMatchFailsInsteadOfWritingAnUnreadableMessage() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+
+        assertFailsWith<SplitCruiserException> {
+            repo.sendPickupProposal("match_unknown", "360 Huntington Ave", "700 Comm Ave", "5:45 PM", 14.5)
+        }
+        assertTrue(
+            requests.none { it.url.toString().contains("/documents/messages/") },
+            "no message document should have been written",
+        )
     }
 
     @Test
@@ -1000,6 +1030,7 @@ class SplitCruiserRepositoryTest {
 
     @Test
     fun aPickupProposalCarriesTheAddressesAndTheAmount() = runTest {
+        seedAcceptedMatch()
         val repo = signedIn(repository(scriptedBackend()))
 
         repo.sendPickupProposal("match_1", "360 Huntington Ave", "700 Comm Ave", "5:45 PM", 14.5)
@@ -1015,13 +1046,23 @@ class SplitCruiserRepositoryTest {
         assertContains(body, "for $14.50")
     }
 
-    /** Serves one conversation containing a single pickup proposal sent by [aProposalFrom]. */
-    private fun chatBackendServing(aProposalFrom: String): (HttpRequestData) -> Pair<HttpStatusCode, String> {
+    /**
+     * An accepted match between "bo" (host) and "me" (rider).
+     *
+     * Every message write resolves the thread's `participants` from the match, so a test that sends
+     * a message needs the match to exist — exactly as production does.
+     */
+    private fun seedAcceptedMatch() {
         documents["trip_matches/match_1"] = """
             {"fields":{"id":{"stringValue":"match_1"},"hostId":{"stringValue":"bo"},
              "riderId":{"stringValue":"me"},"contribution":{"doubleValue":9.0},
              "status":{"stringValue":"accepted"}}}
         """.trimIndent()
+    }
+
+    /** Serves one conversation containing a single pickup proposal sent by [aProposalFrom]. */
+    private fun chatBackendServing(aProposalFrom: String): (HttpRequestData) -> Pair<HttpStatusCode, String> {
+        seedAcceptedMatch()
         val proposal = """
             {"document":{"fields":{"id":{"stringValue":"msg_proposal"},
              "matchId":{"stringValue":"match_1"},"senderId":{"stringValue":"$aProposalFrom"},
