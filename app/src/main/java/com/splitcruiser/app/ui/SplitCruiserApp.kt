@@ -98,6 +98,12 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
+import androidx.compose.ui.semantics.Role
+import com.splitcruiser.app.data.Gender
 
 // --- Material 3 Animation Utilities ---
 
@@ -1126,6 +1132,10 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
     var homeLat by remember { mutableStateOf(0.0) }
     var homeLng by remember { mutableStateOf(0.0) }
 
+    // Collected so "women only" can be a restriction rather than a display filter. Stored on the
+    // private profile document, never on `users/{uid}`, which every signed-in user can read.
+    var gender by rememberSaveable { mutableStateOf(Gender.UNSPECIFIED) }
+
     // Host Vehicle state (optional during setup)
     var isHostExpanded by remember { mutableStateOf(false) }
     var vMake by remember { mutableStateOf("") }
@@ -1336,6 +1346,58 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
 
             Spacer(modifier = Modifier.height(12.dp))
 
+            // Gender.
+            //
+            // Asked because "women only" is an enforced restriction, not a display filter: the
+            // Firestore rules read this (from the private profile, server-side) on the write that
+            // takes a seat. It is optional in the sense that "Prefer not to say" is a real answer —
+            // it just means women-only rides are not offered.
+            Text(
+                text = "Gender",
+                color = SplitCruiserTextSecondary,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(bottom = 6.dp)
+            )
+            Text(
+                text = "Used only to offer women-only rides. Never shown on your profile.",
+                color = SplitCruiserTextSecondary,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+            Column(modifier = Modifier.fillMaxWidth().selectableGroup()) {
+                Gender.SELECTABLE.forEach { option ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .selectable(
+                                selected = gender == option,
+                                onClick = { gender = option },
+                                role = Role.RadioButton,
+                            )
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = gender == option,
+                            // null: the whole row is the touch target, and a nested clickable
+                            // would announce itself separately to a screen reader.
+                            onClick = null,
+                            colors = RadioButtonDefaults.colors(selectedColor = SplitCruiserPrimary)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = Gender.label(option),
+                            color = SplitCruiserTextPrimary,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
             // Contact number. This one does go on the public user document: the trip detail screen
             // has always shown a matched host's number.
             OutlinedTextField(
@@ -1542,6 +1604,7 @@ fun ProfileSetupScreen(viewModel: MainViewModel, navController: NavController) {
                                 homeAddress = homeAddress,
                                 homeLat = homeLat,
                                 homeLng = homeLng,
+                                gender = gender,
                             ),
                             vehicle = vehicle
                         ) {
@@ -6944,6 +7007,11 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
     val isFirebaseEnabled = viewModel.repository.isFirebaseEnabled
     val userAlerts by viewModel.notifications.collectAsState()
 
+    // From the private profile document, not from `User` — gender does not belong on a document
+    // every signed-in user can read.
+    val contactDetails by viewModel.contactDetails.collectAsState()
+    val isEligibleForWomenOnly = contactDetails?.isEligibleForWomenOnly == true
+
     var showEditProfileDialog by remember { mutableStateOf(false) }
 
     // Rating submit state. The target is picked from the user's own match history — it used to
@@ -7416,16 +7484,31 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Female, contentDescription = "Women Filter", tint = SplitCruiserAccent)
+                            Icon(Icons.Default.Female, contentDescription = null, tint = SplitCruiserAccent)
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
-                                Text("Women-Only Filter", color = SplitCruiserTextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                Text("Only match with other women", color = SplitCruiserTextSecondary, fontSize = 10.sp)
+                                // A preference, not the gate. Turning this on used to be the ONLY
+                                // thing standing between any account and every women-only ride on
+                                // the platform; eligibility now comes from the private profile and
+                                // is enforced by the Firestore rules on the write that takes a seat.
+                                Text("Show only women-only rides", color = SplitCruiserTextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text(
+                                    text = if (isEligibleForWomenOnly) {
+                                        "Hides every other ride from your feed"
+                                    } else {
+                                        "Available to riders who selected Woman during setup"
+                                    },
+                                    color = SplitCruiserTextSecondary,
+                                    fontSize = 10.sp
+                                )
                             }
                         }
                         Switch(
-                            checked = currentUser?.isWomenOnlyFilterEnabled ?: false,
+                            checked = isEligibleForWomenOnly && (currentUser?.isWomenOnlyFilterEnabled ?: false),
                             onCheckedChange = { viewModel.toggleWomenOnlyFilter(it) },
+                            // Disabled rather than hidden: silently omitting it would leave someone
+                            // who expected the control unable to tell whether it exists.
+                            enabled = isEligibleForWomenOnly,
                             colors = SwitchDefaults.colors(checkedThumbColor = SplitCruiserAccent)
                         )
                     }

@@ -156,6 +156,7 @@ final class AppViewModel: ObservableObject {
         homeAddress: String,
         homeLat: Double,
         homeLng: Double,
+        gender: String,
         vehicle: Vehicle?
     ) async {
         await perform("Setting up your profile…") {
@@ -167,7 +168,8 @@ final class AppViewModel: ObservableObject {
                     phoneNumber: phoneNumber,
                     homeAddress: homeAddress,
                     homeLat: homeLat,
-                    homeLng: homeLng
+                    homeLng: homeLng,
+                    gender: gender
                 ),
                 vehicle: vehicle
             )

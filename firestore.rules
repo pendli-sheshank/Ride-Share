@@ -20,6 +20,26 @@ service cloud.firestore {
       return request.resource.data.diff(resource.data).affectedKeys();
     }
 
+    // Whether the caller may take a seat on, or accept, a ride marked women-only.
+    //
+    // Gender lives on the caller's *private* profile document, not on users/{uid}, because that one
+    // is readable by every signed-in user. Rules run server-side and can read it regardless, which
+    // is what lets this be enforced without publishing anything.
+    //
+    // "Women only" was previously gated solely on `isWomenOnlyFilterEnabled` — a self-service
+    // boolean any account could flip — with no gender recorded anywhere and no rule behind it. It
+    // was a display filter presented as a safety control.
+    //
+    // Deliberately used ONLY on write rules. A read/list rule that calls get() breaks list queries
+    // outright, which this repo has already been bitten by once (see the skill's known-issues log).
+    // Feed visibility is filtered client-side in FeedProjector; this is the half that has teeth.
+    function isWomenOnlyEligible() {
+      return isAuth() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)/private/profile) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)/private/profile)
+          .data.get('gender', 'unspecified') == 'woman';
+    }
+
     // ============================================
     // COLLECTION: users
     // ============================================
@@ -102,7 +122,10 @@ service cloud.firestore {
           request.resource.data.passengerNames.size() == request.resource.data.passengers.size() &&
           (
             // Joining: adds only the caller, keeps every existing passenger, and costs a seat.
+            // A women-only ride admits only eligible riders — this is the enforcement point that
+            // turns the flag from a display filter into a restriction.
             (
+              (resource.data.get('womenOnly', false) == false || isWomenOnlyEligible()) &&
               !(request.auth.uid in resource.data.passengers) &&
               request.auth.uid in request.resource.data.passengers &&
               request.resource.data.passengers.hasAll(resource.data.passengers) &&
@@ -161,10 +184,21 @@ service cloud.firestore {
         resource.data.riderId == request.auth.uid
       );
 
-      allow create: if isAuth() && (
-        request.resource.data.hostId == request.auth.uid ||
-        request.resource.data.riderId == request.auth.uid
-      );
+      // Both sides of a women-only ride must be eligible: a rider joining a women-only offer, and
+      // a host accepting a women-only request. Checked here as well as on the seat write, because
+      // offerSeatForRequest and acceptRideRequestDirect reach the manifest from the other
+      // direction — via a backing offer the host owns, where the host branch above applies.
+      allow create: if isAuth() &&
+        (
+          request.resource.data.hostId == request.auth.uid ||
+          request.resource.data.riderId == request.auth.uid
+        ) &&
+        (
+          !exists(/databases/$(database)/documents/ride_requests/$(request.resource.data.requestId)) ||
+          get(/databases/$(database)/documents/ride_requests/$(request.resource.data.requestId))
+            .data.get('womenOnly', false) == false ||
+          isWomenOnlyEligible()
+        );
 
       allow update, delete: if isAuth() && (
         resource.data.hostId == request.auth.uid ||

@@ -189,6 +189,7 @@ struct ProfileScreen: View {
         subtitle: String,
         isOn: Bool,
         tint: Color,
+        isEnabled: Bool = true,
         onChange: @escaping (Bool) -> Void
     ) -> some View {
         Toggle(isOn: Binding(get: { isOn }, set: onChange)) {
@@ -205,6 +206,7 @@ struct ProfileScreen: View {
             }
         }
         .tint(tint)
+        .disabled(!isEnabled)
     }
 
     // MARK: Alerts
@@ -270,12 +272,23 @@ struct ProfileScreen: View {
 
     private func safetySection(_ user: User) -> some View {
         BrandCard(title: "Safety and privacy", tint: Brand.primary) {
+            // A preference, not the gate. Turning this on used to be the ONLY thing standing
+            // between any account and every women-only ride on the platform. Eligibility now comes
+            // from the private profile document and is enforced by the Firestore rules on the
+            // write that takes a seat; this only narrows what an eligible rider sees.
+            //
+            // Disabled rather than hidden: silently omitting it would leave someone who expected
+            // the control unable to tell whether it exists.
+            let eligible = viewModel.contactDetails?.isEligibleForWomenOnly == true
             toggleRow(
                 icon: "person.fill",
-                title: "Women-Only Filter",
-                subtitle: "Only match with other women",
-                isOn: user.isWomenOnlyFilterEnabled,
-                tint: Brand.accent
+                title: "Show only women-only rides",
+                subtitle: eligible
+                    ? "Hides every other ride from your feed"
+                    : "Available to riders who selected Woman during setup",
+                isOn: eligible && user.isWomenOnlyFilterEnabled,
+                tint: Brand.accent,
+                isEnabled: eligible
             ) { enabled in
                 Task { await viewModel.toggleWomenOnlyFilter(enabled) }
             }

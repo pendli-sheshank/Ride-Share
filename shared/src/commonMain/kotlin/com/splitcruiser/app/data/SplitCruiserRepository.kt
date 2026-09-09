@@ -367,6 +367,7 @@ class SplitCruiserRepository internal constructor(
             matches = matches.value.values,
             blocks = blocks.value.values,
             now = nowMs(),
+            viewerEligibleForWomenOnly = _contactDetails.value?.isEligibleForWomenOnly == true,
         )
         _activeOffers.value = feeds.activeOffers
         _activeRequests.value = feeds.activeRequests
@@ -595,6 +596,9 @@ class SplitCruiserRepository internal constructor(
         val user = requireUser()
         firestore.setDocument("users/${user.id}/private", CONTACT_DOC, details, serializer<ContactDetails>())
         _contactDetails.value = details
+        // Eligibility for women-only rides is derived from this document, so the feeds have to be
+        // re-derived when it changes or the restriction lags a poll behind the profile.
+        recomputeFeeds()
 
         // The phone number is the exception: the trip detail screen shows a matched host's number,
         // so it has to live on the readable document to be of any use.
@@ -612,6 +616,9 @@ class SplitCruiserRepository internal constructor(
         _contactDetails.value = runCatching {
             firestore.getDocument("users/$uid/private", CONTACT_DOC, serializer<ContactDetails>())
         }.getOrNull()
+        // As above: the first feed projection after login runs before this resolves, so an eligible
+        // user would otherwise see no women-only rides until the next 20s poll.
+        recomputeFeeds()
     }
 
     @Throws(Exception::class)
