@@ -25,6 +25,9 @@ final class AppViewModel: ObservableObject {
     @Published var myRideRequests: [RideRequest] = []
     @Published var userMatches: [TripMatch] = []
     @Published var isConnected = false
+
+    /// False until the first refresh completes, so a feed can tell "loading" from "empty".
+    @Published var hasLoadedFeeds = false
     @Published var isLoading = false
     @Published var errorMessage: String?
 
@@ -101,6 +104,9 @@ final class AppViewModel: ObservableObject {
         })
         subscriptions.append(repository.observeUserMatches { [weak self] matches in
             self?.userMatches = matches
+        })
+        subscriptions.append(repository.observeFirstSync { [weak self] loaded in
+            self?.hasLoadedFeeds = loaded.boolValue
         })
         subscriptions.append(repository.observeConnection { [weak self] connected in
             // A Bool in a generic position arrives as KotlinBoolean.
@@ -260,7 +266,9 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    func acceptMatch(matchId: String) async {
+    /// Returns whether the seat was actually taken, so a caller does not navigate on a failure.
+    @discardableResult
+    func acceptMatch(matchId: String) async -> Bool {
         await perform("Securing your ride…") {
             try await self.repository.acceptMatch(matchId: matchId)
         }

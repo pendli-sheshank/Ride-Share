@@ -29,6 +29,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -129,6 +132,18 @@ class SplitCruiserRepository internal constructor(
 
     private val _lastSyncTime = MutableStateFlow(0L)
     val lastSyncTime: StateFlow<Long> = _lastSyncTime.asStateFlow()
+
+    /**
+     * False until the first refresh completes.
+     *
+     * Both feeds need to tell "still loading" from "genuinely nothing here", and neither had a way
+     * to: iOS gated its skeleton on `isRefreshing`, which only the pull-to-refresh path sets and
+     * the feed never calls, so a cold start rendered "Nobody else has offered a ride yet" instead.
+     * Android gated its skeleton on the ViewModel's global action flag, which is about button
+     * presses, not feed loading.
+     */
+    val hasCompletedFirstSync: StateFlow<Boolean> =
+        _lastSyncTime.map { it > 0L }.stateIn(scope, SharingStarted.Eagerly, false)
 
     // --- Lifecycle --------------------------------------------------------------------------
 
@@ -1791,10 +1806,28 @@ class SplitCruiserRepository internal constructor(
         recomputeFeeds()
     }
 
-    fun getBlockedUsers(): List<User> {
-        val uid = _currentUser.value?.id ?: return emptyList()
-        val blockedIds = blocks.value.values.filter { it.userId == uid }.map { it.blockedUserId }.toSet()
-        return users.value.values.filter { it.id in blockedIds }
+    fun getBlockedUsers(): List<User> = blockedUsersFor(_currentUser.value?.id, blocks.value, users.value)
+
+    /**
+     * The block list as observable state.
+     *
+     * [getBlockedUsers] is a plain call, so the Android screen that rendered it from composition had
+     * nothing to recompose on: unblocking someone mutated the repository and left the row on screen
+     * until the screen was recreated. Derived from the same three inputs so the two cannot drift.
+     */
+    val blockedUsers: StateFlow<List<User>> =
+        combine(_currentUser, blocks, users) { user, blocks, users ->
+            blockedUsersFor(user?.id, blocks, users)
+        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    private fun blockedUsersFor(
+        uid: String?,
+        blocks: Map<String, Block>,
+        users: Map<String, User>,
+    ): List<User> {
+        if (uid == null) return emptyList()
+        val blockedIds = blocks.values.filter { it.userId == uid }.map { it.blockedUserId }.toSet()
+        return users.values.filter { it.id in blockedIds }
     }
 
     private suspend fun refreshBlocks() {
@@ -2081,6 +2114,9 @@ class SplitCruiserRepository internal constructor(
 
     fun observeConnection(onChange: (Boolean) -> Unit): FlowSubscription =
         isConnected.subscribeOnMain(onChange)
+
+    fun observeFirstSync(onChange: (Boolean) -> Unit): FlowSubscription =
+        hasCompletedFirstSync.subscribeOnMain(onChange)
 
     fun observeChat(matchId: String, onChange: (List<Message>) -> Unit): FlowSubscription =
         getChatMessages(matchId).subscribeOnMain(onChange)

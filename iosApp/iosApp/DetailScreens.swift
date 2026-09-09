@@ -200,7 +200,11 @@ struct RideRequestDetailView: View {
 
                     Button("Accept & Chat") {
                         Task {
-                            await viewModel.acceptMatch(matchId: match.id)
+                            // Guard on the result. This pushed the chat unconditionally, so a
+                            // failed accept showed the error alert *and* dropped the user into a
+                            // conversation for a ride they did not have. Every other call site
+                            // (ExploreFeed, PostRideForms, ProfileScreens) already checks.
+                            guard await viewModel.acceptMatch(matchId: match.id) else { return }
                             router.push(.chat(matchId: match.id))
                         }
                     }

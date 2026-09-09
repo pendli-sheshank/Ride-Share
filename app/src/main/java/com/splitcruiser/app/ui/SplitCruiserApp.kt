@@ -104,6 +104,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.ui.semantics.Role
 import com.splitcruiser.app.data.Gender
+import androidx.compose.foundation.lazy.rememberLazyListState
 
 // --- Material 3 Animation Utilities ---
 
@@ -1643,6 +1644,7 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
     val activeMode = viewModel.currentMode
     val isLoading by viewModel.isLoading.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
+    val hasLoadedFeeds by viewModel.hasLoadedFeeds.collectAsState()
     val currentUserId = currentUser?.id ?: ""
 
     // RideSchedule, not `status == "active"`: a ride whose last seat has gone is "full" and still
@@ -1966,7 +1968,7 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                                         fontSize = 14.sp
                                     )
                                     Text(
-                                        text = "Status: ${match.status.replaceFirstChar { it.uppercase() }} • Contribution: $${match.contribution}",
+                                        text = "Status: ${match.status.replaceFirstChar { it.uppercase() }} • Contribution: ${formatContribution(match.contribution)}",
                                         color = SplitCruiserTextSecondary,
                                         fontSize = 11.sp
                                     )
@@ -2006,7 +2008,7 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                         )
                     }
 
-                    if (isLoading && activeOffers.isEmpty()) {
+                    if (!hasLoadedFeeds && activeOffers.isEmpty()) {
                         item {
                             SplitCruiserFeedLoadingSkeleton()
                         }
@@ -2073,7 +2075,7 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                     }
                 } else {
                     // HOST FEED: List active rider requests
-                    if (isLoading && activeRequests.isEmpty()) {
+                    if (!hasLoadedFeeds && activeRequests.isEmpty()) {
                         item {
                             SplitCruiserFeedLoadingSkeleton()
                         }
@@ -2349,7 +2351,7 @@ fun HostDashboard(viewModel: MainViewModel, navController: NavController) {
                     )
                     HostStatCard(
                         label = "Chipped in",
-                        value = "$${String.format(Locale.US, "%.2f", totalContributions)}",
+                        value = formatContribution(totalContributions),
                         icon = Icons.Default.AttachMoney,
                         modifier = Modifier.weight(1f)
                     )
@@ -2748,7 +2750,7 @@ fun JoinedRideScheduleCard(
                 CardStat("DEPARTURE", dateStr, alignment = Alignment.CenterHorizontally)
                 CardStat(
                     label = "CONTRIBUTION",
-                    value = "$${offer.costPerRider}",
+                    value = formatContribution(offer.costPerRider),
                     alignment = Alignment.End,
                     valueColor = SplitCruiserPrimary
                 )
@@ -3406,7 +3408,7 @@ fun TripOfferCard(
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Column(horizontalAlignment = Alignment.End) {
-                            Text("$${offer.costPerRider}", color = SplitCruiserPrimary, fontWeight = FontWeight.Black, fontSize = 22.sp)
+                            Text(formatContribution(offer.costPerRider), color = SplitCruiserPrimary, fontWeight = FontWeight.Black, fontSize = 22.sp)
                             Text("per rider", color = SplitCruiserTextSecondary, fontSize = 10.sp)
                         }
 
@@ -3558,7 +3560,7 @@ fun TripOfferCard(
                         }
 
                         Column(horizontalAlignment = Alignment.End) {
-                            Text("$${offer.costPerRider}", color = SplitCruiserPrimary, fontWeight = FontWeight.Black, fontSize = 18.sp)
+                            Text(formatContribution(offer.costPerRider), color = SplitCruiserPrimary, fontWeight = FontWeight.Black, fontSize = 18.sp)
                             Text("per rider", color = SplitCruiserTextSecondary, fontSize = 9.sp)
                         }
                     }
@@ -3905,7 +3907,7 @@ fun JoinSuccessDialog(
                             }
 
                             Text(
-                                text = "$${offer.costPerRider}",
+                                text = formatContribution(offer.costPerRider),
                                 color = SplitCruiserPrimary,
                                 fontWeight = FontWeight.Black,
                                 fontSize = 16.sp
@@ -5165,12 +5167,12 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                         
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Suggested Gas Contribution:", color = SplitCruiserTextPrimary, fontSize = 13.sp)
-                            Text("$${offer.costPerRider}", color = SplitCruiserTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Text(formatContribution(offer.costPerRider), color = SplitCruiserTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         }
 
                         Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Server Max Limit (2x Cost Cap):", color = SplitCruiserTextSecondary, fontSize = 12.sp)
-                            Text("$${costLimit}", color = SplitCruiserTextSecondary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text(formatContribution(costLimit), color = SplitCruiserTextSecondary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
 
                         Spacer(modifier = Modifier.height(14.dp))
@@ -5461,7 +5463,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                                         Text("Join Ride (Reserve Seat)", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                                     }
                                     Text(
-                                        text = "Reserves your seat immediately at $${offer.costPerRider} — no host approval needed.",
+                                        text = "Reserves your seat immediately at ${formatContribution(offer.costPerRider)} — no host approval needed.",
                                         color = SplitCruiserTextSecondary,
                                         fontSize = 11.sp,
                                         textAlign = TextAlign.Center,
@@ -5779,7 +5781,7 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text("Rider offered gas contribution split:", color = SplitCruiserTextSecondary, fontSize = 12.sp)
-                            Text("$${activePendingMatch.contribution}", color = SplitCruiserTextPrimary, fontWeight = FontWeight.Black, fontSize = 24.sp)
+                            Text(formatContribution(activePendingMatch.contribution), color = SplitCruiserTextPrimary, fontWeight = FontWeight.Black, fontSize = 24.sp)
                             
                             Spacer(modifier = Modifier.height(16.dp))
                             
@@ -6015,7 +6017,8 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
                 actions = {
                     // Fast OS Share sheet button to share trip coordination details
                     IconButton(onClick = {
-                        val shareText = "Hey! I'm carpooling on Split Cruiser. Match details: contribution $${currentMatch?.contribution}, status: ${currentMatch?.status}. Coordinate on app!"
+                        val shareText = "Hey! I'm carpooling on Split Cruiser. Match details: contribution " +
+                            "${formatContribution(currentMatch?.contribution ?: 0.0)}, status: ${currentMatch?.status}. Coordinate on app!"
                         val intent = Intent().apply {
                             action = Intent.ACTION_SEND
                             putExtra(Intent.EXTRA_TEXT, shareText)
@@ -6259,14 +6262,30 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
                 }
             }
 
+            // Keep the newest message in view.
+            //
+            // The list had no LazyListState at all — `Arrangement.Bottom` only bottom-aligns the
+            // content when it is shorter than the viewport. Once a conversation exceeded one
+            // screen the list stayed pinned at item 0, so sending a message, or receiving one,
+            // left it off-screen with no indication anything had happened.
+            val chatListState = rememberLazyListState()
+            LaunchedEffect(messageList.size) {
+                if (messageList.isNotEmpty()) {
+                    chatListState.animateScrollToItem(messageList.lastIndex)
+                }
+            }
+
             LazyColumn(
+                state = chatListState,
                 modifier = Modifier
                     .fillMaxSize()
                     .weight(1f)
                     .padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.Bottom
             ) {
-                items(messageList) { msg ->
+                // Keyed by message id: without it, item state and animations are index-bound and
+                // mis-associate when a message arrives at the top of the list.
+                items(messageList, key = { it.id }) { msg ->
                     val isMe = (msg.senderId == currentUser?.id)
                     val isSystem = msg.isSystem
                     // Read off the message's own type. This used to be `text.startsWith
@@ -6513,7 +6532,18 @@ private fun PickupDetailRow(label: String, value: String) {
 }
 
 /** `12.5` -> `"$12.50"`. */
-private fun formatContribution(amount: Double): String =
+/**
+ * Every money value the user sees goes through this.
+ *
+ * `costPerRider` and `contribution` are Doubles, so string interpolation renders "$15.0" and, for
+ * anything computed by `calculateCostSplit`, "$33.333333333333336". On a product whose entire
+ * premise is splitting a cost, that was the primary surface. This helper already existed and was
+ * correct — it was just private to the chat pickup cards while ten other sites interpolated raw.
+ *
+ * Locale.US deliberately: the amount is paired with a hardcoded "$" everywhere, so formatting the
+ * number in a comma-decimal locale would render "$12,50".
+ */
+fun formatContribution(amount: Double): String =
     "$" + String.format(Locale.US, "%.2f", amount)
 
 /**
@@ -7585,7 +7615,7 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
 
 @Composable
 fun BlockedListScreen(viewModel: MainViewModel, navController: NavController) {
-    val blockedUsers = viewModel.getBlockedUsers()
+    val blockedUsers by viewModel.blockedUsers.collectAsState()
 
     Column(
         modifier = Modifier

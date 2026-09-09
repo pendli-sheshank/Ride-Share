@@ -71,6 +71,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val userMatches: StateFlow<List<TripMatch>> = repository.userMatches
     val notifications: StateFlow<List<NotificationAlert>> = repository.notifications
 
+    /**
+     * False until the first refresh completes.
+     *
+     * The feeds gated their skeleton on [isLoading], which is this ViewModel's *global action*
+     * flag — it tracks button presses, not feed loading — so before the first poll returned the
+     * user saw "No rides posted yet" rather than a skeleton.
+     */
+    val hasLoadedFeeds: StateFlow<Boolean> = repository.hasCompletedFirstSync
+
     /** What onboarding stored: the home address a ride request prefills from. */
     val contactDetails: StateFlow<ContactDetails?> = repository.contactDetails
 
@@ -536,7 +545,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun getBlockedUsers(): List<User> = repository.getBlockedUsers()
+    /**
+     * Observable, unlike [SplitCruiserRepository.getBlockedUsers].
+     *
+     * BlockedListScreen called the plain function from composition, so it had nothing to recompose
+     * on and an unblocked row stayed on screen until the screen was recreated.
+     */
+    val blockedUsers: StateFlow<List<User>> = repository.blockedUsers
 
     fun getUserPublicProfile(userId: String): User? = repository.getUserPublicProfile(userId)
 
