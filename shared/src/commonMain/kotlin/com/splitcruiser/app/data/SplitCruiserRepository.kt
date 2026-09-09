@@ -14,6 +14,8 @@ import com.splitcruiser.app.data.firebase.TokenProvider
 import com.splitcruiser.app.data.firebase.arrayOfStrings
 import com.splitcruiser.app.data.firebase.booleanValue
 import com.splitcruiser.app.data.firebase.buildFields
+import com.splitcruiser.app.data.firebase.FirestoreConflictException
+import com.splitcruiser.app.data.firebase.FirestoreWrite
 import com.splitcruiser.app.data.firebase.ServerClock
 import com.splitcruiser.app.data.firebase.createFirebaseHttpClient
 import com.splitcruiser.app.data.firebase.doubleValue
@@ -1055,7 +1057,7 @@ class SplitCruiserRepository internal constructor(
 
     @Throws(Exception::class)
     suspend fun acceptMatch(matchId: String) {
-        val match = matches.value[matchId] ?: throw SplitCruiserException("Match not found.")
+        val match = loadMatch(matchId)
         applyAcceptedMatch(
             match,
             notifyRider = true,
@@ -1069,6 +1071,129 @@ class SplitCruiserRepository internal constructor(
      * ([joinTripOfferDirect]) — both end with the same offer/request state, just reached from
      * opposite directions and needing different notification text.
      */
+    /**
+     * Takes [seatsNeeded] seats on an offer, atomically.
+     *
+     * This used to be a read-modify-write against the *cache*: `fetchTripOffer` is cache-first, so
+     * the `seatsLeft` it returned could be up to one poll interval (20s) stale, and the write
+     * PATCHed an absolute value computed from it. Two riders taking the last seat inside that
+     * window both read `seatsLeft = 1`, both passed the check, and both wrote `0` — the ride was
+     * overbooked and the host found out at the kerb. The rules could not catch it either: the
+     * non-host branch only bounds `seatsLeft` to `0..totalSeats`, which both writes satisfied.
+     *
+     * The fix is optimistic concurrency. Each attempt reads the offer *and its `updateTime`* from
+     * the server, computes the new manifest from that, and commits with a `currentDocument`
+     * precondition pinned to that `updateTime`. If anyone else wrote in between — the other rider,
+     * the host, the auto-close job — Firestore rejects the whole commit and we read again. The
+     * loser of the race now sees "This trip has no seats left!" instead of silently double-booking.
+     *
+     * `commit()` has existed and been correct in FirestoreClient the whole time, with no callers.
+     */
+    private suspend fun claimSeat(
+        offerId: String,
+        riderId: String,
+        riderName: String,
+        seatsNeeded: Int,
+    ): TripOffer {
+        repeat(SEAT_CLAIM_ATTEMPTS) {
+            val versioned = firestore.getVersionedDocument("trip_offers", offerId, serializer<TripOffer>())
+                ?: throw SplitCruiserException("That ride is no longer available.")
+            val current = versioned.value
+
+            // Idempotent: a retry after a partial failure, or a double-tap, must not seat the rider
+            // twice. `passengers` had no dedup guard at all before.
+            if (riderId in current.passengers) return current
+
+            if (current.seatsLeft < seatsNeeded) {
+                throw SplitCruiserException("This trip has no seats left!")
+            }
+
+            val seatsLeft = current.seatsLeft - seatsNeeded
+            val updated = current.copy(
+                seatsLeft = seatsLeft,
+                passengers = current.passengers + riderId,
+                passengerNames = current.passengerNames + riderName,
+                status = if (seatsLeft <= 0) "full" else current.status,
+            )
+
+            val committed = runCatching {
+                firestore.commit(
+                    listOf(
+                        FirestoreWrite.Update(
+                            path = "trip_offers",
+                            id = offerId,
+                            fields = buildFields(
+                                "passengers" to arrayOfStrings(updated.passengers),
+                                "passengerNames" to arrayOfStrings(updated.passengerNames),
+                                "seatsLeft" to integerValue(seatsLeft.toLong()),
+                                "status" to stringValue(updated.status),
+                            ),
+                            expectedUpdateTime = versioned.updateTime,
+                        )
+                    )
+                )
+            }
+            if (committed.isSuccess) return updated
+
+            // Anything that is not a lost race is a real failure and must reach the caller.
+            val error = committed.exceptionOrNull()
+            if (error !is FirestoreConflictException) throw error ?: SplitCruiserException("Could not reserve that seat.")
+        }
+        throw SplitCruiserException("This ride is being booked by several people right now. Please try again.")
+    }
+
+    /**
+     * Returns [seatsNeeded] seats, atomically, and removes the rider from the manifest.
+     *
+     * Two bugs beyond the race this shares with [claimSeat]. First, `declineMatch` read the offer
+     * from the cache *only* — no network fallback, unlike the accept path — so declining a match
+     * whose offer had not been polled silently never returned the seat. Second, it removed the
+     * rider's name with `passengerNames - riderName`, and Kotlin's `List.minus` removes only the
+     * first match: with two passengers called "Alex", declining one dropped the other's name and
+     * left the two parallel arrays out of step. The UI then `zip`s them, which truncates to the
+     * shorter list and pairs a name with the wrong id. Names are dropped by *index* here.
+     */
+    private suspend fun releaseSeat(offerId: String, riderId: String, seatsNeeded: Int): TripOffer? {
+        repeat(SEAT_CLAIM_ATTEMPTS) {
+            val versioned = runCatching {
+                firestore.getVersionedDocument("trip_offers", offerId, serializer<TripOffer>())
+            }.getOrNull() ?: return null
+            val current = versioned.value
+
+            val index = current.passengers.indexOf(riderId)
+            if (index < 0) return current
+
+            val seatsLeft = (current.seatsLeft + seatsNeeded).coerceAtMost(current.totalSeats)
+            val updated = current.copy(
+                seatsLeft = seatsLeft,
+                passengers = current.passengers.filterIndexed { i, _ -> i != index },
+                passengerNames = current.passengerNames.filterIndexed { i, _ -> i != index },
+                status = if (current.status == "full") "active" else current.status,
+            )
+
+            val committed = runCatching {
+                firestore.commit(
+                    listOf(
+                        FirestoreWrite.Update(
+                            path = "trip_offers",
+                            id = offerId,
+                            fields = buildFields(
+                                "passengers" to arrayOfStrings(updated.passengers),
+                                "passengerNames" to arrayOfStrings(updated.passengerNames),
+                                "seatsLeft" to integerValue(seatsLeft.toLong()),
+                                "status" to stringValue(updated.status),
+                            ),
+                            expectedUpdateTime = versioned.updateTime,
+                        )
+                    )
+                )
+            }
+            if (committed.isSuccess) return updated
+            if (committed.exceptionOrNull() !is FirestoreConflictException) return null
+        }
+        return null
+    }
+
     private suspend fun applyAcceptedMatch(match: TripMatch, notifyRider: Boolean, systemMessageText: String) {
         val matchId = match.id
         val request = requests.value[match.requestId]
@@ -1096,25 +1221,13 @@ class SplitCruiserRepository internal constructor(
         }
 
         if (offer != null) {
-            val seatsNeeded = request?.seatsNeeded ?: 1
-            val seatsLeft = (offer.seatsLeft - seatsNeeded).coerceAtLeast(0)
-            val updatedOffer = offer.copy(
-                seatsLeft = seatsLeft,
-                passengers = offer.passengers + match.riderId,
-                passengerNames = offer.passengerNames + match.riderName,
-                status = if (seatsLeft <= 0) "full" else offer.status,
+            val claimed = claimSeat(
+                offerId = offer.id,
+                riderId = match.riderId,
+                riderName = match.riderName,
+                seatsNeeded = request?.seatsNeeded ?: 1,
             )
-            firestore.updateFields(
-                "trip_offers",
-                offer.id,
-                buildFields(
-                    "passengers" to arrayOfStrings(updatedOffer.passengers),
-                    "passengerNames" to arrayOfStrings(updatedOffer.passengerNames),
-                    "seatsLeft" to integerValue(seatsLeft.toLong()),
-                    "status" to stringValue(updatedOffer.status),
-                ),
-            )
-            offers.value = offers.value + (offer.id to updatedOffer)
+            offers.value = offers.value + (claimed.id to claimed)
         }
         recomputeFeeds()
 
@@ -1134,29 +1247,21 @@ class SplitCruiserRepository internal constructor(
 
     @Throws(Exception::class)
     suspend fun declineMatch(matchId: String) {
-        val match = matches.value[matchId] ?: throw SplitCruiserException("Match not found.")
-        val offer = offers.value[match.offerId]
-        val request = requests.value[match.requestId]
+        val match = loadMatch(matchId)
 
-        // Only give the seat back if it had actually been taken.
-        if (offer != null && request != null && match.status == "accepted") {
-            val updatedOffer = offer.copy(
-                seatsLeft = (offer.seatsLeft + request.seatsNeeded).coerceAtMost(offer.totalSeats),
-                passengers = offer.passengers - match.riderId,
-                passengerNames = offer.passengerNames - match.riderName,
-                status = if (offer.status == "full") "active" else offer.status,
+        // Only give the seat back if it had actually been taken. The seats figure falls back to the
+        // network, then to 1: reading it from the cache alone meant a decline on a cold start
+        // silently skipped the release and left the seat consumed for the life of the ride.
+        if (match.status == "accepted") {
+            val request = requests.value[match.requestId]
+                ?: runCatching { firestore.getDocument("ride_requests", match.requestId, serializer<RideRequest>()) }
+                    .getOrNull()
+            val released = releaseSeat(
+                offerId = match.offerId,
+                riderId = match.riderId,
+                seatsNeeded = request?.seatsNeeded ?: 1,
             )
-            firestore.updateFields(
-                "trip_offers",
-                offer.id,
-                buildFields(
-                    "passengers" to arrayOfStrings(updatedOffer.passengers),
-                    "passengerNames" to arrayOfStrings(updatedOffer.passengerNames),
-                    "seatsLeft" to integerValue(updatedOffer.seatsLeft.toLong()),
-                    "status" to stringValue(updatedOffer.status),
-                ),
-            )
-            offers.value = offers.value + (offer.id to updatedOffer)
+            if (released != null) offers.value = offers.value + (released.id to released)
         }
 
         firestore.updateFields("trip_matches", matchId, buildFields("status" to stringValue("declined")))
@@ -1166,7 +1271,7 @@ class SplitCruiserRepository internal constructor(
 
     @Throws(Exception::class)
     suspend fun completeTrip(matchId: String) {
-        val match = matches.value[matchId] ?: throw SplitCruiserException("Match not found.")
+        val match = loadMatch(matchId)
         firestore.updateFields("trip_matches", matchId, buildFields("status" to stringValue("completed")))
         matches.value = matches.value + (matchId to match.copy(status = "completed"))
 
@@ -1184,7 +1289,7 @@ class SplitCruiserRepository internal constructor(
 
     @Throws(Exception::class)
     suspend fun cancelMatch(matchId: String, reason: String) {
-        val match = matches.value[matchId] ?: throw SplitCruiserException("Match not found.")
+        val match = loadMatch(matchId)
         firestore.updateFields("trip_matches", matchId, buildFields("status" to stringValue("cancelled")))
         matches.value = matches.value + (matchId to match.copy(status = "cancelled"))
         recomputeFeeds()
@@ -1939,6 +2044,21 @@ class SplitCruiserRepository internal constructor(
 
     // --- Internals --------------------------------------------------------------------------
 
+    /**
+     * Cache-first, then the network.
+     *
+     * Every match action used to read `matches.value` alone and throw "Match not found." on a miss,
+     * which is reachable on any cold start before the matches poll has run — accepting, declining or
+     * completing a ride from a notification tap or an iOS deep link failed with a message implying
+     * the ride had been deleted.
+     */
+    private suspend fun loadMatch(matchId: String): TripMatch =
+        matches.value[matchId]
+            ?: runCatching { firestore.getDocument("trip_matches", matchId, serializer<TripMatch>()) }
+                .getOrNull()
+                ?.also { matches.value = matches.value + (matchId to it) }
+            ?: throw SplitCruiserException("Match not found.")
+
     private suspend fun loadOffer(offerId: String): TripOffer = fetchTripOffer(offerId)
 
     private suspend fun loadRequest(requestId: String): RideRequest = fetchRideRequest(requestId)
@@ -2016,6 +2136,15 @@ class SplitCruiserRepository internal constructor(
 
         /** System-set statuses [closeIfExpired] may overwrite once departure has passed. */
         val AUTO_CLOSEABLE_OFFER_STATUSES = setOf("active", "full")
+
+        /**
+         * How many times a conditional seat write retries after losing a race.
+         *
+         * Three covers the realistic contention on a single ride — a handful of riders tapping the
+         * last seat at once — without spinning if something else is rewriting the document
+         * continuously. Exhausting it is reported as "try again", not as a lost seat.
+         */
+        const val SEAT_CLAIM_ATTEMPTS = 3
         val AUTO_CLOSEABLE_REQUEST_STATUSES = setOf("active")
 
         /**

@@ -88,6 +88,43 @@ describe("trip_offers", () => {
     }));
   });
 
+  test("a joiner must actually consume a seat", async () => {
+    await seed("trip_offers/o1", offerWithOneSeatLeft());
+    // Adding yourself while leaving seatsLeft untouched means a full ride never reads as full.
+    await assertFails((await as(RIDER)).doc("trip_offers/o1").update({
+      passengers: ["earlier-rider", RIDER], passengerNames: ["Sam", "Ray"],
+      seatsLeft: 1, status: "active",
+    }));
+  });
+
+  test("a joiner cannot add passengers who never joined", async () => {
+    await seed("trip_offers/o1", offerWithOneSeatLeft({ seatsLeft: 3, totalSeats: 4 }));
+    // `hasAll` alone permitted this: add yourself, and any number of ids alongside.
+    await assertFails((await as(RIDER)).doc("trip_offers/o1").update({
+      passengers: ["earlier-rider", RIDER, "ghost-1", "ghost-2"],
+      passengerNames: ["Sam", "Ray", "Ghost", "Ghost"],
+      seatsLeft: 2, status: "active",
+    }));
+  });
+
+  test("a rider cannot free up seats on someone else's ride", async () => {
+    await seed("trip_offers/o1", offerWithOneSeatLeft({
+      passengers: ["earlier-rider", RIDER], passengerNames: ["Sam", "Ray"], seatsLeft: 0, status: "full",
+    }));
+    // Leaving must return exactly what it returns; it must not reset the ride to empty.
+    await assertFails((await as(RIDER)).doc("trip_offers/o1").update({
+      passengers: [], passengerNames: [], seatsLeft: 3, status: "active",
+    }));
+  });
+
+  test("the two parallel manifest arrays must stay the same length", async () => {
+    await seed("trip_offers/o1", offerWithOneSeatLeft());
+    // The UI zips passengers with passengerNames, so a mismatch pairs a name with the wrong rider.
+    await assertFails((await as(RIDER)).doc("trip_offers/o1").update({
+      passengers: ["earlier-rider", RIDER], passengerNames: ["Sam"], seatsLeft: 0, status: "full",
+    }));
+  });
+
   test("a non-host cannot evict another passenger", async () => {
     await seed("trip_offers/o1", offerWithOneSeatLeft());
     await assertFails((await as(STRANGER)).doc("trip_offers/o1").update({

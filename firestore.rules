@@ -71,10 +71,26 @@ service cloud.firestore {
       // Joining a ride, accepting a match and declining one all change someone else's offer, so the
       // host is not the only allowed writer. But the previous rule let *any* authenticated user set
       // seatsLeft/status/passengers to anything — zero out every ride, cancel other people's trips,
-      // or delete riders from the manifest. A non-host is now confined to moving *themselves* in or
-      // out of the passenger list, with seatsLeft kept in range and status limited to the two the
-      // seat-booking flow legitimately sets. (Full seat-count integrity against a concurrent join
-      // still needs a server transaction — tracked as a follow-up; this closes the griefing paths.)
+      // or delete riders from the manifest. A non-host is confined to moving *themselves* in or out
+      // of the passenger list, with seatsLeft kept in range and status limited to the two the
+      // seat-booking flow legitimately sets.
+      //
+      // Three further constraints make the seat count an invariant the *server* enforces rather
+      // than one the client is trusted to maintain:
+      //
+      //   1. The manifest changes by exactly one entry. `hasAll` alone let a joiner add themselves
+      //      *and* any number of ids that were never on the ride.
+      //   2. seatsLeft must move in the right direction — strictly down to join, strictly up to
+      //      leave. Without this a rider could add themselves while leaving seatsLeft untouched, so
+      //      a full ride never reads as full, or "free up" seats on someone else's ride at will.
+      //   3. passengers and passengerNames stay the same length. The client keeps two parallel
+      //      arrays and the UI zips them, so a length mismatch silently pairs a name with the wrong
+      //      rider — worth refusing at the door.
+      //
+      // Exact seat *arithmetic* still cannot live here, because one passenger entry may consume
+      // several seats (RideRequest.seatsNeeded), which this document does not record. The client
+      // does that arithmetic under a currentDocument.updateTime precondition (see claimSeat), so a
+      // concurrent join is rejected and retried rather than silently overbooking.
       allow update: if isAuth() && (
         resource.data.hostId == request.auth.uid ||
         (
@@ -83,18 +99,23 @@ service cloud.firestore {
           request.resource.data.seatsLeft >= 0 &&
           request.resource.data.seatsLeft <= resource.data.totalSeats &&
           request.resource.data.status in ['active', 'full'] &&
+          request.resource.data.passengerNames.size() == request.resource.data.passengers.size() &&
           (
-            // Joining: adds only the caller, keeps every existing passenger.
+            // Joining: adds only the caller, keeps every existing passenger, and costs a seat.
             (
               !(request.auth.uid in resource.data.passengers) &&
               request.auth.uid in request.resource.data.passengers &&
-              request.resource.data.passengers.hasAll(resource.data.passengers)
+              request.resource.data.passengers.hasAll(resource.data.passengers) &&
+              request.resource.data.passengers.size() == resource.data.passengers.size() + 1 &&
+              request.resource.data.seatsLeft < resource.data.seatsLeft
             ) ||
-            // Leaving: removes only the caller, keeps every other passenger.
+            // Leaving: removes only the caller, keeps every other passenger, and returns a seat.
             (
               request.auth.uid in resource.data.passengers &&
               !(request.auth.uid in request.resource.data.passengers) &&
-              resource.data.passengers.hasAll(request.resource.data.passengers)
+              resource.data.passengers.hasAll(request.resource.data.passengers) &&
+              request.resource.data.passengers.size() == resource.data.passengers.size() - 1 &&
+              request.resource.data.seatsLeft > resource.data.seatsLeft
             )
           )
         )
