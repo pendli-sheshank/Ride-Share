@@ -66,6 +66,15 @@ jobs:
       - name: Verify the app icon set is complete
         run: python3 .github/scripts/verify-app-icons.py iosApp/iosApp/Assets.xcassets/AppIcon.appiconset
 
+      # Same class as the icon check: a bundle problem xcodebuild is perfectly happy with, that
+      # only surfaces at `altool --validate-app` -- after a build number has been consumed and
+      # cannot be reused. The app declared `UIRequiredDeviceCapabilities = armv7` on an arm64-only
+      # iOS 16 binary, which is an "Invalid Bundle" rejection, and had no
+      # ITSAppUsesNonExemptEncryption, so every upload stalled on the manual export-compliance
+      # question. Milliseconds to check.
+      - name: Verify Info.plist passes App Store preflight
+        run: python3 .github/scripts/verify-info-plist.py iosApp/iosApp/Info.plist
+
       # The generator is deterministic, so a regenerated project must be byte-identical to the
       # committed one. If it is not, the checked-in project was hand-edited and the next
       # regeneration would silently revert that edit.
@@ -177,24 +186,16 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO
 
-      # Step 5: iOS Build Summary
+      # This step has no `if:`, so it runs only when every step above it succeeded. That is the
+      # whole reason it can state these as facts.
       - name: iOS Build Summary
         run: |
-          echo "✅ iOS Project Validation Complete"
-          echo ""
-          echo "Build Summary:"
-          echo "  ✅ Step 1: Shared.framework built successfully"
-          echo "  ✅ Step 2: iOS project structure verified"
-          echo "  ✅ Step 3: Xcode project generated/validated"
-          echo "  ✅ Step 4: Swift compiled for the iOS Simulator"
-          echo ""
-          echo "Project includes:"
-          echo "  • Valid Xcode project structure"
-          echo "  • SwiftUI app (iOSApp, ContentView)"
-          echo "  • LaunchScreen.storyboard"
-          echo "  • Assets.xcassets (AppIcon, AccentColor)"
-          echo "  • Info.plist with iOS configuration"
-          echo "  • Shared.framework linking"
+          echo "iOS project validation complete:"
+          echo "  Shared.xcframework built"
+          echo "  iOS project structure verified"
+          echo "  Xcode project generated and matches the committed pbxproj"
+          echo "  Info.plist passed App Store preflight"
+          echo "  Swift compiled for the iOS Simulator"
 
       # Step 5: Upload build artifacts
       - name: Upload iOS build artifacts
@@ -207,31 +208,29 @@ jobs:
             shared/build/XCFrameworks/
           if-no-files-found: warn
 
-      # Step 6: Build summary
+      # Reports what actually happened.
+      #
+      # This step used to be `if: always()` writing an unconditional wall of green checkmarks, so a
+      # red run rendered a summary tab claiming Swift had compiled and the project was valid. A
+      # summary that cannot say "failed" is worse than no summary: it is the same shape as the
+      # per-file `swiftc -parse || true` loop that let a Swift type error reach main.
       - name: Build Summary
         if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
         run: |
-          echo "## iOS Project Build & Validation" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Validation Results" >> $GITHUB_STEP_SUMMARY
-          echo "✅ **Kotlin Multiplatform**: Shared.framework built for iOS" >> $GITHUB_STEP_SUMMARY
-          echo "✅ **Project Structure**: Complete with all required files" >> $GITHUB_STEP_SUMMARY
-          echo "✅ **Xcode Project**: Generated and valid" >> $GITHUB_STEP_SUMMARY
-          echo "✅ **Swift Code**: Compiled for the iOS Simulator" >> $GITHUB_STEP_SUMMARY
-          echo "✅ **Build Configuration**: Debug and Release configured" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Project Components" >> $GITHUB_STEP_SUMMARY
-          echo "- **App Entry Point**: iOSApp.swift (@main)" >> $GITHUB_STEP_SUMMARY
-          echo "- **UI Layer**: ContentView.swift (SwiftUI)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Resources**: LaunchScreen.storyboard, Info.plist" >> $GITHUB_STEP_SUMMARY
-          echo "- **Assets**: AppIcon definitions, AccentColor" >> $GITHUB_STEP_SUMMARY
-          echo "- **Framework**: Shared.xcframework from KMP" >> $GITHUB_STEP_SUMMARY
-          echo "- **Target**: iOS 14.0+" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### For macOS Development" >> $GITHUB_STEP_SUMMARY
-          echo "1. Clone/pull latest code" >> $GITHUB_STEP_SUMMARY
-          echo "2. Run: \`cd iosApp && ./setup.sh\`" >> $GITHUB_STEP_SUMMARY
-          echo "3. Open: \`iosApp.xcodeproj\` in Xcode" >> $GITHUB_STEP_SUMMARY
-          echo "4. Build & Run on simulator or device" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "[See iOS_PROJECT_SETUP.md for complete documentation](iosApp/iOS_PROJECT_SETUP.md)" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## iOS build and validation"
+            echo ""
+            if [ "$JOB_STATUS" = "success" ]; then
+              echo "**Result: passed.** The Swift sources compiled for the iOS Simulator against a"
+              echo "freshly built Shared.xcframework, and the committed \`project.pbxproj\` matches"
+              echo "what \`generate-project.py\` produces."
+            else
+              echo "**Result: $JOB_STATUS.** See the failing step above — do not treat this build as"
+              echo "validated. Swift is compiled by no other job before merge."
+            fi
+            echo ""
+            echo "Simulator builds are unsigned and cost nothing in Apple account state; the"
+            echo "TestFlight pipeline lives in \`ios-release.yml\`."
+          } >> "$GITHUB_STEP_SUMMARY"
