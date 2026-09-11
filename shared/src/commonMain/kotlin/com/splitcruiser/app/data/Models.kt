@@ -125,6 +125,32 @@ data class TripOffer(
     val totalSeats: Int = 4,
     val seatsLeft: Int = 4,
     val vehicleInfo: String = "",
+    /**
+     * What the whole trip costs the host to run — fuel, tolls, parking. The figure the host
+     * actually knows.
+     *
+     * This is the input to the split. [costPerRider] is derived from it by
+     * `SplitCruiserRepository.perRiderShare`, so the app does the division rather than asking the
+     * host to do it in their head. Before this field existed, the host typed a per-rider price
+     * directly and nothing in the product ever divided anything — `calculateCostSplit` had no
+     * callers at all.
+     *
+     * `0.0` on offers posted before the field existed. Those keep whatever [costPerRider] was
+     * typed at the time; nothing back-fills them, and the UI falls back to showing the per-rider
+     * figure alone.
+     */
+    val totalCost: Double = 0.0,
+    /**
+     * Each rider's share, in the same currency as [totalCost] — `totalCost / (totalSeats + 1)`,
+     * rounded up to the cent.
+     *
+     * Fixed when the ride is posted, and deliberately not recomputed as seats fill. A share that
+     * tracked the manifest would have to be written by riders on the seat-booking commit, which
+     * `firestore.rules` confines to the four manifest fields; letting it through would mean the
+     * rule verifying `totalCost / (passengers + 1)` in floating point against arithmetic done in
+     * Kotlin, so the invariant would be either unenforced or flaky. It would also let the price
+     * move *up* under a rider who has already agreed to it, the moment another rider leaves.
+     */
     val costPerRider: Double = 0.0,
     val womenOnly: Boolean = false,
     // "active", "full" and "closed" are all system-set (seats and departure time drive them);

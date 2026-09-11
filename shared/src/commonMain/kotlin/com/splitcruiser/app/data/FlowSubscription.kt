@@ -56,7 +56,13 @@ object RideFactory {
         destLng: Double,
         departureTime: Long,
         totalSeats: Int,
-        costPerRider: Double,
+        /**
+         * What the whole trip costs, not what one rider pays. `postTripOffer` divides it — see
+         * `SplitCruiserRepository.perRiderShare` — so `costPerRider` is deliberately absent here:
+         * there is one place the split happens, and no caller can post a share that disagrees
+         * with it.
+         */
+        totalCost: Double,
         womenOnly: Boolean,
         vehicleInfo: String,
         exitLocation: String,
@@ -70,7 +76,7 @@ object RideFactory {
         departureTime = departureTime,
         totalSeats = totalSeats,
         seatsLeft = totalSeats,
-        costPerRider = costPerRider,
+        totalCost = totalCost,
         womenOnly = womenOnly,
         vehicleInfo = vehicleInfo,
         exitLocation = exitLocation,

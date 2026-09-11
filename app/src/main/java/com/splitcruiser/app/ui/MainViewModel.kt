@@ -380,6 +380,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * What to prefill the contribution field with when accepting directly. Silent on failure — a
      * missing suggestion means an empty field, not a blocked accept.
      */
+    /**
+     * Each rider's share of a whole-trip cost, for the live preview under the post-offer form.
+     *
+     * Pure arithmetic on the shared repository, so it needs no coroutine and no error path — and
+     * being the same function `postTripOffer` stores with, the previewed figure is the stored one.
+     */
+    fun perRiderShare(totalCost: Double, totalSeats: Int): Double =
+        repository.perRiderShare(totalCost, totalSeats)
+
+    /**
+     * The trip-cost ceiling the repository enforces for a ride of this size, so the form can name
+     * it in its error copy. Seat-dependent — see `SplitCruiserRepository.maxTripCost`.
+     */
+    fun maxTripCost(totalSeats: Int): Double = repository.maxTripCost(totalSeats)
+
     fun suggestedContribution(request: RideRequest, onResult: (Double) -> Unit) {
         viewModelScope.launch {
             onResult(repository.suggestedContributionResult(request).getOrDefault(0.0))

@@ -204,10 +204,22 @@ struct RideDetailView: View {
                     .font(.largeTitle)
                     .fontWeight(.black)
                     .foregroundColor(Brand.primary)
-                Text("suggested contribution")
+                Text(offer.totalCost > 0 ? "each" : "suggested contribution")
                     .font(.caption)
                     .foregroundColor(Brand.textSecondary)
                 Spacer()
+            }
+
+            // Where the number comes from. A rider shown only "$15" cannot tell a fair split from
+            // a figure the host invented; the dividend and the divisor are the product. Offers
+            // posted before `totalCost` existed carry 0 and show the share alone, which is all
+            // they ever had. `totalSeats + 1` counts the driver, who pays a share too.
+            if offer.totalCost > 0 {
+                DetailRow(label: "Total trip cost", value: TripFormat.money(offer.totalCost))
+                DetailRow(
+                    label: "Split",
+                    value: "\(offer.totalSeats + 1) ways (\(offer.totalSeats) riders + host)"
+                )
             }
 
             Text("Cash, paid in person. Split Cruiser never takes a cut and never handles the money.")

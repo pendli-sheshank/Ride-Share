@@ -183,6 +183,10 @@ safety section now links to it on both platforms.)
 - [ ] Does it add user-visible copy? Same words on both platforms — see §2.
 - [ ] Does it add a colour, spacing value or radius? It goes in the shared tokens, so both
       platforms get it.
+- [ ] **Does it compute a user-visible number?** The arithmetic goes in `:shared` and both
+      platforms call it, the way `perRiderShare` and `PlaceRanking` do. A figure previewed in a
+      form and a figure stored by the repository must come from the same function, or they drift
+      and the form quietly lies about what it is about to save.
 - [ ] Does it add developer instrumentation to a user-facing screen? Gate it: `BuildConfig.DEBUG`
       on Android, `#if DEBUG` on iOS.
 - [ ] **Does it add a second control that does what another control on the same screen already

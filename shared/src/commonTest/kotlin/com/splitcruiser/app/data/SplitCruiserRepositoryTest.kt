@@ -361,7 +361,7 @@ class SplitCruiserRepositoryTest {
                 destLng = -71.0096,
                 departureTime = future,
                 totalSeats = 3,
-                costPerRider = 12.0,
+                totalCost = 48.0,
                 womenOnly = false,
                 vehicleInfo = "Blue Civic",
                 exitLocation = "",
@@ -370,6 +370,12 @@ class SplitCruiserRepositoryTest {
         val posted = repo.getHostedRides("me").single()
         assertEquals("me", posted.hostId)
         assertEquals(3, posted.seatsLeft)
+        // $48 across three riders *and the driver* is $12 each — the host is travelling too, so the
+        // cost divides `totalSeats + 1` ways. The caller never supplied a per-rider figure; this is
+        // the first time anything in the product actually divided a cost.
+        assertEquals(48.0, posted.totalCost)
+        assertEquals(12.0, posted.costPerRider)
+        // What the three passengers cover between them, the driver's own share excluded.
         assertEquals(36.0, posted.costEstimate)
         assertEquals(7, posted.originGeohash.length)
         assertTrue(posted.id.startsWith("offer_"))
@@ -382,7 +388,7 @@ class SplitCruiserRepositoryTest {
             repo.postTripOffer(
                 RideFactory.makeTripOffer(
                     "A", "B", 1.0, 1.0, 2.0, 2.0,
-                    departureTime = now - 1, totalSeats = 2, costPerRider = 5.0,
+                    departureTime = now - 1, totalSeats = 2, totalCost = 15.0,
                     womenOnly = false, vehicleInfo = "", exitLocation = "",
                 )
             )
@@ -397,7 +403,7 @@ class SplitCruiserRepositoryTest {
             repo.postTripOffer(
                 RideFactory.makeTripOffer(
                     "A", "B", 0.0, 0.0, 0.0, 0.0,
-                    departureTime = future, totalSeats = 2, costPerRider = 5.0,
+                    departureTime = future, totalSeats = 2, totalCost = 15.0,
                     womenOnly = false, vehicleInfo = "", exitLocation = "",
                 )
             )
@@ -532,13 +538,15 @@ class SplitCruiserRepositoryTest {
         origin: String = "Back Bay",
         destination: String = "Providence",
         costPerRider: Double = 12.0,
+        totalCost: Double = 0.0,
         totalSeats: Int = 3,
         departureTime: Long = future,
         exitLocation: String = "",
     ) = TripOffer(
         origin = origin, destination = destination,
         originLat = 42.3, originLng = -71.1, destLat = 41.8, destLng = -71.4,
-        costPerRider = costPerRider, totalSeats = totalSeats, seatsLeft = totalSeats,
+        costPerRider = costPerRider, totalCost = totalCost,
+        totalSeats = totalSeats, seatsLeft = totalSeats,
         departureTime = departureTime, exitLocation = exitLocation,
     )
 
@@ -1331,6 +1339,92 @@ class SplitCruiserRepositoryTest {
         assertEquals(100.0, repo.calculateCostSplit(100.0, 0))
     }
 
+    /**
+     * The driver is a traveller, not a vendor, so the trip cost divides `totalSeats + 1` ways.
+     *
+     * This is the difference between a split and a fare, and it is the whole reason the product
+     * asks for a trip cost rather than a per-seat price. `calculateCostSplit` had encoded the
+     * division since the beginning and had no callers at all; nothing in the app divided anything.
+     */
+    @Test
+    fun theTripCostDividesAcrossTheRidersAndTheDriver() {
+        val repo = repository(scriptedBackend())
+        assertEquals(12.0, repo.perRiderShare(totalCost = 60.0, totalSeats = 4))
+        assertEquals(30.0, repo.perRiderShare(totalCost = 60.0, totalSeats = 1))
+        // A solo driver offering no seats keeps the whole cost rather than dividing by zero.
+        assertEquals(60.0, repo.perRiderShare(totalCost = 60.0, totalSeats = 0))
+    }
+
+    /**
+     * Rounded *up* to the cent. $100 over two riders and a driver is $33.333…; three shares of
+     * $33.33 leave the host a cent short on every trip, which is the worse of the two errors.
+     */
+    @Test
+    fun anUnevenShareRoundsUpToTheCentSoTheHostIsNeverShort() {
+        val repo = repository(scriptedBackend())
+        assertEquals(33.34, repo.perRiderShare(totalCost = 100.0, totalSeats = 2))
+        assertEquals(0.0, repo.perRiderShare(totalCost = 0.0, totalSeats = 3))
+        // Never negative: a caller that somehow gets a negative cost past validation gets zero,
+        // not a share the app would render as "-$4.00 each".
+        assertEquals(0.0, repo.perRiderShare(totalCost = -12.0, totalSeats = 3))
+    }
+
+    /**
+     * Posting derives the share; it does not trust one the caller supplied.
+     *
+     * This is what keeps the stored figure and the figure previewed under the post-offer form the
+     * same number, and it is why `RideFactory.makeTripOffer` takes no `costPerRider` at all.
+     */
+    @Test
+    fun postingDerivesThePerRiderShareAndIgnoresAnySuppliedOne() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+        repo.postTripOffer(anOffer(costPerRider = 499.0, totalCost = 60.0, totalSeats = 3))
+
+        val posted = repo.getHostedRides("me").single()
+        assertEquals(15.0, posted.costPerRider)
+        assertEquals(60.0, posted.totalCost)
+    }
+
+    /** An offer posted before `totalCost` existed keeps the per-rider figure it was created with. */
+    @Test
+    fun anOfferWithNoTripCostKeepsItsTypedPerRiderFigure() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+        repo.postTripOffer(anOffer(costPerRider = 12.0, totalCost = 0.0, totalSeats = 3))
+
+        assertEquals(12.0, repo.getHostedRides("me").single().costPerRider)
+    }
+
+    /**
+     * The trip-cost ceiling scales with the seat count, and its message names the field the host
+     * typed into.
+     *
+     * A flat whole-trip cap cannot do that job. `MAX_CONTRIBUTION` on the derived share is what
+     * actually binds, so a single ceiling is either unreachable — at eight seats the share cap is
+     * hit first — or wrong for every smaller ride. And a host who entered a trip cost never chose
+     * a per-rider figure, so "cost per rider cannot exceed $500" sends them looking for a field
+     * the form does not have.
+     */
+    @Test
+    fun theTripCostCeilingScalesWithTheSeatCountAndSaysSo() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+
+        // Three seats plus the driver: $2000 divides to exactly $500 each and is allowed.
+        repo.postTripOffer(anOffer(totalCost = 2_000.0, totalSeats = 3))
+        assertEquals(500.0, repo.getHostedRides("me").single().costPerRider)
+
+        val failure = assertFailsWith<SplitCruiserException> {
+            repo.postTripOffer(anOffer(totalCost = 2_000.01, totalSeats = 3))
+        }
+        assertContains(failure.message!!, "3-seat ride")
+        assertContains(failure.message!!, "2000")
+    }
+
+    @Test
+    fun aNegativeTripCostIsRejected() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+        assertFailsWith<SplitCruiserException> { repo.postTripOffer(anOffer(totalCost = -1.0)) }
+    }
+
     // --- Chat ------------------------------------------------------------------------------
 
     /**
@@ -1493,7 +1587,7 @@ class SplitCruiserRepositoryTest {
                 destination = "Logan Airport",
                 originLat = 42.3383, originLng = -71.0881,
                 destLat = 42.3656, destLng = -71.0096,
-                departureTime = future, totalSeats = 3, costPerRider = 12.0,
+                departureTime = future, totalSeats = 3, totalCost = 48.0,
                 womenOnly = false, vehicleInfo = "", exitLocation = "",
             )
         )

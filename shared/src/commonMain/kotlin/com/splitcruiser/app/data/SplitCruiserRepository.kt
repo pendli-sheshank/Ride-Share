@@ -23,6 +23,7 @@ import com.splitcruiser.app.data.firebase.firebaseJson
 import com.splitcruiser.app.data.firebase.integerValue
 import com.splitcruiser.app.data.firebase.stringValue
 import io.ktor.client.engine.HttpClientEngine
+import kotlin.math.ceil
 import kotlin.math.round
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -694,18 +695,31 @@ class SplitCruiserRepository internal constructor(
     @Throws(Exception::class)
     suspend fun postTripOffer(offer: TripOffer) {
         val user = requireUser()
-        validateTripOfferOrThrow(offer)
+
+        // The split happens here, once, before validation — so the bounds below are checked against
+        // the share that actually gets stored rather than against whatever the caller passed in.
+        // A host who names a trip cost never sets `costPerRider` themselves; one posting from an
+        // older build (or a screen not yet migrated) sends `totalCost = 0.0` and keeps the figure
+        // they typed.
+        val priced = if (offer.totalCost > 0.0) {
+            offer.copy(costPerRider = perRiderShare(offer.totalCost, offer.totalSeats))
+        } else {
+            offer
+        }
+        validateTripOfferOrThrow(priced)
 
         val id = newId("offer")
-        val finalOffer = offer.copy(
+        val finalOffer = priced.copy(
             id = id,
             hostId = user.id,
             hostName = user.name,
             hostRating = user.ratingAvg,
-            originGeohash = GeoUtils.encodeGeohash(offer.originLat, offer.originLng, 7),
-            destGeohash = GeoUtils.encodeGeohash(offer.destLat, offer.destLng, 7),
-            costEstimate = offer.costPerRider * offer.totalSeats,
-            seatsLeft = offer.totalSeats,
+            originGeohash = GeoUtils.encodeGeohash(priced.originLat, priced.originLng, 7),
+            destGeohash = GeoUtils.encodeGeohash(priced.destLat, priced.destLng, 7),
+            // What the passengers cover between them if every seat fills — the trip cost less the
+            // driver's own share, since `costPerRider` now divides `totalSeats + 1` ways.
+            costEstimate = priced.costPerRider * priced.totalSeats,
+            seatsLeft = priced.totalSeats,
             status = "active",
         )
         firestore.setDocument("trip_offers", id, finalOffer, serializer<TripOffer>())
@@ -1948,6 +1962,40 @@ class SplitCruiserRepository internal constructor(
         if (riders <= 0) totalCost else totalCost / riders
 
     /**
+     * Each rider's share of a [totalCost] trip offering [totalSeats] passenger seats.
+     *
+     * The driver is travelling too, so the cost divides `totalSeats + 1` ways rather than landing
+     * entirely on the passengers: a $60 tank on a four-seat ride is $12 each, not $15. That is the
+     * difference between splitting a cost and charging a fare, and this product is the former.
+     *
+     * Rounded **up** to the cent. Rounding each share down leaves the host short by up to a cent
+     * per rider on every trip, which is a worse failure than a rider overpaying a fraction of one.
+     *
+     * Both platforms call this for the live preview under the post-offer form, so the number the
+     * host sees while typing is the number that gets stored — the same reason `PlaceRanking` is
+     * shared rather than reimplemented per platform.
+     */
+    /**
+     * The largest trip cost a ride offering [totalSeats] seats may carry, so both post-offer forms
+     * can name the limit before the call rather than hardcoding a copy of it that drifts.
+     *
+     * Seat-dependent, because the constraint that actually binds is [MAX_CONTRIBUTION] on the
+     * *derived* share: a flat whole-trip ceiling would be either unreachable (at eight seats the
+     * share cap is hit first) or a lie (on a three-seat ride the real limit is a quarter of it).
+     * Deriving it from the same constant keeps the message true for the ride being posted.
+     *
+     * A function rather than the companion constant because the companion is private, and because
+     * a member is exported to Swift where a `const val` in a private object is not.
+     */
+    fun maxTripCost(totalSeats: Int): Double = MAX_CONTRIBUTION * (totalSeats + 1)
+
+    fun perRiderShare(totalCost: Double, totalSeats: Int): Double {
+        if (totalCost <= 0.0) return 0.0
+        val share = calculateCostSplit(totalCost, totalSeats + 1)
+        return ceil(share * 100.0) / 100.0
+    }
+
+    /**
      * What to prefill the contribution field with when a driver accepts a request directly.
      *
      * A [RideRequest] carries no cost — riders say where and when, not what they will pay — so
@@ -2027,6 +2075,14 @@ class SplitCruiserRepository internal constructor(
         // `toDoubleOrNull() ?: 10.0` and applied no ceiling, so "999999" posted a ride asking each
         // rider for a million dollars, and a typo silently became a $10 ride the host never agreed
         // to. This is a cost-split between neighbours, not a fare.
+        // Checked before the per-rider bound below so the message names the field the host typed
+        // into. A host who entered a trip cost never chose the share, and "cost per rider cannot
+        // exceed $500" sends them looking for a field that is not on the form.
+        requireValid(offer.totalCost >= 0.0) { "Trip cost cannot be negative." }
+        requireValid(offer.totalCost <= maxTripCost(offer.totalSeats)) {
+            "A ${offer.totalSeats}-seat ride can split at most " +
+                "$${maxTripCost(offer.totalSeats).toInt()}."
+        }
         requireValid(offer.costPerRider <= MAX_CONTRIBUTION) {
             "Cost per rider cannot exceed $${MAX_CONTRIBUTION.toInt()}."
         }

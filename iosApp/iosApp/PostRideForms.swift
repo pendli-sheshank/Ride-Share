@@ -20,7 +20,9 @@ struct PostOfferScreen: View {
     // Android seeds the offer form at now + 4 hours; iOS used one hour for both forms.
     @State private var departure = Date().addingTimeInterval(4 * 3600)
     @State private var seats = 4
-    @State private var cost = "15.00"
+    // What the whole trip costs, not what one rider pays — the app does the division. Matches the
+    // Android form's seed.
+    @State private var cost = "60.00"
     @State private var vehicleInfo = ""
     @State private var womenOnly = false
     @State private var formError: String?
@@ -28,6 +30,15 @@ struct PostOfferScreen: View {
 
     private var canSubmit: Bool {
         origin.isResolved && destination.isResolved && !isSubmitting
+    }
+
+    /// The split, recomputed as either field is typed into — `nil` until both parse.
+    ///
+    /// Goes through `:shared` so the previewed figure is byte-for-byte the one `postTripOffer`
+    /// stores, rather than a Swift reimplementation that can drift from it.
+    private var previewShare: Double? {
+        guard let parsed = Double(cost), parsed > 0 else { return nil }
+        return viewModel.perRiderShare(totalCost: parsed, totalSeats: seats)
     }
 
     /// Ranks the pickup search toward home, the way Android's post-offer form does.
@@ -86,8 +97,8 @@ struct PostOfferScreen: View {
 
                     HStack(spacing: BrandScale.spaceMd) {
                         BrandTextField(
-                            title: "Cost Per Rider ($)",
-                            placeholder: "15.00",
+                            title: "Total Trip Cost ($)",
+                            placeholder: "60.00",
                             text: $cost,
                             icon: "dollarsign.circle.fill",
                             iconTint: Brand.warning,
@@ -103,6 +114,26 @@ struct PostOfferScreen: View {
                                 .foregroundColor(Brand.textPrimary)
                                 .accessibilityIdentifier("offer_seats_input")
                         }
+                    }
+
+                    // The split, shown as it is typed — the same preview Android renders under
+                    // the same two fields.
+                    if let previewShare {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(TripFormat.money(previewShare)) each")
+                                .font(.system(size: 20, weight: .black))
+                                .foregroundColor(Brand.primary)
+                            // `seats + 1` says out loud that the driver pays a share too, which is
+                            // the difference between a split and a fare.
+                            Text("\(TripFormat.money(Double(cost) ?? 0)) split \(seats + 1) ways — \(seats) \(seats == 1 ? "rider" : "riders") and you.")
+                                .font(BrandFont.caption())
+                                .foregroundColor(Brand.textSecondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(BrandScale.spaceMd)
+                        .background(Brand.surfaceMuted)
+                        .cornerRadius(BrandScale.radiusMd)
+                        .accessibilityIdentifier("offer_split_preview")
                     }
 
                     BrandTextField(
@@ -190,8 +221,12 @@ struct PostOfferScreen: View {
 
     private func submit() {
         formError = nil
-        guard let costPerRider = Double(cost), costPerRider >= 0 else {
-            formError = "Enter a valid cost per rider."
+        guard let totalCost = Double(cost), totalCost >= 0 else {
+            formError = "Enter the trip cost as a number, like 60.00."
+            return
+        }
+        guard totalCost <= viewModel.maxTripCost(totalSeats: seats) else {
+            formError = "A \(seats)-seat ride can split at most $\(Int(viewModel.maxTripCost(totalSeats: seats)))."
             return
         }
         isSubmitting = true
@@ -205,7 +240,7 @@ struct PostOfferScreen: View {
                 destLng: destination.lon,
                 departureTime: departure,
                 totalSeats: seats,
-                costPerRider: costPerRider,
+                totalCost: totalCost,
                 womenOnly: womenOnly,
                 vehicleInfo: vehicleInfo.isEmpty ? "Shared Sedan" : vehicleInfo,
                 exitLocation: exitLocation
