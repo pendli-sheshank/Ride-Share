@@ -27,6 +27,7 @@ import com.splitcruiser.app.data.confirmPickupProposalResult
 import com.splitcruiser.app.data.createUserProfileResult
 import com.splitcruiser.app.data.fetchMyTripsFromFirestore
 import com.splitcruiser.app.data.firebase.EncryptedSharedPreferencesStore
+import com.splitcruiser.app.push.SplitCruiserNotifications
 import com.splitcruiser.app.data.joinTripOfferDirectResult
 import com.splitcruiser.app.data.logInWithEmailResult
 import com.splitcruiser.app.data.offerSeatForRequestResult
@@ -679,8 +680,41 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Registers this device for notifications, if it has a token and permission to show them.
+     *
+     * Called on every sign-in rather than once at first launch. FCM rotates a token when the app
+     * is restored to a new device, when its data is cleared, and periodically on its own —
+     * `SplitCruiserMessagingService.onNewToken` fires for those, but it can fire with nobody
+     * signed in, so the sign-in path is the one that reliably has both a token and a session.
+     *
+     * Silent by design. A device that cannot register is one person not getting notifications,
+     * which is where every account starts; it is not worth an error banner over a working login.
+     */
+    fun syncPushToken(context: Context) {
+        viewModelScope.launch {
+            if (!SplitCruiserNotifications.canPostNotifications(context)) return@launch
+            SplitCruiserNotifications.ensureChannel(context)
+            val token = SplitCruiserNotifications.currentToken(context) ?: return@launch
+            repository.registerPushToken(token, platform = "android")
+        }
+    }
+
+    /**
+     * Forgets this device, then signs out.
+     *
+     * The order matters: `unregisterPushToken` is a network write and needs the credentials that
+     * `logout` clears. Without it the registration outlives the session, and the next person to
+     * sign in on this phone receives the previous user's notifications.
+     *
+     * `logout` itself stays synchronous — it is called from lifecycle callbacks on both platforms —
+     * so the unregister is a separate suspend call rather than folded into it.
+     */
     fun logout() {
-        repository.logout()
+        viewModelScope.launch {
+            runCatching { repository.unregisterPushToken() }
+            repository.logout()
+        }
     }
 
     /**

@@ -343,6 +343,101 @@ class SplitCruiserRepositoryTest {
         assertEquals("+16175550100", repo.currentUser.value?.phoneNumber)
     }
 
+    // --- Push registration -------------------------------------------------------------------
+
+    /**
+     * The token must not land on the user document.
+     *
+     * `users/{uid}` is readable by every signed-in user — `firestore.rules` says so, and had
+     * already flagged the old `fcmToken` field by name. A live push token there is a stable
+     * per-device identifier published to everyone who can open the app, so it goes to the same
+     * owner-only subcollection the home address does.
+     */
+    @Test
+    fun thePushTokenIsWrittenToThePrivateSubcollectionAndNotTheReadableDocument() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+
+        repo.registerPushToken("tok-abc", platform = "android")
+
+        val writes = requests.filter { it.method.value == "PATCH" }.map { it.url.toString() }
+        assertTrue(
+            writes.any { it.contains("/users/me/private/push") },
+            "the registration must go to the private subcollection: $writes",
+        )
+        // The Cloud Function reads `users/{uid}/private/push`; nothing may write it to `users/me`.
+        val bodies = requests.filter { it.method.value == "PATCH" }
+            .mapNotNull { (it.body as? TextContent)?.text }
+        assertTrue(
+            bodies.none { it.contains("tok-abc") && !it.contains("token") } ||
+                writes.none { it.endsWith("/users/me") },
+            "the token must never be part of a write to the readable user document: $writes",
+        )
+    }
+
+    /** A blank token is not worth a round trip, and would overwrite a good registration. */
+    @Test
+    fun aBlankPushTokenIsNotWritten() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+        val before = requests.size
+
+        repo.registerPushToken("   ", platform = "android")
+
+        assertEquals(before, requests.size)
+    }
+
+    /**
+     * Registering must never be able to break a login.
+     *
+     * The cost of a failed registration is one person not getting notifications, which is where
+     * every account starts anyway — so it is swallowed rather than thrown.
+     */
+    @Test
+    fun aFailedPushRegistrationDoesNotThrow() = runTest {
+        // Only the push write fails. Failing every PATCH would break the sign-in this test needs
+        // to get far enough to register anything.
+        val repo = signedIn(
+            repository { request ->
+                if (request.url.toString().contains("/private/push")) {
+                    HttpStatusCode.ServiceUnavailable to """{"error":{"message":"nope"}}"""
+                } else {
+                    scriptedBackend()(request)
+                }
+            }
+        )
+
+        repo.registerPushToken("tok-abc", platform = "android")
+    }
+
+    /**
+     * Signing out forgets the device, or the next person to sign in on this phone receives the
+     * previous user's notifications.
+     */
+    @Test
+    fun signingOutUnregistersTheDevice() = runTest {
+        val repo = signedIn(repository(scriptedBackend()))
+        repo.registerPushToken("tok-abc", platform = "android")
+
+        repo.unregisterPushToken()
+
+        assertTrue(
+            requests.any {
+                it.method.value == "DELETE" && it.url.toString().contains("/users/me/private/push")
+            },
+            "the registration must be deleted while the credentials are still valid",
+        )
+    }
+
+    /** Nothing to unregister when nobody is signed in — and no crash for trying. */
+    @Test
+    fun unregisteringWithNoUserIsANoOp() = runTest {
+        val repo = repository(scriptedBackend())
+        val before = requests.size
+
+        repo.unregisterPushToken()
+
+        assertEquals(before, requests.size)
+    }
+
     @Test
     fun signingOutForgetsTheHomeAddress() = runTest {
         val repo = signedIn(repository(scriptedBackend()))

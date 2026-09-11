@@ -628,6 +628,53 @@ class SplitCruiserRepository internal constructor(
         }
     }
 
+    /**
+     * Records where to reach this user's device when the app is closed.
+     *
+     * Both platforms call this with the token their messaging SDK hands them, and again whenever
+     * that token is rotated — a token is not permanent, and a stale one fails silently at send
+     * time rather than reporting anything to the user.
+     *
+     * Writes `users/{uid}/private/push`, **not** the user document. `users` is readable by every
+     * signed-in user, so a live push token there is a stable per-device identifier published to
+     * everyone who can open the app; `firestore.rules` had already flagged the `fcmToken` field
+     * for exactly this. The Cloud Function reads it with the Admin SDK, which bypasses the rules.
+     *
+     * Never throws. A device that cannot register should not be able to break a login — the cost
+     * is one person not getting notifications, which is where every account starts anyway.
+     */
+    suspend fun registerPushToken(token: String, platform: String) {
+        val uid = _currentUser.value?.id ?: return
+        if (token.isBlank()) return
+        val registration = PushRegistration(
+            token = token,
+            platform = platform,
+            updatedAt = serverClock.nowMs(),
+        )
+        runCatching {
+            firestore.setDocument(
+                "users/$uid/private",
+                PUSH_DOC,
+                registration,
+                serializer<PushRegistration>(),
+            )
+        }.onFailure { logWarn(LOG_TAG, "Could not register this device for notifications", it) }
+    }
+
+    /**
+     * Forgets this device, so the next person to sign in on it does not receive the previous
+     * user's notifications.
+     *
+     * Separate from [logout] rather than folded into it because [logout] is deliberately not a
+     * suspend function — it is called from lifecycle callbacks on both platforms — and this is a
+     * network write. Call it *before* logging out, while the credentials are still valid.
+     */
+    suspend fun unregisterPushToken() {
+        val uid = _currentUser.value?.id ?: return
+        runCatching { firestore.deleteDocument("users/$uid/private", PUSH_DOC) }
+            .onFailure { logWarn(LOG_TAG, "Could not unregister this device", it) }
+    }
+
     private suspend fun loadContactDetails(uid: String) {
         _contactDetails.value = runCatching {
             firestore.getDocument("users/$uid/private", CONTACT_DOC, serializer<ContactDetails>())
@@ -2317,6 +2364,15 @@ class SplitCruiserRepository internal constructor(
     private companion object {
         /** The single document under `users/{uid}/private` that onboarding writes. */
         const val CONTACT_DOC = "profile"
+
+        /**
+         * Where this device's push registration lives, under the same private subcollection.
+         *
+         * `functions/src/fanOutNotifications.ts` reads this exact path with the Admin SDK. The two
+         * are only kept in step by this comment and that one — there is no shared constant across
+         * the Kotlin and TypeScript sides.
+         */
+        const val PUSH_DOC = "push"
 
         /** System-set statuses [closeIfExpired] may overwrite once departure has passed. */
         val AUTO_CLOSEABLE_OFFER_STATUSES = setOf("active", "full")

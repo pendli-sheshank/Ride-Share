@@ -2,6 +2,7 @@
 package com.splitcruiser.app.ui
 
 import android.content.Intent
+import android.Manifest
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -104,6 +105,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.ui.semantics.Role
 import com.splitcruiser.app.data.Gender
+import com.splitcruiser.app.push.SplitCruiserNotifications
 import androidx.compose.foundation.lazy.rememberLazyListState
 
 // --- Material 3 Animation Utilities ---
@@ -308,6 +310,30 @@ fun SplitCruiserApp(viewModel: MainViewModel = viewModel()) {
         navController.navigate(authPhase) {
             popUpTo(0) { inclusive = true }
             launchSingleTop = true
+        }
+    }
+
+    // Notification permission, asked once the user is actually signed in.
+    //
+    // Not at launch: a prompt on a login screen has no context, and API 33+ gives exactly one
+    // chance — a reflexive "don't allow" is permanent as far as the app is concerned. By the time
+    // someone has an account, "we'll tell you when a host accepts" is a reason they can weigh.
+    //
+    // The token is registered on the answer either way: a user who denies the prompt may still
+    // enable notifications later in system settings, and `syncPushToken` re-checks before writing.
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { viewModel.syncPushToken(context) }
+
+    LaunchedEffect(authPhase) {
+        if (authPhase != "dashboard") return@LaunchedEffect
+        if (SplitCruiserNotifications.canPostNotifications(context)) {
+            // Already granted, or pre-API 33 where the permission does not exist. Re-registering on
+            // every sign-in is deliberate: FCM rotates tokens, and a stale registration fails
+            // silently at send time with nothing surfacing to the user.
+            viewModel.syncPushToken(context)
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 

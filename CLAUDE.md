@@ -162,12 +162,25 @@ not evidence. Verify against a build.
   (`PlaceRanking`) is shared, so both platforms order address suggestions identically. Address
   search asks Photon for 25 candidates and shows the nearest 8; asking for 8 was why a home address
   never appeared, since Photon orders by OSM importance.
-- The `google-services` and `secrets` Gradle plugins are inert on `:app` now that no native
-  Firebase SDK consumes them.
+- **Push notifications are the one place a native Firebase SDK is used.** `firebase-messaging` is
+  on `:app` because push has no REST equivalent a client can use — a device must register with FCM
+  through the platform SDK to get a token at all, which is why `fcmToken` sat on the user model
+  referenced by nothing. The *data* SDKs stay out: `:shared` still speaks REST for auth, Firestore
+  and Storage, and that is what lets iOS share the backend. Do not add
+  firebase-auth/firestore/storage.
+  **The token is not on the user document.** `users/{uid}` is readable by every signed-in user, so
+  a live push token there is a stable per-device identifier published to everyone; it lives in
+  `users/{uid}/private/push` (`PushRegistration`), the same reason the home address does.
+  `functions/src/fanOutNotifications.ts` reads that exact path with the Admin SDK — the Kotlin and
+  TypeScript sides share no constant, only a comment each. The Android channel id in
+  `strings.xml` must equal `RIDE_CHANNEL_ID` in `pushPayload.ts`, or API 26+ drops every
+  notification silently. The `secrets` Gradle plugin is still inert.
+  **iOS has no push yet** — that needs the Firebase iOS SDK via SPM in the generated Xcode
+  project, an `AppDelegate`, and a `GoogleService-Info.plist` secret. Tracked as the next stage.
 - **`Theme.swift` reads the shared tokens through the Kotlin/Native ObjC export**
   (`SplitCruiserColors.shared.Primary`). That cannot be compile-checked on Linux; if the exported
   property names turn out to differ, it is a one-token fix, and the whole mapping is in one file.
-- Test coverage: 227 tests in `:shared`, 79 rules tests against the emulator (`rules-tests/`), 8 in
+- Test coverage: 232 tests in `:shared`, 83 rules tests against the emulator (`rules-tests/`), 23 in
   `functions/`, and 3 unit tests in `:app` (a Robolectric label check, a Roborazzi screenshot, and
   an arithmetic placeholder). CI compiles the androidTest suite and runs lint, but **nothing runs
   the instrumented tests** — that needs an emulator job, and the suite spent a long time not even

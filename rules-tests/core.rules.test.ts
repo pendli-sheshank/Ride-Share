@@ -54,6 +54,43 @@ describe("users", () => {
     await assertFails((await as(STRANGER)).doc(`users/${RIDER}/private/profile`).get());
   });
 
+  /**
+   * The whole reason the push token moved off `users/{uid}`.
+   *
+   * That document is readable by every signed-in user, and the rules file had already flagged the
+   * old `fcmToken` field by name. A live push token there is a stable per-device identifier handed
+   * to everyone who can open the app. `functions/src/fanOutNotifications.ts` reads this path with
+   * the Admin SDK, which bypasses these rules.
+   */
+  test("a push registration is readable only by its owner", async () => {
+    await seed(`users/${RIDER}/private/push`, {
+      token: "tok-abc", platform: "android", updatedAt: 1_700_000_000_000,
+    });
+    await assertSucceeds((await as(RIDER)).doc(`users/${RIDER}/private/push`).get());
+    await assertFails((await as(STRANGER)).doc(`users/${RIDER}/private/push`).get());
+  });
+
+  test("nobody can plant a push registration on someone else's account", async () => {
+    // Writing another user's token would redirect their notifications to your device.
+    await assertFails(
+      (await as(STRANGER)).doc(`users/${RIDER}/private/push`).set({ token: "attacker-token" }),
+    );
+  });
+
+  test("a user may replace their own registration when the token rotates", async () => {
+    await seed(`users/${RIDER}/private/push`, { token: "old", platform: "android", updatedAt: 1 });
+    await assertSucceeds(
+      (await as(RIDER)).doc(`users/${RIDER}/private/push`).set({
+        token: "new", platform: "android", updatedAt: 2,
+      }),
+    );
+  });
+
+  test("a user may delete their own registration when signing out", async () => {
+    await seed(`users/${RIDER}/private/push`, { token: "old", platform: "android", updatedAt: 1 });
+    await assertSucceeds((await as(RIDER)).doc(`users/${RIDER}/private/push`).delete());
+  });
+
   test("a block list is readable only by its owner", async () => {
     await seed(`users/${RIDER}/blockedUsers/${STRANGER}`, { id: STRANGER });
     await assertSucceeds((await as(RIDER)).doc(`users/${RIDER}/blockedUsers/${STRANGER}`).get());

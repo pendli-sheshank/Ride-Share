@@ -101,10 +101,17 @@ googleServices {
 dependencies {
   implementation(project(":shared"))
   implementation(platform(libs.androidx.compose.bom))
-  // The native Firebase SDKs are deliberately absent. The backend lives in :shared and speaks
-  // Firebase's REST APIs, which is what lets iOS share it — the iOS SDK would need CocoaPods or
-  // SPM entries in the generated Xcode project. Do not add firebase-auth/firestore/storage back
-  // here without moving the whole backend with them.
+  // The Firebase *data* SDKs are still deliberately absent. The backend lives in :shared and
+  // speaks Firebase's REST APIs, which is what lets iOS share it. Do not add
+  // firebase-auth/firestore/storage back here without moving the whole backend with them.
+  //
+  // Messaging is the one exception, and it is not a data SDK. Push delivery has no REST equivalent
+  // a client can use: a device has to register with FCM through the platform SDK to get a token at
+  // all. `fcmToken` sat on the user model referenced by nothing precisely because there was no way
+  // to obtain one. Nothing about the backend moves — :shared still writes the registration over
+  // REST, to `users/{uid}/private/push`.
+  implementation(platform(libs.firebase.bom))
+  implementation(libs.firebase.messaging)
   // implementation(libs.accompanist.permissions)
   implementation(libs.androidx.activity.compose)
   // implementation(libs.androidx.camera.camera2)
