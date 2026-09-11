@@ -27,6 +27,7 @@ import com.splitcruiser.app.data.confirmPickupProposalResult
 import com.splitcruiser.app.data.createUserProfileResult
 import com.splitcruiser.app.data.fetchMyTripsFromFirestore
 import com.splitcruiser.app.data.firebase.EncryptedSharedPreferencesStore
+import com.splitcruiser.app.push.SplitCruiserNotifications
 import com.splitcruiser.app.data.joinTripOfferDirectResult
 import com.splitcruiser.app.data.logInWithEmailResult
 import com.splitcruiser.app.data.offerSeatForRequestResult
@@ -206,6 +207,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // --- Auth ---
+    /**
+     * Sends the Identity Toolkit password-reset email.
+     *
+     * `sendPasswordReset` has existed in `:shared` the whole time with no caller on either
+     * platform, so anyone who forgot their password was simply locked out of their account.
+     *
+     * [onSent] fires on success only, and the copy it drives must not reveal whether the address
+     * is registered — confirming that is an account-enumeration oracle on an app that also shows
+     * people's names and photos.
+     */
+    fun sendPasswordReset(email: String, onSent: () -> Unit) {
+        val loadingMessage = "Sending the reset link…"
+        if (!beginLoading(loadingMessage)) return
+        viewModelScope.launch {
+            try {
+                runCatching { repository.sendPasswordReset(email) }
+                    .onSuccess { onSent() }
+                    .onFailure { _uiError.value = it.message ?: "Could not send the reset email." }
+            } finally {
+                endLoading(loadingMessage)
+            }
+        }
+    }
+
     fun loginWithEmail(email: String, password: String, onFinished: (isNewUser: Boolean) -> Unit) {
         val loadingMessage = "Logging you in…"
         if (!beginLoading(loadingMessage)) return
@@ -452,10 +477,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun completeTrip(matchId: String) {
+    fun completeTrip(matchId: String, onSuccess: () -> Unit = {}) {
         viewModelScope.launch {
             runCatching { repository.completeTrip(matchId) }
+                .onSuccess { onSuccess() }
                 .onFailure { _uiError.value = it.message ?: "Failed to complete trip." }
+        }
+    }
+
+    /**
+     * Either party pulls out of a ride they had agreed on; the rider's seat goes back on the offer.
+     *
+     * The navigation callback only fires on success. The previous "complete trip" control
+     * navigated away unconditionally, so a rejected write looked exactly like a successful one.
+     */
+    fun cancelMatch(matchId: String, reason: String = "", onSuccess: () -> Unit = {}) {
+        viewModelScope.launch {
+            runCatching { repository.cancelMatch(matchId, reason) }
+                .onSuccess { onSuccess() }
+                .onFailure { _uiError.value = it.message ?: "Failed to leave this ride." }
         }
     }
 
@@ -640,8 +680,41 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Registers this device for notifications, if it has a token and permission to show them.
+     *
+     * Called on every sign-in rather than once at first launch. FCM rotates a token when the app
+     * is restored to a new device, when its data is cleared, and periodically on its own —
+     * `SplitCruiserMessagingService.onNewToken` fires for those, but it can fire with nobody
+     * signed in, so the sign-in path is the one that reliably has both a token and a session.
+     *
+     * Silent by design. A device that cannot register is one person not getting notifications,
+     * which is where every account starts; it is not worth an error banner over a working login.
+     */
+    fun syncPushToken(context: Context) {
+        viewModelScope.launch {
+            if (!SplitCruiserNotifications.canPostNotifications(context)) return@launch
+            SplitCruiserNotifications.ensureChannel(context)
+            val token = SplitCruiserNotifications.currentToken(context) ?: return@launch
+            repository.registerPushToken(token, platform = "android")
+        }
+    }
+
+    /**
+     * Forgets this device, then signs out.
+     *
+     * The order matters: `unregisterPushToken` is a network write and needs the credentials that
+     * `logout` clears. Without it the registration outlives the session, and the next person to
+     * sign in on this phone receives the previous user's notifications.
+     *
+     * `logout` itself stays synchronous — it is called from lifecycle callbacks on both platforms —
+     * so the unregister is a separate suspend call rather than folded into it.
+     */
     fun logout() {
-        repository.logout()
+        viewModelScope.launch {
+            runCatching { repository.unregisterPushToken() }
+            repository.logout()
+        }
     }
 
     /**

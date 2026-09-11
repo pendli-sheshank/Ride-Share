@@ -11,6 +11,12 @@
       wraps it: the feature has silently never worked. A normal permission, so no runtime prompt.
     -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!--
+      Runtime permission on API 33+. Without it the system drops every notification silently — the
+      same failure mode as the undeclared VIBRATE permission, which made every haptic call throw
+      into a bare catch and meant the feature had never once worked.
+    -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!--
       Address suggestions are ranked by how far each result is from the user. Coarse is all the
@@ -42,6 +48,27 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+          Receives pushes and token rotations. Not exported: only the system delivers to it, and an
+          exported messaging service would let any app on the device spoof a notification.
+        -->
+        <service
+            android:name="com.splitcruiser.app.push.SplitCruiserMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <!--
+          The channel FCM falls back to when a notification arrives with no channel of its own.
+          It must exist before any notification is posted or API 26+ drops it silently, so
+          `SplitCruiserNotifications.ensureChannel` creates it at startup as well.
+        -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="@string/push_channel_id" />
     </application>
 
 </manifest>

@@ -100,7 +100,7 @@ once they exist.
 | `ANDROID_KEY_PASSWORD` | key password |
 | `ANDROID_KEY_ALIAS` | key alias; defaults to `upload` if unset |
 | `PLAY_SERVICE_ACCOUNT_JSON` | full service-account JSON, raw (not base64) |
-| `GOOGLE_SERVICES_JSON` | contents of `google-services.json` (optional but recommended) |
+| `GOOGLE_SERVICES_JSON` | contents of `google-services.json`. **Required for push notifications.** Without it the release build has no `FirebaseApp`, `SplitCruiserNotifications.currentToken` returns null, and no device ever registers — silently, by design, so a debug build without it still runs. Everything else in the app works without it, since the backend is REST. |
 
 ### Firebase — used by **both** platforms
 
@@ -196,7 +196,21 @@ cannot sign anybody in. Do them once, in the console, for the project named by
    `firebase deploy --only firestore:rules,firestore:indexes`. Skip this and every Firestore call
    returns a 404 that used to reach the login screen as "That item no longer exists" — see §7.
 5. Storage → **Get started** (profile pictures use the v0 REST API against `FIREBASE_STORAGE_BUCKET`).
-6. Nothing to seed. Signup used to be gated on an invite code that only a backend could create;
+6. **Cloud Messaging**, for push notifications. Project settings → General → Your apps → Android →
+   **Download `google-services.json`** and put its contents in the `GOOGLE_SERVICES_JSON` secret.
+   This is the one part of the app that needs a native Firebase SDK, because a device cannot get an
+   FCM token over REST at all.
+   - `firebase deploy --only functions` must include `fanOutNotifications`, or notifications are
+     written to Firestore and never delivered — which is the state the app shipped in for its whole
+     life before that function existed.
+   - Nothing here is visible to a build. A green release with this step skipped ships an app whose
+     notifications silently never arrive; `SplitCruiserNotifications.currentToken` returns null when
+     there is no `FirebaseApp`, deliberately, so that a debug build without the file still runs.
+   - *(iOS, once that stage lands: Project settings → Cloud Messaging → **APNs Authentication
+     Key** — upload the `.p8` with its key ID and your team ID. With the Firebase SDK, Firebase
+     talks to APNs on our behalf, so the key goes in the console and **not** into a GitHub secret.
+     A separate `GOOGLE_SERVICE_INFO_PLIST` secret will carry `GoogleService-Info.plist`.)*
+7. Nothing to seed. Signup used to be gated on an invite code that only a backend could create;
    that screen is gone, and `communities` still ships as `DEFAULT_COMMUNITIES` in `commonMain`.
 
 Verify without building anything; a real project answers `EMAIL_EXISTS` or `EMAIL_NOT_FOUND`

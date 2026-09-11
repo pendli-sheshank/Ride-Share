@@ -431,6 +431,11 @@ struct MatchRow: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @EnvironmentObject private var router: AppRouter
 
+    /// Both ways out of a ride are confirmed before they fire: completing settles a rider's trip
+    /// and unlocks rating them, leaving hands the seat to someone else.
+    @State private var showCompleteConfirm = false
+    @State private var showLeaveConfirm = false
+
     private var isHost: Bool { viewModel.currentUser?.id == match.hostId }
 
     /// The other party's name. Android shows the literal string "Your host" to a rider even when
@@ -472,7 +477,45 @@ struct MatchRow: View {
                     Label("Open chat", systemImage: "bubble.left.and.bubble.right.fill")
                 }
                 .buttonStyle(BrandButtonStyle(height: 40))
+
+                // Ending the ride. The host settles it — which is what makes the rating list
+                // meaningful — and the rider can hand the seat back. Neither control existed on
+                // iOS: `completeTrip` had no call site here at all, and `cancelMatch` had none on
+                // either platform, so a booked seat could never be released by anyone.
+                if match.status == "accepted" {
+                    if isHost {
+                        Button("Mark ride complete") { showCompleteConfirm = true }
+                            .buttonStyle(BrandOutlineButtonStyle(tint: Brand.success, height: 40))
+                    } else {
+                        Button("Leave this ride") { showLeaveConfirm = true }
+                            .buttonStyle(BrandOutlineButtonStyle(tint: Brand.danger, height: 40))
+                    }
+                }
             }
+        }
+        .confirmationDialog(
+            "Ride finished?",
+            isPresented: $showCompleteConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Mark complete") {
+                Task { await viewModel.completeTrip(matchId: match.id) }
+            }
+            Button("Not yet", role: .cancel) {}
+        } message: {
+            Text("You'll both be able to rate each other, and the seat stays counted as used.")
+        }
+        .confirmationDialog(
+            "Leave this ride?",
+            isPresented: $showLeaveConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Leave ride", role: .destructive) {
+                Task { await viewModel.cancelMatch(matchId: match.id) }
+            }
+            Button("Stay", role: .cancel) {}
+        } message: {
+            Text("Your seat goes back on the ride for someone else, and your host is told. You'd have to ask again to get back on.")
         }
         .padding(BrandScale.spaceLg)
         .background(Brand.surfaceCard)

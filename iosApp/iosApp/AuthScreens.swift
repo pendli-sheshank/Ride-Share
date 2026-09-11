@@ -118,6 +118,17 @@ struct LoginScreen: View {
                 .disabled(isSubmitting)
                 .accessibilityIdentifier("auth_submit_button")
 
+            // Forgetting a password locked people out permanently: `sendPasswordReset` has been
+            // in `:shared` all along, with a ViewModel wrapper on this side and no view calling
+            // it. Log-in only — there is nothing to reset while signing up.
+            if !isSigningUp {
+                Button("Forgot your password?") { requestPasswordReset() }
+                    .font(BrandFont.body(.semibold))
+                    .foregroundColor(Brand.primary)
+                    .disabled(isSubmitting)
+                    .accessibilityIdentifier("forgot_password_button")
+            }
+
             Button(isSigningUp
                    ? "Already have an account? Log In"
                    : "Don't have an account? Sign Up") {
@@ -132,6 +143,26 @@ struct LoginScreen: View {
                 .foregroundColor(Brand.textSecondary.opacity(0.5))
                 .multilineTextAlignment(.center)
                 .padding(.top, BrandScale.spaceSm)
+        }
+    }
+
+    /// Sends the reset email, saying the same thing whether or not the address is registered.
+    ///
+    /// Confirming that an address has an account is an enumeration oracle on an app that also
+    /// shows people's names and photos, so the success copy is deliberately non-committal — and
+    /// matches Android's word for word.
+    private func requestPasswordReset() {
+        formError = nil
+        let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            formError = "Enter your email address first, then tap this."
+            return
+        }
+        isSubmitting = true
+        Task {
+            await viewModel.sendPasswordReset(email: trimmed)
+            isSubmitting = false
+            viewModel.notify("If that address has an account, a reset link is on its way.")
         }
     }
 
