@@ -4097,8 +4097,22 @@ fun PostOfferScreen(viewModel: MainViewModel, navController: NavController) {
     var departureEpoch by rememberSaveable { mutableStateOf(calendar.timeInMillis) }
 
     var totalSeats by rememberSaveable { mutableStateOf("4") }
-    var costPerRider by rememberSaveable { mutableStateOf("15.00") }
+    // What the whole trip costs, not what one rider pays. The host knows the first figure — a tank
+    // of fuel, the tolls — and the app does the division; asking for a per-rider price was asking
+    // the host to do the one piece of arithmetic the product is named after.
+    var tripCost by rememberSaveable { mutableStateOf("60.00") }
     var womenOnly by rememberSaveable { mutableStateOf(false) }
+
+    // The preview under the two fields, recomputed as either is typed into. `perRiderShare` is the
+    // same shared function `postTripOffer` stores with, so this is the figure that gets saved and
+    // not an approximation of it.
+    val previewSeats = totalSeats.trim().toIntOrNull()
+    val previewCost = tripCost.trim().toDoubleOrNull()
+    val previewShare = if (previewCost != null && previewCost > 0.0 && previewSeats != null && previewSeats in 1..8) {
+        viewModel.perRiderShare(previewCost, previewSeats)
+    } else {
+        null
+    }
 
     val userVehicle = viewModel.getVehicleInfo(viewModel.currentUser.value?.id ?: "")
 
@@ -4302,11 +4316,11 @@ fun PostOfferScreen(viewModel: MainViewModel, navController: NavController) {
             }
 
             Row(modifier = Modifier.fillMaxWidth()) {
-                // Cost per rider
+                // Total trip cost — the app derives each rider's share from it.
                 OutlinedTextField(
-                    value = costPerRider,
-                    onValueChange = { costPerRider = it },
-                    label = { Text("Cost Per Rider ($)") },
+                    value = tripCost,
+                    onValueChange = { tripCost = it },
+                    label = { Text("Total Trip Cost ($)") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier
                         .weight(1f)
@@ -4363,6 +4377,37 @@ fun PostOfferScreen(viewModel: MainViewModel, navController: NavController) {
                 )
             }
 
+            // The split, shown as it is typed. Without this the host names a trip cost and has no
+            // idea what they are advertising until the ride is live.
+            if (previewShare != null && previewSeats != null) {
+                Spacer(modifier = Modifier.height(SplitCruiserSpacing.Sm))
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceMuted),
+                    shape = RoundedCornerShape(SplitCruiserRadius.Md),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("offer_split_preview")
+                ) {
+                    Column(modifier = Modifier.padding(SplitCruiserSpacing.Md)) {
+                        Text(
+                            text = "${formatContribution(previewShare)} each",
+                            color = SplitCruiserPrimary,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 20.sp
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            // `previewSeats + 1` says out loud that the driver pays a share too,
+                            // which is the whole difference between a split and a fare.
+                            text = "${formatContribution(previewCost ?: 0.0)} split ${previewSeats + 1} ways — " +
+                                "$previewSeats ${if (previewSeats == 1) "rider" else "riders"} and you.",
+                            color = SplitCruiserTextSecondary,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            }
+
             // Women Only Offer
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -4416,7 +4461,7 @@ fun PostOfferScreen(viewModel: MainViewModel, navController: NavController) {
                     // `costPerRider.toDoubleOrNull() ?: 10.0` posted a $10 ride for the input "abc",
                     // and `totalSeats.toIntOrNull() ?: 4` accepted "0", producing a ride with zero
                     // seats that nobody could ever join.
-                    val cost = costPerRider.trim().toDoubleOrNull()
+                    val cost = tripCost.trim().toDoubleOrNull()
                     val seats = totalSeats.trim().toIntOrNull()
                     val validationError = when {
                         origin.isBlank() -> "Where does the ride start?"
@@ -4427,12 +4472,16 @@ fun PostOfferScreen(viewModel: MainViewModel, navController: NavController) {
                             "Pick the destination from the suggestions so riders can find it."
                         departureEpoch <= System.currentTimeMillis() ->
                             "Choose a departure time in the future."
-                        costPerRider.isBlank() -> "What should each rider chip in?"
-                        cost == null -> "Enter the contribution as a number, like 12.50."
-                        cost < 0.0 -> "The contribution cannot be negative."
-                        cost > 500.0 -> "That contribution looks too high. The cap is $500."
+                        tripCost.isBlank() -> "What does the whole trip cost you?"
+                        cost == null -> "Enter the trip cost as a number, like 60.00."
+                        cost < 0.0 -> "The trip cost cannot be negative."
                         seats == null -> "Enter the number of seats as a whole number."
                         seats !in 1..8 -> "A ride can offer between 1 and 8 seats."
+                        // After the seat checks: the ceiling depends on how many ways the cost
+                        // divides, so it cannot be named until the seat count is known good.
+                        cost > viewModel.maxTripCost(seats) ->
+                            "A $seats-seat ride can split at most " +
+                                "$${viewModel.maxTripCost(seats).toInt()}."
                         else -> null
                     }
                     if (validationError != null) {
@@ -4455,7 +4504,11 @@ fun PostOfferScreen(viewModel: MainViewModel, navController: NavController) {
                             originLng = originLng,
                             destLat = destLat,
                             destLng = destLng,
-                            costPerRider = cost,
+                            // `costPerRider` is deliberately not set here — `postTripOffer`
+                            // derives it from `totalCost`, so there is exactly one place the
+                            // division happens and the stored share cannot drift from the
+                            // preview above.
+                            totalCost = cost,
                             totalSeats = seats,
                             seatsLeft = seats,
                             departureTime = epoch,
@@ -5174,9 +5227,52 @@ fun TripDetailScreen(id: String, type: String, viewModel: MainViewModel, navCont
                         Text("COST ALLOCATION", color = SplitCruiserPrimary, fontSize = 11.sp, fontWeight = FontWeight.Black)
                         Spacer(modifier = Modifier.height(12.dp))
                         
+                        // Where the price comes from, for rides posted with a whole-trip cost. A
+                        // rider seeing only "$15" cannot tell a fair split from a number the host
+                        // invented; showing the dividend and the divisor is the point of the
+                        // product. Older offers carry `totalCost == 0.0` and skip straight to the
+                        // share, which is all they ever had.
+                        if (offer.totalCost > 0.0) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Total Trip Cost:", color = SplitCruiserTextSecondary, fontSize = 13.sp)
+                                Text(
+                                    formatContribution(offer.totalCost),
+                                    color = SplitCruiserTextSecondary,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                            }
+                            Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Split:", color = SplitCruiserTextSecondary, fontSize = 13.sp)
+                                Text(
+                                    // The driver is one of the ways, which is why this is
+                                    // `totalSeats + 1` and not `totalSeats`.
+                                    "${offer.totalSeats + 1} ways (${offer.totalSeats} riders + host)",
+                                    color = SplitCruiserTextSecondary,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Suggested Gas Contribution:", color = SplitCruiserTextPrimary, fontSize = 13.sp)
+                            Text(
+                                if (offer.totalCost > 0.0) "Your Share:" else "Suggested Gas Contribution:",
+                                color = SplitCruiserTextPrimary,
+                                fontSize = 13.sp
+                            )
                             Text(formatContribution(offer.costPerRider), color = SplitCruiserTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        }
+
+                        Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Seats taken:", color = SplitCruiserTextSecondary, fontSize = 12.sp)
+                            Text(
+                                "${offer.totalSeats - offer.seatsLeft} of ${offer.totalSeats}",
+                                color = SplitCruiserTextSecondary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
                         }
 
                         Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {

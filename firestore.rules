@@ -86,7 +86,22 @@ service cloud.firestore {
     match /trip_offers/{offerId} {
       allow read: if isAuth();
 
-      allow create: if isAuth() && request.resource.data.hostId == request.auth.uid;
+      // Money bounds, matched to SplitCruiserRepository's MAX_CONTRIBUTION (500) and the
+      // seat-dependent trip-cost ceiling `maxTripCost` derives from it. The client validates these
+      // too, but client validation is a courtesy — a ride asking a million dollars a seat has to be
+      // refused by something a modified client cannot talk past.
+      //
+      // Deliberately bounds and not the exact split arithmetic
+      // (`costPerRider == totalCost / (totalSeats + 1)`). Kotlin's `Double` division and this
+      // engine's need not agree in the last bits, so an equality test here would reject writes the
+      // app makes correctly. What keeps the two in step is that exactly one function derives the
+      // share — `perRiderShare`, called from `postTripOffer` — and the update rule below stops any
+      // non-host from touching the result.
+      allow create: if isAuth() && request.resource.data.hostId == request.auth.uid &&
+        request.resource.data.get('costPerRider', 0) >= 0 &&
+        request.resource.data.get('costPerRider', 0) <= 500 &&
+        request.resource.data.get('totalCost', 0) >= 0 &&
+        request.resource.data.get('totalCost', 0) <= 500 * (request.resource.data.totalSeats + 1);
 
       // Joining a ride, accepting a match and declining one all change someone else's offer, so the
       // host is not the only allowed writer. But the previous rule let *any* authenticated user set
@@ -106,6 +121,12 @@ service cloud.firestore {
       //   3. passengers and passengerNames stay the same length. The client keeps two parallel
       //      arrays and the UI zips them, so a length mismatch silently pairs a name with the wrong
       //      rider — worth refusing at the door.
+      //
+      // `hasOnly` is also what fixes the price: `costPerRider` and `totalCost` are not in the list,
+      // so a rider taking a seat cannot rewrite what the ride costs on the way in. That is the
+      // enforcement half of the decision to derive the share once, at posting, rather than
+      // recomputing it as the manifest changes — a live share would have to be written on exactly
+      // this commit, by exactly the caller who must not be trusted with it.
       //
       // Exact seat *arithmetic* still cannot live here, because one passenger entry may consume
       // several seats (RideRequest.seatsNeeded), which this document does not record. The client

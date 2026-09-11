@@ -203,7 +203,7 @@ final class AppViewModel: ObservableObject {
         destLng: Double,
         departureTime: Date,
         totalSeats: Int,
-        costPerRider: Double,
+        totalCost: Double,
         womenOnly: Bool,
         vehicleInfo: String,
         exitLocation: String = ""
@@ -218,13 +218,27 @@ final class AppViewModel: ObservableObject {
                 destLng: destLng,
                 departureTime: departureTime.epochMillis,
                 totalSeats: Int32(totalSeats),
-                costPerRider: costPerRider,
+                totalCost: totalCost,
                 womenOnly: womenOnly,
                 vehicleInfo: vehicleInfo,
                 exitLocation: exitLocation
             )
             try await self.repository.postTripOffer(offer: offer)
         }
+    }
+
+    /// Each rider's share of a whole-trip cost, for the live preview under the post-offer form.
+    ///
+    /// The same shared function `postTripOffer` stores with, so the previewed figure is the stored
+    /// one — the reason this goes through `:shared` rather than being redone in Swift.
+    func perRiderShare(totalCost: Double, totalSeats: Int) -> Double {
+        repository.perRiderShare(totalCost: totalCost, totalSeats: Int32(totalSeats))
+    }
+
+    /// The trip-cost ceiling the repository enforces for a ride of this size, so the form can name
+    /// it in its error copy. Seat-dependent — see `SplitCruiserRepository.maxTripCost`.
+    func maxTripCost(totalSeats: Int) -> Double {
+        repository.maxTripCost(totalSeats: Int32(totalSeats))
     }
 
     func postRideRequest(

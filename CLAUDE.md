@@ -121,6 +121,19 @@ not evidence. Verify against a build.
   every PR. Add a case there for any rule you change — a Ktor `MockEngine` accepts every write, so
   the repository suite cannot tell you a rule would have rejected it. Four client writes shipped
   that a live Firestore denies, three of them swallowed by `runCatching`, for exactly that reason.
+- **The price is derived once, at posting, and riders cannot move it.** A host names
+  `TripOffer.totalCost` — what the trip costs them — and `postTripOffer` divides it by
+  `totalSeats + 1` (the driver travels too) via `perRiderShare`, which is the only place the
+  division happens. `costPerRider` is that result; no screen collects it and
+  `RideFactory.makeTripOffer` does not take it.
+  **It is deliberately not recomputed as seats fill.** A live share would have to be written on
+  the seat-booking commit, which `firestore.rules` confines to the four manifest fields — letting
+  it through would mean the rule verifying `totalCost / (passengers + 1)` in floating point
+  against arithmetic done in Kotlin, so the invariant would be either unenforced or flaky. It
+  would also move the price *up* under a rider who already agreed to it, the moment another rider
+  leaves. The cap on `totalCost` scales with the seat count (`maxTripCost`) because the bound that
+  actually binds is `MAX_CONTRIBUTION` on the derived share. Offers posted before the field
+  existed carry `totalCost == 0.0` and keep the per-rider figure they were typed with.
 - **Seat changes are conditional writes.** `claimSeat`/`releaseSeat` read the offer *and its
   `updateTime`*, then commit with a `currentDocument` precondition and retry on conflict. Anything
   that mutates `seatsLeft`/`passengers` must go through them; a plain `updateFields` reintroduces
@@ -145,7 +158,7 @@ not evidence. Verify against a build.
 - **`Theme.swift` reads the shared tokens through the Kotlin/Native ObjC export**
   (`SplitCruiserColors.shared.Primary`). That cannot be compile-checked on Linux; if the exported
   property names turn out to differ, it is a one-token fix, and the whole mapping is in one file.
-- Test coverage: 216 tests in `:shared`, 54 rules tests against the emulator (`rules-tests/`), 8 in
+- Test coverage: 222 tests in `:shared`, 67 rules tests against the emulator (`rules-tests/`), 8 in
   `functions/`, and 3 unit tests in `:app` (a Robolectric label check, a Roborazzi screenshot, and
   an arithmetic placeholder). CI compiles the androidTest suite and runs lint, but **nothing runs
   the instrumented tests** — that needs an emulator job, and the suite spent a long time not even
