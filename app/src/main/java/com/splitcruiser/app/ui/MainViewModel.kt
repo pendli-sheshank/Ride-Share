@@ -206,6 +206,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // --- Auth ---
+    /**
+     * Sends the Identity Toolkit password-reset email.
+     *
+     * `sendPasswordReset` has existed in `:shared` the whole time with no caller on either
+     * platform, so anyone who forgot their password was simply locked out of their account.
+     *
+     * [onSent] fires on success only, and the copy it drives must not reveal whether the address
+     * is registered — confirming that is an account-enumeration oracle on an app that also shows
+     * people's names and photos.
+     */
+    fun sendPasswordReset(email: String, onSent: () -> Unit) {
+        val loadingMessage = "Sending the reset link…"
+        if (!beginLoading(loadingMessage)) return
+        viewModelScope.launch {
+            try {
+                runCatching { repository.sendPasswordReset(email) }
+                    .onSuccess { onSent() }
+                    .onFailure { _uiError.value = it.message ?: "Could not send the reset email." }
+            } finally {
+                endLoading(loadingMessage)
+            }
+        }
+    }
+
     fun loginWithEmail(email: String, password: String, onFinished: (isNewUser: Boolean) -> Unit) {
         val loadingMessage = "Logging you in…"
         if (!beginLoading(loadingMessage)) return
@@ -452,10 +476,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun completeTrip(matchId: String) {
+    fun completeTrip(matchId: String, onSuccess: () -> Unit = {}) {
         viewModelScope.launch {
             runCatching { repository.completeTrip(matchId) }
+                .onSuccess { onSuccess() }
                 .onFailure { _uiError.value = it.message ?: "Failed to complete trip." }
+        }
+    }
+
+    /**
+     * Either party pulls out of a ride they had agreed on; the rider's seat goes back on the offer.
+     *
+     * The navigation callback only fires on success. The previous "complete trip" control
+     * navigated away unconditionally, so a rejected write looked exactly like a successful one.
+     */
+    fun cancelMatch(matchId: String, reason: String = "", onSuccess: () -> Unit = {}) {
+        viewModelScope.launch {
+            runCatching { repository.cancelMatch(matchId, reason) }
+                .onSuccess { onSuccess() }
+                .onFailure { _uiError.value = it.message ?: "Failed to leave this ride." }
         }
     }
 

@@ -292,6 +292,30 @@ final class AppViewModel: ObservableObject {
         await perform { try await self.repository.declineMatch(matchId: matchId) }
     }
 
+    /// The host marks a ride as having actually happened, which is what unlocks rating.
+    ///
+    /// iOS had no call site for this at all — Android's was a single unlabelled tick in the chat
+    /// toolbar — so an iOS host could never end a ride and neither party could ever rate it.
+    /// The shared side refuses the call from anyone but the host.
+    @discardableResult
+    func completeTrip(matchId: String) async -> Bool {
+        await perform("Wrapping up the ride…") {
+            try await self.repository.completeTrip(matchId: matchId)
+        }
+    }
+
+    /// Either party pulls out of a ride they had agreed on; the rider's seat goes back.
+    ///
+    /// `cancelMatch` had no caller on either platform, which is why a rider who had taken a seat
+    /// had no way to give it up: every `declineMatch` control is a host declining a *pending*
+    /// match, and the seat release there is guarded on `accepted`.
+    @discardableResult
+    func cancelMatch(matchId: String) async -> Bool {
+        await perform("Leaving the ride…") {
+            try await self.repository.cancelMatch(matchId: matchId)
+        }
+    }
+
     /// A driver taking a rider's request without having posted a ride of their own.
     ///
     /// The shared side mints the backing offer, which is what used to make this impossible: the

@@ -138,6 +138,15 @@ not evidence. Verify against a build.
   `updateTime`*, then commit with a `currentDocument` precondition and retry on conflict. Anything
   that mutates `seatsLeft`/`passengers` must go through them; a plain `updateFields` reintroduces
   the overbooking race, and the rules cannot catch it because both writers satisfy the bounds.
+- **A ride has exactly three endings, and each has one owner.** `declineMatch` is the host turning
+  down a *pending* request. `cancelMatch` is either party pulling out of an *accepted* one, and it
+  returns the seat — it used to set the status and stop, which is why a booked seat could never be
+  released by anyone: `releaseSeat`'s only caller was `declineMatch`, guarded on `accepted`, while
+  every `declineMatch` control is host-side on a `pending` match. `completeTrip` is the **host**
+  saying the trip happened; it settles one match and closes the offer only when nothing else on it
+  is still live, because it used to close the whole ride for every passenger on the strength of
+  one. Ratings are gated on `completed` alone — `accepted` used to qualify, so people could rate a
+  ride days before taking it, and `ratingAvg` is derived from that.
 - **The launcher icon and the in-app logo are both real artwork now**, generated from
   `assets/app-icon-source.png` by `scripts/generate-app-icon.py` — 41 files, byte-stable, so
   replacing the brand means replacing that one PNG and re-running it. The logo asset is inset so
@@ -158,7 +167,7 @@ not evidence. Verify against a build.
 - **`Theme.swift` reads the shared tokens through the Kotlin/Native ObjC export**
   (`SplitCruiserColors.shared.Primary`). That cannot be compile-checked on Linux; if the exported
   property names turn out to differ, it is a one-token fix, and the whole mapping is in one file.
-- Test coverage: 222 tests in `:shared`, 67 rules tests against the emulator (`rules-tests/`), 8 in
+- Test coverage: 227 tests in `:shared`, 79 rules tests against the emulator (`rules-tests/`), 8 in
   `functions/`, and 3 unit tests in `:app` (a Robolectric label check, a Roborazzi screenshot, and
   an arithmetic placeholder). CI compiles the androidTest suite and runs lint, but **nothing runs
   the instrumented tests** — that needs an emulator job, and the suite spent a long time not even

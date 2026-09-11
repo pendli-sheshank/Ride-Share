@@ -178,6 +178,35 @@ class SplitCruiserRepositoryTest {
         return SplitCruiserRepository(config, InMemoryStore(), engine)
     }
 
+    /**
+     * [scriptedBackend] plus a working `:runQuery` over the `trip_matches` in [documents].
+     *
+     * The default fake answers every query with an empty result, which is fine for the writes most
+     * tests assert on but useless for anything whose *decision* depends on a query — such as
+     * `completeTrip` deciding whether another rider is still on the ride. Without this a test of
+     * that decision would pass for the wrong reason: no siblings found because none were served.
+     *
+     * Deliberately unfiltered. A match query is either by `hostId` or by `riderId`, both of which
+     * the callers here satisfy, and modelling the filter would be modelling Firestore rather than
+     * testing the repository.
+     */
+    private fun backendServingMatchQueries(): (HttpRequestData) -> Pair<HttpStatusCode, String> {
+        val base = scriptedBackend()
+        return { request ->
+            val url = request.url.toString()
+            if (url.contains(":runQuery") && request.method.value == "POST") {
+                val rows = documents.keys
+                    .filter { it.startsWith("trip_matches/") }
+                    .joinToString(",") { key ->
+                        """{"document":${documentWithVersion(key, documents.getValue(key))}}"""
+                    }
+                HttpStatusCode.OK to "[$rows]"
+            } else {
+                base(request)
+            }
+        }
+    }
+
     /** A backend that accepts writes, serves whatever is in [documents], and finds nothing else. */
     private fun scriptedBackend(): (HttpRequestData) -> Pair<HttpStatusCode, String> = { request ->
         val url = request.url.toString()
@@ -743,6 +772,150 @@ class SplitCruiserRepositoryTest {
         assertEquals(listOf("Alex", "Kai"), names, "the remaining Alex must keep their name")
         assertEquals("1", fields["seatsLeft"]!!.jsonObject["integerValue"]!!.jsonPrimitive.content)
         assertEquals("active", fields["status"]!!.jsonObject["stringValue"]!!.jsonPrimitive.content)
+    }
+
+    // --- Leaving and completing a ride -------------------------------------------------------
+
+    /** A four-seat ride with two riders aboard, one of whom ("me") can try to leave. */
+    private fun seedAcceptedRideWithTwoPassengers() {
+        documents["trip_offers/offer_1"] = """
+            {"fields":{"id":{"stringValue":"offer_1"},"hostId":{"stringValue":"bo"},
+             "seatsLeft":{"integerValue":"2"},"totalSeats":{"integerValue":"4"},
+             "passengers":{"arrayValue":{"values":[{"stringValue":"me"},{"stringValue":"kai"}]}},
+             "passengerNames":{"arrayValue":{"values":[{"stringValue":"Ana"},{"stringValue":"Kai"}]}},
+             "status":{"stringValue":"active"}}}
+        """.trimIndent()
+        documents["ride_requests/req_1"] = """
+            {"fields":{"id":{"stringValue":"req_1"},"riderId":{"stringValue":"me"},
+             "seatsNeeded":{"integerValue":"1"},"status":{"stringValue":"matched"}}}
+        """.trimIndent()
+        documents["trip_matches/match_1"] = """
+            {"fields":{"id":{"stringValue":"match_1"},"hostId":{"stringValue":"bo"},
+             "riderId":{"stringValue":"me"},"riderName":{"stringValue":"Ana"},
+             "offerId":{"stringValue":"offer_1"},"requestId":{"stringValue":"req_1"},
+             "status":{"stringValue":"accepted"}}}
+        """.trimIndent()
+    }
+
+    /**
+     * The gap the whole of this change exists to close.
+     *
+     * `releaseSeat` was correct and had exactly one caller — `declineMatch`, guarded on
+     * `status == "accepted"`. But every `declineMatch` control on both platforms is a *host*
+     * declining a *pending* match, so that branch could never be entered from the product: a
+     * rider who had taken a seat had no way to give it back, and the seat was consumed for the
+     * life of the ride. `cancelMatch` was the function that should have done it and did not — it
+     * set the status and stopped, and had no caller anywhere either.
+     */
+    @Test
+    fun aRiderLeavingAnAcceptedRideGetsTheSeatBackOnTheOffer() = runTest {
+        seedAcceptedRideWithTwoPassengers()
+        val repo = signedIn(repository(scriptedBackend()))
+        repo.refreshNow()
+
+        repo.cancelMatch("match_1")
+
+        val fields = Json.parseToJsonElement(documents.getValue("trip_offers/offer_1"))
+            .jsonObject["fields"]!!.jsonObject
+        val ids = fields["passengers"]!!.jsonObject["arrayValue"]!!.jsonObject["values"]!!.jsonArray
+            .map { it.jsonObject["stringValue"]!!.jsonPrimitive.content }
+        assertEquals(listOf("kai"), ids, "the leaving rider comes off the manifest")
+        assertEquals("3", fields["seatsLeft"]!!.jsonObject["integerValue"]!!.jsonPrimitive.content)
+        assertEquals("cancelled", repo.getTripMatchById("match_1")?.status)
+    }
+
+    /** A pending match never reached the manifest, so leaving one must not invent a seat. */
+    @Test
+    fun leavingAPendingMatchDoesNotChangeTheSeatCount() = runTest {
+        seedAcceptedRideWithTwoPassengers()
+        documents["trip_matches/match_1"] = documents.getValue("trip_matches/match_1")
+            .replace("\"accepted\"", "\"pending\"")
+        val repo = signedIn(repository(scriptedBackend()))
+        repo.refreshNow()
+
+        repo.cancelMatch("match_1")
+
+        val fields = Json.parseToJsonElement(documents.getValue("trip_offers/offer_1"))
+            .jsonObject["fields"]!!.jsonObject
+        assertEquals("2", fields["seatsLeft"]!!.jsonObject["integerValue"]!!.jsonPrimitive.content)
+    }
+
+    /**
+     * `loadMatch` will fetch any match id, and the rules reject a non-participant's write — so
+     * without this check an unauthorised call failed late, remotely, and inside `runCatching`.
+     */
+    @Test
+    fun aStrangerCannotCancelSomeoneElsesMatch() = runTest {
+        seedAcceptedRideWithTwoPassengers()
+        documents["trip_matches/match_1"] = documents.getValue("trip_matches/match_1")
+            .replace("\"riderId\":{\"stringValue\":\"me\"}", "\"riderId\":{\"stringValue\":\"kai\"}")
+        val repo = signedIn(repository(scriptedBackend()))
+
+        val failure = assertFailsWith<SplitCruiserException> { repo.cancelMatch("match_1") }
+        assertContains(failure.message!!, "not part of this ride")
+    }
+
+    /**
+     * Completion is the host's statement that the trip happened, so only the host may make it.
+     *
+     * The control was an unlabelled tick in the chat toolbar that either party could press.
+     */
+    @Test
+    fun onlyTheHostCanMarkARideComplete() = runTest {
+        seedAcceptedRideWithTwoPassengers()
+        val repo = signedIn(repository(scriptedBackend()))
+        repo.refreshNow()
+
+        val failure = assertFailsWith<SplitCruiserException> { repo.completeTrip("match_1") }
+        assertContains(failure.message!!, "Only the host")
+        assertEquals("accepted", repo.getTripMatchById("match_1")?.status)
+    }
+
+    /**
+     * Completing one rider's trip must not close the ride for everyone else on it.
+     *
+     * It used to flip the whole *offer* to `completed` on the strength of a single match, so a
+     * four-seat ride ended the moment the first rider's journey was settled.
+     */
+    @Test
+    fun completingOneMatchLeavesTheOfferOpenWhileAnotherRiderIsStillOnIt() = runTest {
+        documents["trip_offers/offer_1"] = """
+            {"fields":{"id":{"stringValue":"offer_1"},"hostId":{"stringValue":"me"},
+             "seatsLeft":{"integerValue":"2"},"totalSeats":{"integerValue":"4"},
+             "passengers":{"arrayValue":{"values":[{"stringValue":"kai"},{"stringValue":"rae"}]}},
+             "passengerNames":{"arrayValue":{"values":[{"stringValue":"Kai"},{"stringValue":"Rae"}]}},
+             "status":{"stringValue":"active"}}}
+        """.trimIndent()
+        documents["trip_matches/match_1"] = """
+            {"fields":{"id":{"stringValue":"match_1"},"hostId":{"stringValue":"me"},
+             "riderId":{"stringValue":"kai"},"riderName":{"stringValue":"Kai"},
+             "offerId":{"stringValue":"offer_1"},"requestId":{"stringValue":"req_1"},
+             "status":{"stringValue":"accepted"},"timestamp":{"integerValue":"2"}}}
+        """.trimIndent()
+        documents["trip_matches/match_2"] = """
+            {"fields":{"id":{"stringValue":"match_2"},"hostId":{"stringValue":"me"},
+             "riderId":{"stringValue":"rae"},"riderName":{"stringValue":"Rae"},
+             "offerId":{"stringValue":"offer_1"},"requestId":{"stringValue":"req_2"},
+             "status":{"stringValue":"accepted"},"timestamp":{"integerValue":"1"}}}
+        """.trimIndent()
+        // The sibling check is a query, so it needs a backend that answers one.
+        val repo = signedIn(repository(backendServingMatchQueries()))
+        repo.refreshNow()
+
+        repo.completeTrip("match_1")
+
+        assertEquals("completed", repo.getTripMatchById("match_1")?.status)
+        assertEquals(
+            "active",
+            Json.parseToJsonElement(documents.getValue("trip_offers/offer_1"))
+                .jsonObject["fields"]!!.jsonObject["status"]!!.jsonObject["stringValue"]!!
+                .jsonPrimitive.content,
+            "Rae is still on this ride, so the offer must stay open",
+        )
+
+        // Once the last live match settles, the offer closes with it.
+        repo.completeTrip("match_2")
+        assertEquals("completed", repo.getTripOfferById("offer_1")?.status)
     }
 
     @Test

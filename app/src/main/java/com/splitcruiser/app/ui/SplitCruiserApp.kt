@@ -1050,6 +1050,39 @@ fun EmailPasswordLoginScreen(viewModel: MainViewModel, navController: NavControl
                     )
                 }
 
+                // Forgetting a password locked people out permanently: `sendPasswordReset` has
+                // been in `:shared` all along with no caller on either platform. Log-in only —
+                // there is nothing to reset while signing up.
+                if (!isSignUpMode) {
+                    TextButton(
+                        onClick = {
+                            val emailTrimmed = email.trim()
+                            if (emailTrimmed.isBlank()) {
+                                viewModel.setError("Enter your email address first, then tap this.")
+                            } else {
+                                viewModel.sendPasswordReset(emailTrimmed) {
+                                    // Deliberately does not say whether the address is registered:
+                                    // confirming that is an account-enumeration oracle on an app
+                                    // that also shows people's names and photos.
+                                    Toast.makeText(
+                                        context,
+                                        "If that address has an account, a reset link is on its way.",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
+                            }
+                        },
+                        modifier = Modifier.testTag("forgot_password_button")
+                    ) {
+                        Text(
+                            "Forgot your password?",
+                            color = SplitCruiserPrimary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
                 // Hidden rather than disabled when GOOGLE_WEB_CLIENT_ID is unset: without it the
                 // account picker fails at the tap with a Play Services error that means nothing
                 // to whoever is looking at it.
@@ -1708,12 +1741,16 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = if (selectedTab == "trips") "My Travel Schedule" else "Namaste, ${currentUser?.name ?: "Rider"}",
+                                text = when (selectedTab) {
+                                    "trips" -> "My Travel Schedule"
+                                    "chats" -> "Your conversations"
+                                    else -> "Namaste, ${currentUser?.name ?: "Rider"}"
+                                },
                                 color = SplitCruiserTextPrimary,
                                 fontSize = 20.sp,
                                 fontWeight = FontWeight.Black
                             )
-                            if (currentUser?.verifiedTier == "vouched" && selectedTab != "trips") {
+                            if (currentUser?.verifiedTier == "vouched" && selectedTab == "explore") {
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Icon(
                                     imageVector = Icons.Default.Verified,
@@ -1724,7 +1761,11 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                             }
                         }
                         Text(
-                            text = if (selectedTab == "trips") "Manage your hosted and joined rides" else dashboardSubtitle,
+                            text = when (selectedTab) {
+                                "trips" -> "Manage your hosted and joined rides"
+                                "chats" -> "Sort out pickups with the people you're riding with"
+                                else -> dashboardSubtitle
+                            },
                             color = SplitCruiserTextSecondary,
                             fontSize = 11.sp
                         )
@@ -1773,7 +1814,10 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                     }
                 }
 
-                if (selectedTab != "trips") {
+                // Explore only. "Find a ride / Give a ride" switches what the *feed* shows, so it
+                // has nothing to say on a list of conversations — it was `!= "trips"`, which put
+                // it above the new Chats tab too.
+                if (selectedTab == "explore") {
                     Spacer(modifier = Modifier.height(12.dp))
 
                     // Mode Selector Bar (Styled exactly like Design HTML rounded tab pills)
@@ -1842,11 +1886,11 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                 )
 
                 NavigationBarItem(
-                    selected = false,
-                    enabled = userMatches.isNotEmpty(),
-                    onClick = {
-                        userMatches.firstOrNull()?.let { navController.navigate("chat/${it.id}") }
-                    },
+                    // A real tab now, with a list behind it, rather than a shortcut into whichever
+                    // conversation happened to sort first. It also stays reachable with no matches
+                    // — the empty state explains why it is empty, which a disabled tab cannot.
+                    selected = selectedTab == "chats",
+                    onClick = { selectedTab = "chats" },
                     icon = {
                         // The dot only shows when there is actually a conversation to open. It
                         // used to be drawn unconditionally, so a user with no matches saw an
@@ -2110,6 +2154,16 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                     Spacer(modifier = Modifier.height(100.dp))
                 }
             }
+        } else if (selectedTab == "chats") {
+            // The Chats tab, which until now was not a tab at all: it navigated straight into
+            // `userMatches.firstOrNull()`, so with two rides running one conversation was simply
+            // unreachable, and which one you got depended on match ordering.
+            ConversationList(
+                matches = userMatches,
+                currentUserId = currentUser?.id.orEmpty(),
+                viewModel = viewModel,
+                onOpen = { navController.navigate("chat/$it") },
+            )
         } else {
             // A rider who has never hosted should not have to scroll past a "Rides you're
             // hosting" heading and its empty state to reach the rides they actually joined.
@@ -2895,6 +2949,130 @@ fun MyRideRequestCard(
                 }
             }
         }
+    }
+}
+
+/**
+ * Every conversation the signed-in user is part of.
+ *
+ * The Chats tab used to navigate into `userMatches.firstOrNull()`, so a user with two rides
+ * running could reach exactly one of them and had no way to tell which. Live rides sort to the
+ * top and finished ones stay reachable below, because the chat is where the pickup was agreed and
+ * people go back to it after the trip.
+ */
+@Composable
+private fun ConversationList(
+    matches: List<TripMatch>,
+    currentUserId: String,
+    viewModel: MainViewModel,
+    onOpen: (String) -> Unit,
+) {
+    // "Live" first — a ride you are still going on outranks one that has ended — then newest
+    // first inside each group.
+    val ordered = remember(matches) {
+        matches.sortedWith(
+            compareByDescending<TripMatch> { it.status == "accepted" || it.status == "pending" }
+                .thenByDescending { it.timestamp }
+        )
+    }
+
+    if (ordered.isEmpty()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = SplitCruiserSpacing.Lg),
+            verticalArrangement = Arrangement.Center
+        ) {
+            SplitCruiserEmptyState(
+                title = "No conversations yet",
+                description = "Once you reserve a seat or accept a rider, you'll get a chat here to " +
+                    "sort out where and when to meet.",
+                icon = Icons.Default.ChatBubbleOutline,
+                illustrationType = "joined"
+            )
+        }
+        return
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = SplitCruiserSpacing.Lg)
+    ) {
+        item { Spacer(modifier = Modifier.height(SplitCruiserSpacing.Md)) }
+
+        items(ordered, key = { it.id }) { match ->
+            val isHost = match.hostId == currentUserId
+            val offer = viewModel.getTripOfferById(match.offerId)
+            val counterpart = if (isHost) {
+                match.riderName.ifBlank { "Your rider" }
+            } else {
+                viewModel.getUserPublicProfile(match.hostId)?.displayName
+                    ?: offer?.hostName?.takeIf { it.isNotBlank() }
+                    ?: "Your host"
+            }
+            val route = if (offer != null && offer.origin.isNotBlank()) {
+                "${offer.origin} → ${offer.destination}"
+            } else {
+                "Ride details loading…"
+            }
+
+            Card(
+                onClick = { onOpen(match.id) },
+                colors = CardDefaults.cardColors(containerColor = SplitCruiserSurfaceCard),
+                shape = RoundedCornerShape(SplitCruiserRadius.Lg),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+                    .border(1.dp, SplitCruiserOutline, RoundedCornerShape(SplitCruiserRadius.Lg))
+            ) {
+                Row(
+                    modifier = Modifier.padding(SplitCruiserSpacing.Md),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ChatBubbleOutline,
+                        contentDescription = null,
+                        tint = SplitCruiserPrimary,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(SplitCruiserSpacing.Md))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = counterpart,
+                            color = SplitCruiserTextPrimary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = route,
+                            color = SplitCruiserTextSecondary,
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(SplitCruiserSpacing.Sm))
+                    // The status is the whole reason a finished chat is still worth opening, so
+                    // it is on the row rather than discoverable only inside.
+                    Text(
+                        text = match.status.replaceFirstChar { it.uppercase() },
+                        color = when (match.status) {
+                            "accepted" -> SplitCruiserSuccess
+                            "pending" -> SplitCruiserWarning
+                            "completed" -> SplitCruiserPrimary
+                            else -> SplitCruiserTextSecondary
+                        },
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+
+        item { Spacer(modifier = Modifier.height(100.dp)) }
     }
 }
 
@@ -6183,6 +6361,12 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
     }
     var confirmingProposalId by remember { mutableStateOf<String?>(null) }
 
+    // Both ways out of a ride are confirmed before they fire. Completing settles a rider's trip
+    // and unlocks rating them; leaving hands the seat back to someone else. Neither should happen
+    // on one stray tap of a toolbar icon, which is what the single unlabelled tick allowed.
+    var showCompleteConfirm by rememberSaveable { mutableStateOf(false) }
+    var showLeaveConfirm by rememberSaveable { mutableStateOf(false) }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -6221,15 +6405,32 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
                         Icon(imageVector = Icons.Default.Share, contentDescription = "Share", tint = SplitCruiserPrimary)
                     }
 
-                    // Complete Trip / Rating Action
-                    IconButton(onClick = {
-                        coroutineScope.launch {
-                            viewModel.completeTrip(matchId)
-                            // Prompt Rating dialog / screen
-                            navController.navigate("profile")
+                    // Ending the ride, split by who is allowed to do what.
+                    //
+                    // This was a single unlabelled tick that anyone in the chat could press. It
+                    // called `completeTrip` — which the repository now refuses for a non-host —
+                    // and navigated away unconditionally, so a rejected write looked identical to
+                    // a successful one. The rider's half of the lifecycle did not exist at all:
+                    // there was no way to give a seat back once it had been taken.
+                    val isHostOfThisMatch = currentMatch?.hostId == currentUser?.id
+                    val canEndRide = currentMatch?.status == "accepted"
+
+                    if (canEndRide && isHostOfThisMatch) {
+                        IconButton(onClick = { showCompleteConfirm = true }) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "Mark ride complete",
+                                tint = SplitCruiserSuccess
+                            )
                         }
-                    }) {
-                        Icon(imageVector = Icons.Default.Check, contentDescription = "Complete Trip", tint = SplitCruiserSuccess)
+                    } else if (canEndRide) {
+                        IconButton(onClick = { showLeaveConfirm = true }) {
+                            Icon(
+                                imageVector = Icons.Default.ExitToApp,
+                                contentDescription = "Leave this ride",
+                                tint = SplitCruiserDanger
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = SplitCruiserSurfaceCard)
@@ -6676,6 +6877,66 @@ fun ChatScreen(matchId: String, viewModel: MainViewModel, navController: NavCont
                 }
             }
         }
+    }
+
+    if (showCompleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showCompleteConfirm = false },
+            containerColor = SplitCruiserSurfaceCard,
+            title = { Text("Ride finished?", color = SplitCruiserTextPrimary, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "Mark this ride as done. You'll both be able to rate each other, and the seat " +
+                        "stays counted as used.",
+                    color = SplitCruiserTextSecondary,
+                    fontSize = 13.sp
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showCompleteConfirm = false
+                    // Navigates only on success: the previous control moved to the profile screen
+                    // whether or not the write landed.
+                    viewModel.completeTrip(matchId) { navController.navigate("profile") }
+                }) {
+                    Text("Mark complete", color = SplitCruiserSuccess, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCompleteConfirm = false }) {
+                    Text("Not yet", color = SplitCruiserTextSecondary)
+                }
+            }
+        )
+    }
+
+    if (showLeaveConfirm) {
+        AlertDialog(
+            onDismissRequest = { showLeaveConfirm = false },
+            containerColor = SplitCruiserSurfaceCard,
+            title = { Text("Leave this ride?", color = SplitCruiserTextPrimary, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "Your seat goes back on the ride for someone else, and your host is told. " +
+                        "You'd have to ask again to get back on.",
+                    color = SplitCruiserTextSecondary,
+                    fontSize = 13.sp
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showLeaveConfirm = false
+                    viewModel.cancelMatch(matchId) { navController.popBackStack() }
+                }) {
+                    Text("Leave ride", color = SplitCruiserDanger, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLeaveConfirm = false }) {
+                    Text("Stay", color = SplitCruiserTextSecondary)
+                }
+            }
+        )
     }
 
     if (showProposeDialog) {
@@ -7303,7 +7564,13 @@ fun ProfileScreen(viewModel: MainViewModel, navController: NavController) {
     val rateableCompanions = remember(userMatches, currentUser, ratedIds) {
         val me = currentUser?.id.orEmpty()
         userMatches
-            .filter { it.status == "accepted" || it.status == "completed" }
+            // `completed` only. "Accepted" means a seat is reserved, not that anyone has travelled
+            // together — this list offered a rating form the moment a host tapped accept, days
+            // before the ride, and `ratingAvg` is derived from what gets submitted here. It was
+            // only ever this permissive because `completeTrip` was effectively unreachable, so
+            // gating on `completed` alone would have emptied the list; now the host has a real
+            // control for it.
+            .filter { it.status == "completed" }
             .mapNotNull { match ->
                 val otherId = if (match.hostId == me) match.riderId else match.hostId
                 if (otherId.isBlank() || otherId == me) return@mapNotNull null
