@@ -628,6 +628,53 @@ class SplitCruiserRepository internal constructor(
         }
     }
 
+    /**
+     * Records where to reach this user's device when the app is closed.
+     *
+     * Both platforms call this with the token their messaging SDK hands them, and again whenever
+     * that token is rotated — a token is not permanent, and a stale one fails silently at send
+     * time rather than reporting anything to the user.
+     *
+     * Writes `users/{uid}/private/push`, **not** the user document. `users` is readable by every
+     * signed-in user, so a live push token there is a stable per-device identifier published to
+     * everyone who can open the app; `firestore.rules` had already flagged the `fcmToken` field
+     * for exactly this. The Cloud Function reads it with the Admin SDK, which bypasses the rules.
+     *
+     * Never throws. A device that cannot register should not be able to break a login — the cost
+     * is one person not getting notifications, which is where every account starts anyway.
+     */
+    suspend fun registerPushToken(token: String, platform: String) {
+        val uid = _currentUser.value?.id ?: return
+        if (token.isBlank()) return
+        val registration = PushRegistration(
+            token = token,
+            platform = platform,
+            updatedAt = serverClock.nowMs(),
+        )
+        runCatching {
+            firestore.setDocument(
+                "users/$uid/private",
+                PUSH_DOC,
+                registration,
+                serializer<PushRegistration>(),
+            )
+        }.onFailure { logWarn(LOG_TAG, "Could not register this device for notifications", it) }
+    }
+
+    /**
+     * Forgets this device, so the next person to sign in on it does not receive the previous
+     * user's notifications.
+     *
+     * Separate from [logout] rather than folded into it because [logout] is deliberately not a
+     * suspend function — it is called from lifecycle callbacks on both platforms — and this is a
+     * network write. Call it *before* logging out, while the credentials are still valid.
+     */
+    suspend fun unregisterPushToken() {
+        val uid = _currentUser.value?.id ?: return
+        runCatching { firestore.deleteDocument("users/$uid/private", PUSH_DOC) }
+            .onFailure { logWarn(LOG_TAG, "Could not unregister this device", it) }
+    }
+
     private suspend fun loadContactDetails(uid: String) {
         _contactDetails.value = runCatching {
             firestore.getDocument("users/$uid/private", CONTACT_DOC, serializer<ContactDetails>())
@@ -1293,13 +1340,52 @@ class SplitCruiserRepository internal constructor(
         recomputeFeeds()
     }
 
+    /**
+     * The host marks a ride as having actually happened.
+     *
+     * Three things were wrong with this, and they compounded. It checked nothing about who was
+     * calling, so any participant could end the ride from the chat screen's unlabelled tick. It
+     * had **one** call site in the whole product and none at all on iOS. And it closed the entire
+     * *offer* — for every passenger on it — on the strength of a single match, so a four-seat ride
+     * ended the moment the first rider's trip was marked done.
+     *
+     * Completion is a statement about one rider's journey, so it settles one match. The offer is
+     * closed only once nothing else on it is still live, and the check runs against a freshly
+     * refreshed match list rather than whatever the cache happened to hold: a host on a cold start
+     * would otherwise see no siblings and close a ride three other people were still on.
+     *
+     * Only the host can call it, because only the host is present for every pickup. That is also
+     * what makes `completed` worth gating ratings on — see the rating list in the profile screen,
+     * which used to accept `accepted` too and let people rate a ride they had not taken yet.
+     */
     @Throws(Exception::class)
     suspend fun completeTrip(matchId: String) {
+        val user = requireUser()
         val match = loadMatch(matchId)
+        if (match.hostId != user.id) {
+            throw SplitCruiserException("Only the host can mark this ride as complete.")
+        }
+        if (match.status != "accepted") {
+            throw SplitCruiserException("Only an accepted ride can be marked complete.")
+        }
+
         firestore.updateFields("trip_matches", matchId, buildFields("status" to stringValue("completed")))
         matches.value = matches.value + (matchId to match.copy(status = "completed"))
 
-        val offer = offers.value[match.offerId]
+        // `refreshMatches` re-reads by hostId, which for the host is every match on this offer.
+        // No new query shape, so no new index and nothing to re-check against the rules.
+        runCatching { refreshMatches() }
+        val stillRunning = matches.value.values.any {
+            it.offerId == match.offerId && it.id != matchId &&
+                (it.status == "accepted" || it.status == "pending")
+        }
+
+        // Read through to the network rather than off the cache alone. A cache-only read here
+        // meant a host completing a ride they had not polled — a cold start, a fresh login —
+        // silently skipped closing the offer, so the ride stayed in the feed advertising seats on
+        // a trip that had already happened. `declineMatch` had the identical bug on its seat
+        // return.
+        val offer = if (stillRunning) null else runCatching { loadOffer(match.offerId) }.getOrNull()
         if (offer != null) {
             firestore.updateFields(
                 "trip_offers",
@@ -1311,18 +1397,60 @@ class SplitCruiserRepository internal constructor(
         recomputeFeeds()
     }
 
+    /**
+     * Either party pulls out of a ride they had agreed on, and the seat goes back.
+     *
+     * The seat return is the fix. This set `status = "cancelled"` and stopped, so a cancelled
+     * *accepted* match left the rider on the manifest and the seat consumed for the life of the
+     * ride — the same leak `declineMatch` had, in the one function that was supposed to be the
+     * way out of a booked ride. It also had no caller anywhere on either platform, which is why
+     * nobody hit it: `releaseSeat` was reachable in principle and unreachable in practice, since
+     * every `declineMatch` call site is a host declining a *pending* match and the release there
+     * is guarded on `accepted`.
+     *
+     * Authorised to the two people on the match. `loadMatch` will happily return a stranger's
+     * match id, and the rules allow an update only from a participant, so an unauthorised call
+     * used to fail late, remotely, and inside `runCatching`.
+     */
     @Throws(Exception::class)
     suspend fun cancelMatch(matchId: String, reason: String) {
+        val user = requireUser()
         val match = loadMatch(matchId)
+        if (user.id != match.hostId && user.id != match.riderId) {
+            throw SplitCruiserException("You are not part of this ride.")
+        }
+        if (match.status == "completed") {
+            throw SplitCruiserException("This ride has already been completed.")
+        }
+
+        // Only an accepted match ever took a seat; a pending one never reached the manifest.
+        if (match.status == "accepted") {
+            val request = requests.value[match.requestId]
+                ?: runCatching { firestore.getDocument("ride_requests", match.requestId, serializer<RideRequest>()) }
+                    .getOrNull()
+            val released = releaseSeat(
+                offerId = match.offerId,
+                riderId = match.riderId,
+                seatsNeeded = request?.seatsNeeded ?: 1,
+            )
+            if (released != null) offers.value = offers.value + (released.id to released)
+        }
+
         firestore.updateFields("trip_matches", matchId, buildFields("status" to stringValue("cancelled")))
         matches.value = matches.value + (matchId to match.copy(status = "cancelled"))
         recomputeFeeds()
 
-        val other = if (_currentUser.value?.id == match.hostId) match.riderId else match.hostId
+        val leavingIsTheRider = user.id == match.riderId
+        val other = if (leavingIsTheRider) match.hostId else match.riderId
         sendNotificationAlert(
             targetUserId = other,
-            title = "Ride Cancelled",
-            message = if (reason.isBlank()) "A ride you were part of was cancelled." else reason,
+            title = if (leavingIsTheRider) "A rider left your ride" else "Ride Cancelled",
+            message = when {
+                reason.isNotBlank() -> reason
+                leavingIsTheRider -> "${match.riderName.ifBlank { "A rider" }} gave up their seat. " +
+                    "It is available again."
+                else -> "A ride you were part of was cancelled."
+            },
             type = "match",
         )
     }
@@ -2236,6 +2364,15 @@ class SplitCruiserRepository internal constructor(
     private companion object {
         /** The single document under `users/{uid}/private` that onboarding writes. */
         const val CONTACT_DOC = "profile"
+
+        /**
+         * Where this device's push registration lives, under the same private subcollection.
+         *
+         * `functions/src/fanOutNotifications.ts` reads this exact path with the Admin SDK. The two
+         * are only kept in step by this comment and that one — there is no shared constant across
+         * the Kotlin and TypeScript sides.
+         */
+        const val PUSH_DOC = "push"
 
         /** System-set statuses [closeIfExpired] may overwrite once departure has passed. */
         val AUTO_CLOSEABLE_OFFER_STATUSES = setOf("active", "full")

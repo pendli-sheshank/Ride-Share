@@ -352,12 +352,17 @@ struct RatingsCard: View {
     /// trap `BlockedListScreen` documents.
     @State private var ratedIds: Set<String> = []
 
-    /// The other party on every accepted or completed match, named without ever exposing an id.
+    /// The other party on every *completed* match, named without ever exposing an id.
+    ///
+    /// `accepted` used to qualify too, which meant a rating form appeared the moment a host
+    /// tapped accept — days before anyone travelled — and `ratingAvg` is derived from what gets
+    /// submitted here. It was only that permissive because `completeTrip` was effectively
+    /// unreachable; the host now has a real control for it, so `completed` means something.
     private var companions: [RatingCompanion] {
         guard let me = viewModel.currentUser?.id else { return [] }
         var seen = Set<String>()
         return viewModel.userMatches
-            .filter { $0.status == "accepted" || $0.status == "completed" }
+            .filter { $0.status == "completed" }
             .compactMap { match -> RatingCompanion? in
                 let wasHost = match.hostId != me
                 let otherId = wasHost ? match.hostId : match.riderId

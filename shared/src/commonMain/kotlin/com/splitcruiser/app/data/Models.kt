@@ -23,13 +23,39 @@ data class User(
     val noShowCount: Int = 0,
     val homeArea: String = "",
     val isWomenOnlyFilterEnabled: Boolean = false,
-    val fcmToken: String = "",
+    // `fcmToken` used to sit here and was referenced by nothing in any source file on either
+    // platform — the app had no push notifications at all. It is not revived here: `users/{uid}` is
+    // readable by every signed-in user, so a live push token on it would hand every user of the app
+    // a stable per-device identifier for everyone else. `firestore.rules` already warned about
+    // exactly this field. The registration lives in `users/{uid}/private/push` — see
+    // [PushRegistration] and `SplitCruiserRepository.registerPushToken` — for the same reason the
+    // home address lives under `private/`.
     val emailNotificationsEnabled: Boolean = false,
     val pushNotificationsEnabled: Boolean = false
 ) {
     val displayName: String
         get() = if (lastInitial.isNotEmpty()) "$name $lastInitial." else name
 }
+
+/**
+ * Where to reach a user's device when the app is closed.
+ *
+ * `users/{uid}/private/push`, never the user document: `users` is readable by every signed-in user,
+ * so a live push token there is a stable per-device identifier published to everyone. The Cloud
+ * Function that sends the notification reads this with the Admin SDK, which bypasses the rules.
+ *
+ * One device per account, deliberately. Multi-device would mean a collection keyed by installation
+ * id and a fan-out that prunes dead entries; one document is honest about what is implemented, and
+ * signing in on a new phone simply moves the registration.
+ */
+@Serializable
+data class PushRegistration(
+    val token: String = "",
+    /** "android" or "ios" — lets a future payload tune itself per platform. */
+    val platform: String = "",
+    /** Server-anchored, like every other timestamp the client writes. */
+    val updatedAt: Long = 0L,
+)
 
 /**
  * The details onboarding collects so a ride request can fill itself in.

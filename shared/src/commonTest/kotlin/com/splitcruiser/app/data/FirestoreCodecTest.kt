@@ -147,7 +147,6 @@ class FirestoreCodecTest {
             noShowCount = 1,
             homeArea = "Mission Hill",
             isWomenOnlyFilterEnabled = true,
-            fcmToken = "token",
             emailNotificationsEnabled = true,
             pushNotificationsEnabled = false
         )

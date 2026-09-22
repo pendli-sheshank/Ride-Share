@@ -1,3 +1,12 @@
 <resources>
     <string name="app_name">Split Cruiser</string>
+
+    <!--
+      Must match RIDE_CHANNEL_ID in functions/src/pushPayload.ts. The Cloud Function names this
+      channel on every message it sends, and a notification naming a channel that does not exist is
+      dropped by the system on API 26+ without an error.
+    -->
+    <string name="push_channel_id">split_cruiser_rides</string>
+    <string name="push_channel_name">Ride updates</string>
+    <string name="push_channel_description">Requests, acceptances, cancellations and chat messages for your rides.</string>
 </resources>

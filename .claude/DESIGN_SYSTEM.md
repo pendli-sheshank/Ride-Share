@@ -165,13 +165,11 @@ it, so until that changes this checklist is the mechanism.
 | Blocked users | `BlockedListScreen` | `BlockedListScreen` (`ProfileScreens.swift`) |
 | Host analytics | `HostDashboard` | `HostDashboardScreen` (`ProfileScreens.swift`) |
 
-**One deliberate structural difference**, recorded rather than accidental:
-
-- Android's bottom bar sends "Chats" straight into `userMatches.first()` and has no list behind
-  it, so every other conversation is unreachable from the bar. iOS keeps a `MatchesScreen` list.
-
-(Android's dead `host_dashboard` route used to be the second entry here. The Profile screen's
-safety section now links to it on both platforms.)
+(Two entries used to sit here as accepted structural differences, and both are now closed.
+Android's dead `host_dashboard` route — the Profile screen's safety section links to it on both
+platforms. And Android's "Chats" tab, which navigated straight into `userMatches.first()` with no
+list behind it, so with two rides running one conversation was simply unreachable: it is a real
+tab now, with `ConversationList` behind it, matching iOS's `MatchesScreen`.)
 
 ### Questions to answer before merging
 

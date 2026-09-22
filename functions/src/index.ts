@@ -5,3 +5,4 @@ initializeApp();
 export { autoCloseExpiredRides } from "./autoCloseExpiredRides";
 export { aggregateRating } from "./aggregateRating";
 export { aggregateNoShow } from "./aggregateNoShow";
+export { fanOutNotifications } from "./fanOutNotifications";
