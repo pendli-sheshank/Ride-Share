@@ -227,6 +227,38 @@ jobs:
           echo "Installed signing identities:"
           security find-identity -v -p codesigning "$keychain_path"
 
+      # --- Firebase configuration for push ----------------------------------------------
+      # Overwrites the committed placeholder GoogleService-Info.plist with the real one.
+      #
+      # The placeholder exists so the PR simulator build, which has no secrets, still finds the
+      # resource its Resources phase references. It carries API_KEY =
+      # PLACEHOLDER_NOT_CONFIGURED, which SplitCruiserPush.isConfigured checks: while that
+      # sentinel is in place the app never calls FirebaseApp.configure() and push stays off.
+      # So a release built without this secret ships an app whose notifications silently never
+      # arrive — which is why the step says so loudly rather than only skipping.
+      - name: Write GoogleService-Info.plist
+        env:
+          GOOGLE_SERVICE_INFO_PLIST: ${{ secrets.GOOGLE_SERVICE_INFO_PLIST }}
+        run: |
+          set -euo pipefail
+          plist="iosApp/iosApp/GoogleService-Info.plist"
+          if [ -z "${GOOGLE_SERVICE_INFO_PLIST:-}" ]; then
+            echo "::warning::GOOGLE_SERVICE_INFO_PLIST is not set. This build ships with the"
+            echo "::warning::placeholder, so push notifications will not work. Everything else"
+            echo "::warning::does — the backend is REST. See the release skill §4 step 6."
+            exit 0
+          fi
+          # printf, not a heredoc: a secret interpolated into a heredoc is re-parsed by the
+          # shell, which is how three earlier release failures were caused.
+          printf '%s' "$GOOGLE_SERVICE_INFO_PLIST" > "$plist"
+          plutil -lint "$plist"
+          if [ "$(/usr/libexec/PlistBuddy -c 'Print :API_KEY' "$plist")" = "PLACEHOLDER_NOT_CONFIGURED" ]; then
+            echo "::error::GOOGLE_SERVICE_INFO_PLIST still contains the placeholder sentinel."
+            echo "Put the real GoogleService-Info.plist from the Firebase console in the secret."
+            exit 1
+          fi
+          echo "Real Firebase configuration written for bundle $(/usr/libexec/PlistBuddy -c 'Print :BUNDLE_ID' "$plist")"
+
       # --- Version / build number -------------------------------------------------------
       # App Store Connect rejects a build whose CFBundleVersion it has already seen for this
       # CFBundleShortVersionString. run_number is monotonic per workflow, so it never repeats.

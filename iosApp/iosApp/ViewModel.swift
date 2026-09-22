@@ -187,7 +187,29 @@ final class AppViewModel: ObservableObject {
         await perform { try await self.repository.sendPasswordReset(email: email) }
     }
 
-    func logOut() {
+    /// Records this device so the Cloud Function can reach it when the app is closed.
+    ///
+    /// Writes `users/{uid}/private/push`, not the user document — `users/{uid}` is readable by
+    /// every signed-in user, so a live push token there is a stable per-device identifier
+    /// published to everyone. The shared repository swallows its own failures: a device that
+    /// cannot register is one person not getting notifications, not a reason to break a login.
+    func registerPushToken(token: String) async {
+        // `try?`, not `try`: a device that cannot register is one person not getting
+        // notifications, which is where every account starts. Kotlin exports every suspend
+        // fun as `async throws`, so the `try` is required even though this one cannot fail
+        // — the repository swallows its own errors.
+        try? await repository.registerPushToken(token: token, platform: "ios")
+    }
+
+    /// Forgets this device, then signs out.
+    ///
+    /// The order matters: `unregisterPushToken` is a network write and needs the credentials that
+    /// `logout` clears. Without it the registration outlives the session and the next person to
+    /// sign in on this phone receives the previous user's notifications. `logout` itself stays
+    /// synchronous — it is called from view code on both platforms — so the unregister is a
+    /// separate suspending call rather than folded into it.
+    func logOut() async {
+        try? await repository.unregisterPushToken()
         repository.logout()
         needsProfileSetup = false
     }

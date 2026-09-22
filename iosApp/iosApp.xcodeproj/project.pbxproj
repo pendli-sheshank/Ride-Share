@@ -12,6 +12,7 @@
 		12CF37E7513955BEA6F72112 /* LoadingViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED4B6BF6AB4E57F584A900BF /* LoadingViews.swift */; };
 		0DDFEDD2D1C85389B3236ADA /* AppRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB51A995D126594E833C6517 /* AppRouter.swift */; };
 		136897E3F6FD5E1CA21CB28A /* ViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D3D2A92B3975171BBB525B1 /* ViewModel.swift */; };
+		8A4BB46DC68457808AE88E8E /* PushNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F5854EB2DF95B298BF1A964 /* PushNotifications.swift */; };
 		7A96A302A995515E8B419FD8 /* LocationAutocompleteField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D74E8FBBBCF5E118164FF70 /* LocationAutocompleteField.swift */; };
 		3405091099EF5F7F8A4D0F2C /* TripCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1D84D980503594184843ACA /* TripCards.swift */; };
 		C74EBC44DB8854C78A5E7C94 /* ScheduleCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67BC6ECAE11A58B7B4E2D9FF /* ScheduleCards.swift */; };
@@ -26,6 +27,8 @@
 		41842331DC585BB2A741E495 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3D8261F990D35581B391804F /* Assets.xcassets */; };
 		C184793FE5BA565897EAA63B /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = F65FD96E2BE4530ABB6CC5CC /* LaunchScreen.storyboard */; };
 		FE3CC1D9C1405115968A1DFD /* Shared.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4D78B6A376685539B5276587 /* Shared.xcframework */; };
+		ABE9ADBC05335AC8BE3B8EAD /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 3343E62B9C6254E78351B7F1 /* GoogleService-Info.plist */; };
+		ABDC109F52705B0AB0AD17A2 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 75FF0156D51B508FA2D20134 /* FirebaseMessaging */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -36,6 +39,7 @@
 		ED4B6BF6AB4E57F584A900BF /* LoadingViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadingViews.swift; sourceTree = "<group>"; };
 		DB51A995D126594E833C6517 /* AppRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRouter.swift; sourceTree = "<group>"; };
 		3D3D2A92B3975171BBB525B1 /* ViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewModel.swift; sourceTree = "<group>"; };
+		9F5854EB2DF95B298BF1A964 /* PushNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushNotifications.swift; sourceTree = "<group>"; };
 		0D74E8FBBBCF5E118164FF70 /* LocationAutocompleteField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationAutocompleteField.swift; sourceTree = "<group>"; };
 		B1D84D980503594184843ACA /* TripCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripCards.swift; sourceTree = "<group>"; };
 		67BC6ECAE11A58B7B4E2D9FF /* ScheduleCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleCards.swift; sourceTree = "<group>"; };
@@ -51,6 +55,8 @@
 		3D8261F990D35581B391804F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F65FD96E2BE4530ABB6CC5CC /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		4D78B6A376685539B5276587 /* Shared.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = ../shared/build/XCFrameworks/release/Shared.xcframework; sourceTree = SOURCE_ROOT; };
+		3343E62B9C6254E78351B7F1 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
+		0517273EAD0059D8B7897F13 /* iosApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = iosApp.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -59,6 +65,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				FE3CC1D9C1405115968A1DFD /* Shared.xcframework in Frameworks */,
+				ABDC109F52705B0AB0AD17A2 /* FirebaseMessaging in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -91,6 +98,7 @@
 				ED4B6BF6AB4E57F584A900BF /* LoadingViews.swift */,
 				DB51A995D126594E833C6517 /* AppRouter.swift */,
 				3D3D2A92B3975171BBB525B1 /* ViewModel.swift */,
+				9F5854EB2DF95B298BF1A964 /* PushNotifications.swift */,
 				0D74E8FBBBCF5E118164FF70 /* LocationAutocompleteField.swift */,
 				B1D84D980503594184843ACA /* TripCards.swift */,
 				67BC6ECAE11A58B7B4E2D9FF /* ScheduleCards.swift */,
@@ -113,6 +121,8 @@
 				3D8261F990D35581B391804F /* Assets.xcassets */,
 				F65FD96E2BE4530ABB6CC5CC /* LaunchScreen.storyboard */,
 				FD81299CF3F35F7D9D3BE2F2 /* Info.plist */,
+				3343E62B9C6254E78351B7F1 /* GoogleService-Info.plist */,
+				0517273EAD0059D8B7897F13 /* iosApp.entitlements */,
 			);
 			name = Resources;
 			sourceTree = "<group>";
@@ -141,6 +151,9 @@
 			dependencies = (
 			);
 			name = iosApp;
+			packageProductDependencies = (
+				75FF0156D51B508FA2D20134 /* FirebaseMessaging */,
+			);
 			productName = iosApp;
 			productReference = 6C71546D770452B782C55EC1 /* iosApp.app */;
 			productType = "com.apple.product-type.application";
@@ -170,6 +183,9 @@
 				Base,
 			);
 			mainGroup = 539236F418005CACA85A4B3D;
+			packageReferences = (
+				C6DA764CB9E85234BC379B0D /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+			);
 			productRefGroup = 501D126131F25CC6A84EF187 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -186,6 +202,7 @@
 			files = (
 				41842331DC585BB2A741E495 /* Assets.xcassets in Resources */,
 				C184793FE5BA565897EAA63B /* LaunchScreen.storyboard in Resources */,
+				ABE9ADBC05335AC8BE3B8EAD /* GoogleService-Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -202,6 +219,7 @@
 				12CF37E7513955BEA6F72112 /* LoadingViews.swift in Sources */,
 				0DDFEDD2D1C85389B3236ADA /* AppRouter.swift in Sources */,
 				136897E3F6FD5E1CA21CB28A /* ViewModel.swift in Sources */,
+				8A4BB46DC68457808AE88E8E /* PushNotifications.swift in Sources */,
 				7A96A302A995515E8B419FD8 /* LocationAutocompleteField.swift in Sources */,
 				3405091099EF5F7F8A4D0F2C /* TripCards.swift in Sources */,
 				C74EBC44DB8854C78A5E7C94 /* ScheduleCards.swift in Sources */,
@@ -253,6 +271,7 @@
 				CLANG_WARN_SUSPICIOUS_MOVES = YES;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_ENTITLEMENTS = iosApp/iosApp.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
@@ -334,6 +353,7 @@
 				CLANG_WARN_SUSPICIOUS_MOVES = YES;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_ENTITLEMENTS = iosApp/iosApp.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = YES;
@@ -515,6 +535,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		C6DA764CB9E85234BC379B0D /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 11.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		75FF0156D51B508FA2D20134 /* FirebaseMessaging */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C6DA764CB9E85234BC379B0D /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseMessaging;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 8CEAA7618478518E8A407594 /* Project object */;
 }

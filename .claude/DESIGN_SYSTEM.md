@@ -164,6 +164,7 @@ it, so until that changes this checklist is the mechanism.
 | Profile editing | `EditProfileDialog` | `EditProfileSheet` (`ProfileScreens.swift`) |
 | Blocked users | `BlockedListScreen` | `BlockedListScreen` (`ProfileScreens.swift`) |
 | Host analytics | `HostDashboard` | `HostDashboardScreen` (`ProfileScreens.swift`) |
+| Push notifications | `SplitCruiserMessagingService` + `syncPushToken` | `AppDelegate` + `SplitCruiserPush` (`PushNotifications.swift`) |
 
 (Two entries used to sit here as accepted structural differences, and both are now closed.
 Android's dead `host_dashboard` route — the Profile screen's safety section links to it on both
@@ -185,6 +186,10 @@ tab now, with `ConversationList` behind it, matching iOS's `MatchesScreen`.)
       platforms call it, the way `perRiderShare` and `PlaceRanking` do. A figure previewed in a
       form and a figure stored by the repository must come from the same function, or they drift
       and the form quietly lies about what it is about to save.
+- [ ] **Does it ask the user for a system permission?** Ask at the same point in the flow on both
+      platforms, and never on the login screen. Android's `POST_NOTIFICATIONS` (API 33+) and
+      iOS's `UNUserNotificationCenter` prompt each give exactly one chance; a prompt with no
+      reason on screen is a permanent no. Both now ask on first reaching the dashboard.
 - [ ] Does it add developer instrumentation to a user-facing screen? Gate it: `BuildConfig.DEBUG`
       on Android, `#if DEBUG` on iOS.
 - [ ] **Does it add a second control that does what another control on the same screen already
