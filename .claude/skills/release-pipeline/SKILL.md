@@ -1509,6 +1509,58 @@ person understands why these lines look the way they do.**
   rules-test job, so a rules regression cannot be caught before it reaches the live project. Validate
   against a throwaway Firebase project before deploying, and consider adding a rules-test job.
 
+### 2026-09-26 — `Missing package product 'UserMessagingPlatform'`: a module name is not a product name
+**Symptom:** `Build iOS App` failed in seconds, before compiling any Swift, with the same line twice:
+
+```
+iosApp.xcodeproj: error: Missing package product 'UserMessagingPlatform'
+                         (in target 'iosApp' from project 'iosApp')
+```
+
+Note what was *not* in the error: `GoogleMobileAds`. The package resolved fine; only the second
+product was missing.
+
+**Cause:** the AdMob SPM package was given two `XCSwiftPackageProductDependency` objects,
+`GoogleMobileAds` and `UserMessagingPlatform`, on the belief that UMP ships as a second product of
+the same repository. It does not. `swift-package-manager-google-mobile-ads` declares **exactly one**
+product, `GoogleMobileAds` (verified in its `Package.swift` at tags `12.0.0`, `12.9.0` and `main`).
+UMP is a *separate* package, `swift-package-manager-google-user-messaging-platform`, whose **product**
+is `GoogleUserMessagingPlatform` while its binary xcframework — and therefore its Swift **module** —
+is `UserMessagingPlatform`. `import UserMessagingPlatform` names the module; there is no product by
+that name anywhere in the graph.
+
+**Fix:** drop the UMP product dependency. It arrives transitively as a dependency of
+`GoogleMobileAdsTarget`, and importing it by module name is Google's documented setup — their own
+samples add only the `GoogleMobileAds` product.
+
+**The expensive part was what the early failure hid.** Because the build died at the package graph,
+it never reached the Swift, so a second defect was invisible: the pin was
+`GOOGLE_MOBILE_ADS_SDK_MIN_VERSION = "12.0.0"`, and GMA 12's manifest constrains UMP to
+`"1.1.0"..<"3.0.0"`. UMP 2.x still uses the Objective-C-prefixed spellings
+(`UMPConsentInformation.sharedInstance`, `UMPConsentForm`, `UMPRequestParameters`), while `Ads.swift`
+uses the un-prefixed Swift names that Google's current docs publish and that arrived in UMP 3.x —
+admitted only by GMA 13's wider `..<"4.0.0"` range. So the pin moved to **13.0.0**, and it is a
+floor: lowering it breaks the consent flow rather than the build. Verifying that also turned up a
+third wrong name — the adaptive banner is `largeAnchoredAdaptiveBanner(width:)`;
+`currentOrientationAnchoredAdaptiveBanner` no longer exists in Swift, only as the legacy ObjC
+`GADCurrentOrientationAnchoredAdaptiveBannerAdSizeWithWidth`.
+
+**The lesson, which is the reusable part:** three SDK names, all written from memory, all wrong, and
+`verify-xcodeproj.py` passed on every one of them — it proves the pbxproj graph is internally
+consistent, not that a product exists in a remote package. For any SPM dependency, fetch the real
+manifest before wiring it up; it is one `curl` and it is authoritative:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/<owner>/<repo>/<tag>/Package.swift | grep -A6 'products:'
+```
+
+**If this recurs as `no such module 'UserMessagingPlatform'`** — meaning the transitive module is not
+on the search path after all — the answer is a *second* `XCRemoteSwiftPackageReference` for
+`https://github.com/googleads/swift-package-manager-google-user-messaging-platform.git` with product
+name `GoogleUserMessagingPlatform` (not `UserMessagingPlatform`), and a version range that intersects
+GMA 13's `1.1.0..<4.0.0`. Recorded here so it costs one round trip instead of this investigation
+again.
+
 ---
 
 ## 8. Pre-flight checklist before merging to `main`

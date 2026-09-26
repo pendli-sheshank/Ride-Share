@@ -31,7 +31,6 @@
 		ABE9ADBC05335AC8BE3B8EAD /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 3343E62B9C6254E78351B7F1 /* GoogleService-Info.plist */; };
 		ABDC109F52705B0AB0AD17A2 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 75FF0156D51B508FA2D20134 /* FirebaseMessaging */; };
 		5302F0882C4B5BCBAF950D55 /* GoogleMobileAds in Frameworks */ = {isa = PBXBuildFile; productRef = F97AA66B1E6C5AFBA8894EB0 /* GoogleMobileAds */; };
-		A911FC36E63055769FF215EE /* UserMessagingPlatform in Frameworks */ = {isa = PBXBuildFile; productRef = A1A654DE45FF5B9DBE6263C7 /* UserMessagingPlatform */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -71,7 +70,6 @@
 				FE3CC1D9C1405115968A1DFD /* Shared.xcframework in Frameworks */,
 				ABDC109F52705B0AB0AD17A2 /* FirebaseMessaging in Frameworks */,
 				5302F0882C4B5BCBAF950D55 /* GoogleMobileAds in Frameworks */,
-				A911FC36E63055769FF215EE /* UserMessagingPlatform in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -161,7 +159,6 @@
 			packageProductDependencies = (
 				75FF0156D51B508FA2D20134 /* FirebaseMessaging */,
 				F97AA66B1E6C5AFBA8894EB0 /* GoogleMobileAds */,
-				A1A654DE45FF5B9DBE6263C7 /* UserMessagingPlatform */,
 			);
 			productName = iosApp;
 			productReference = 6C71546D770452B782C55EC1 /* iosApp.app */;
@@ -561,7 +558,7 @@
 			repositoryURL = "https://github.com/googleads/swift-package-manager-google-mobile-ads.git";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 12.0.0;
+				minimumVersion = 13.0.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
@@ -576,11 +573,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = E8641F6C29EE527493C1359D /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */;
 			productName = GoogleMobileAds;
-		};
-		A1A654DE45FF5B9DBE6263C7 /* UserMessagingPlatform */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = E8641F6C29EE527493C1359D /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */;
-			productName = UserMessagingPlatform;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

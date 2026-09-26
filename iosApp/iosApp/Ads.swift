@@ -244,7 +244,7 @@ final class BannerAdContainer: UIView {
 
         bannerView?.removeFromSuperview()
 
-        let banner = BannerView(adSize: currentOrientationAnchoredAdaptiveBanner(width: pendingWidth))
+        let banner = BannerView(adSize: largeAnchoredAdaptiveBanner(width: pendingWidth))
         banner.adUnitID = unitId
         banner.rootViewController = root
         banner.translatesAutoresizingMaskIntoConstraints = false
@@ -274,6 +274,11 @@ final class BannerAdContainer: UIView {
 /// width to request the ad at and the width the banner's height is derived from. Reporting that
 /// height means the slot is the right size *before* the ad arrives, instead of growing under the
 /// reader's thumb when it does.
+///
+/// `largeAnchoredAdaptiveBanner(width:)` is the current SDK's anchored format.
+/// `currentOrientationAnchoredAdaptiveBanner` was its predecessor and no longer exists in Swift —
+/// only as the legacy Objective-C `GADCurrentOrientationAnchoredAdaptiveBannerAdSizeWithWidth`.
+/// The height comes from the returned `AdSize`, so switching formats needs no layout change here.
 private struct BannerAd: UIViewRepresentable {
     let unitId: String
 
@@ -296,7 +301,7 @@ private struct BannerAd: UIViewRepresentable {
         container.apply(unitId: unitId, width: width)
         return CGSize(
             width: width,
-            height: currentOrientationAnchoredAdaptiveBanner(width: width).size.height
+            height: largeAnchoredAdaptiveBanner(width: width).size.height
         )
     }
 }

@@ -220,9 +220,17 @@ not evidence. Verify against a build.
   **`SKAdNetworkItems` is scraped, never written from memory** — ~50 ids from
   `developers.google.com/admob/ios/ios14`, and a stale list loses install attribution silently.
   `verify-info-plist.py` checks it is well-formed; nothing can check it is current.
-  **`generate-project.py` emits one package reference and two products** for
-  `swift-package-manager-google-mobile-ads` (`GoogleMobileAds` + `UserMessagingPlatform`). A second
-  package reference for the second product resolves and then fails as a duplicate-package conflict.
+  **`generate-project.py` emits one package reference and one product**,
+  `GoogleMobileAds` — that package declares no others. UMP is a *separate* package whose product is
+  `GoogleUserMessagingPlatform` while its module is `UserMessagingPlatform`; it arrives transitively
+  and `Ads.swift` imports it by module name, which is Google's documented setup. Declaring a
+  product dependency on `UserMessagingPlatform` fails the build with "Missing package product" —
+  that is a module name, not a product name. **The pin must stay at GMA 13+**: GMA 12 constrains UMP
+  to `<3.0.0`, which is the prefixed `UMPConsentInformation.sharedInstance` era, and lowering it
+  breaks the consent flow rather than the build. Adaptive banners are
+  `largeAnchoredAdaptiveBanner(width:)`; `currentOrientationAnchoredAdaptiveBanner` is gone from
+  Swift. Check the SDK's `Package.swift` and current docs before changing any of these names — every
+  one of them was got wrong from memory first.
   **Placement is shared, rendering is not.** `AdSlotting` in `:shared` decides which ride indices
   an ad card follows, so both platforms place them identically — the same reason `PlaceRanking`
   and `perRiderShare` are shared. Ads appear on the browse feed only: never on chat (a pickup
