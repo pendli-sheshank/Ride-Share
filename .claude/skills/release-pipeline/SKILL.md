@@ -102,8 +102,20 @@ once they exist.
 | `PLAY_SERVICE_ACCOUNT_JSON` | full service-account JSON, raw (not base64) |
 | `GOOGLE_SERVICES_JSON` | contents of `google-services.json`. **Required for push notifications.** Without it the release build has no `FirebaseApp`, `SplitCruiserNotifications.currentToken` returns null, and no device ever registers — silently, by design, so a debug build without it still runs. Everything else in the app works without it, since the backend is REST. |
 | `ADMOB_APP_ID` | AdMob application id (`ca-app-pub-…~…`) → the `admobAppId` manifest placeholder **and** `BuildConfig.ADMOB_APP_ID`. **Optional.** Unset, the build falls back to Google's public sample id so the app still launches — the ads SDK crashes at init on a missing application id — and `SplitCruiserAds.isEnabled` is false, so no ad slot is drawn at all. |
-| `ADMOB_BANNER_UNIT_ID` | Ad unit for the anchored banner on the browse feed. Optional; debug builds always use Google's test unit regardless, because a developer clicking live inventory is how an AdMob account gets suspended. |
-| `ADMOB_FEED_UNIT_ID` | Ad unit for the in-feed sponsored card. Same rules. |
+| `ADMOB_BANNER_UNIT_ID` | **Android's** ad unit for the anchored banner on the browse feed. Optional; debug builds always use Google's test unit regardless, because a developer clicking live inventory is how an AdMob account gets suspended. |
+| `ADMOB_FEED_UNIT_ID` | **Android's** ad unit for the in-feed sponsored card. Same rules. |
+
+### AdMob — iOS only
+
+An AdMob ad unit belongs to **one app**, and an app is one platform, so iOS needs its own three
+values. There is no shared unit id, and getting this wrong fails the quiet way: an iOS app
+requesting an Android unit id gets **no fill** — not an error, just a slot that never fills.
+
+| Secret | Where it goes |
+|---|---|
+| `ADMOB_IOS_APP_ID` | AdMob **iOS** application id (`ca-app-pub-…~…`) → `GADApplicationIdentifier` in `Info.plist`, written by `ios-release.yml`. **Optional.** Unset, the committed plist keeps Google's sample iOS id — which is both a working placeholder (a missing or malformed id makes `MobileAds.shared.start` raise `GADInvalidInitializationException`) and the sentinel `SplitCruiserAds.isEnabled` tests, so no ad slot is drawn. Not the Firebase iOS app id, and not the Android AdMob id. |
+| `ADMOB_IOS_BANNER_UNIT_ID` | iOS ad unit for the anchored banner → `SCAdBannerUnitId`. Optional; empty means Google's test unit, and debug builds use the test unit regardless. |
+| `ADMOB_IOS_FEED_UNIT_ID` | iOS ad unit for the in-feed card → `SCAdFeedUnitId`. Same rules. |
 
 ### Firebase — used by **both** platforms
 
@@ -263,13 +275,23 @@ a broken one.
    Firebase). Linking is what lets one project cover both.
 2. Register **both apps** — Android `com.splitcruiser.app` and the iOS bundle id. Each gets its own
    application id; they are not interchangeable, and the iOS one goes in `ADMOB_IOS_APP_ID`.
-3. Create the ad units: one banner per platform for the anchored feed banner, one per platform for
-   the in-feed card. Put them in `ADMOB_BANNER_UNIT_ID` / `ADMOB_FEED_UNIT_ID`.
+3. Create the ad units: **four in total** — a banner and an in-feed unit under *each* app. A unit
+   belongs to one app, so there is no sharing them; an iOS app requesting an Android unit id gets
+   no fill rather than an error. Android's go in `ADMOB_BANNER_UNIT_ID` / `ADMOB_FEED_UNIT_ID`,
+   iOS's in `ADMOB_IOS_BANNER_UNIT_ID` / `ADMOB_IOS_FEED_UNIT_ID`.
 4. AdMob → Privacy & messaging → **create a GDPR message** and publish it. The UMP SDK in the app
-   fetches this; with no published message `loadAndShowConsentFormIfRequired` has nothing to show,
-   and in the EEA/UK `canRequestAds()` then stays false, so no ads serve. This step is the one most
-   easily missed, because the app behaves correctly — it just earns nothing.
-5. **Update Play's Data Safety form and the App Store privacy label.** Ads means collecting an
+   fetches this; with no published message `loadAndShowConsentFormIfRequired` (Android) and
+   `ConsentForm.loadAndPresentIfRequired` (iOS) have nothing to show, and in the EEA/UK
+   `canRequestAds` then stays false, so no ads serve. One published message covers both platforms.
+   This step is the one most easily missed, because the app behaves correctly — it just earns
+   nothing.
+5. Refresh `SKAdNetworkItems` in `iosApp/iosApp/Info.plist` from
+   <https://developers.google.com/admob/ios/ios14> if it has been a while. iOS install attribution
+   runs through those identifiers whenever the IDFA is unavailable, which is most of the time.
+   Google adds buyers over time and a stale list loses attribution **silently** — it never fails a
+   build, and `verify-info-plist.py` can only check the list is well-formed, not that it is
+   current. Scrape the page; never reconstruct it from memory.
+6. **Update Play's Data Safety form and the App Store privacy label.** Ads means collecting an
    advertising identifier, and both stores reject a submission whose declaration does not match the
    SDKs in the binary. This is a store rejection, not a runtime failure.
 

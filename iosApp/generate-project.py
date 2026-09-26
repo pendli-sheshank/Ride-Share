@@ -29,6 +29,21 @@ _ID_NAMESPACE = uuid.UUID("6f1a9c3e-58d2-4a7b-9e14-2c8d5b0f7a63")
 # on first resolve.
 FIREBASE_IOS_SDK_MIN_VERSION = "11.0.0"
 
+# The Google Mobile Ads SDK, also by Swift Package Manager, for ads on the browse feed.
+#
+# The second and last native-SDK exception, for the same reason as push: there is no REST path
+# for ad serving — an ad has to be requested and rendered by the platform SDK. `:shared` still
+# speaks REST for auth, Firestore and Storage, and `AdSlotting` in `:shared` is what keeps the
+# two platforms placing ads at identical indices.
+#
+# **One package reference, two products.** `GoogleMobileAds` serves the ads;
+# `UserMessagingPlatform` is the consent (UMP) SDK, and it has to run *before* the ads SDK
+# starts — see Ads.swift. They ship from the same repository, so there is one
+# XCRemoteSwiftPackageReference and two XCSwiftPackageProductDependency objects pointing at it.
+# Emitting a second package reference for the second product is the mistake to avoid here:
+# Xcode resolves both and then reports a duplicate-package conflict.
+GOOGLE_MOBILE_ADS_SDK_MIN_VERSION = "12.0.0"
+
 
 def generate_id(name, length=24):
     """Stable identifier for a pbxproj object, derived from its role."""
@@ -56,6 +71,8 @@ SWIFT_SOURCES = [
     "LocationAutocompleteField.swift",
     "TripCards.swift",
     "ScheduleCards.swift",
+    # Ads. Owns the SDK surface and the two ad views, so it sits above the screens that draw them.
+    "Ads.swift",
     # Screens.
     "ContentView.swift",
     "ExploreFeed.swift",
@@ -128,6 +145,14 @@ def create_xcode_project():
         "firebase_package": generate_id("firebase_package"),
         "firebase_messaging_product": generate_id("firebase_messaging_product"),
         "firebase_messaging_build": generate_id("firebase_messaging_build"),
+        # Ads. Same four-object shape as Firebase above, except that one package reference feeds
+        # *two* products, so there are two product dependencies and two build files against a
+        # single XCRemoteSwiftPackageReference.
+        "admob_package": generate_id("admob_package"),
+        "google_mobile_ads_product": generate_id("google_mobile_ads_product"),
+        "google_mobile_ads_build": generate_id("google_mobile_ads_build"),
+        "ump_product": generate_id("ump_product"),
+        "ump_build": generate_id("ump_build"),
         "google_services_plist_ref": generate_id("google_services_plist_ref"),
         "google_services_plist": generate_id("google_services_plist"),
         "entitlements_ref": generate_id("entitlements_ref"),
@@ -173,6 +198,8 @@ def create_xcode_project():
 		{ids['shared_framework_build']} /* Shared.xcframework in Frameworks */ = {{isa = PBXBuildFile; fileRef = {ids['shared_framework_ref']} /* Shared.xcframework */; }};
 		{ids['google_services_plist']} /* GoogleService-Info.plist in Resources */ = {{isa = PBXBuildFile; fileRef = {ids['google_services_plist_ref']} /* GoogleService-Info.plist */; }};
 		{ids['firebase_messaging_build']} /* FirebaseMessaging in Frameworks */ = {{isa = PBXBuildFile; productRef = {ids['firebase_messaging_product']} /* FirebaseMessaging */; }};
+		{ids['google_mobile_ads_build']} /* GoogleMobileAds in Frameworks */ = {{isa = PBXBuildFile; productRef = {ids['google_mobile_ads_product']} /* GoogleMobileAds */; }};
+		{ids['ump_build']} /* UserMessagingPlatform in Frameworks */ = {{isa = PBXBuildFile; productRef = {ids['ump_product']} /* UserMessagingPlatform */; }};
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -193,6 +220,8 @@ def create_xcode_project():
 			files = (
 				{ids['shared_framework_build']} /* Shared.xcframework in Frameworks */,
 				{ids['firebase_messaging_build']} /* FirebaseMessaging in Frameworks */,
+				{ids['google_mobile_ads_build']} /* GoogleMobileAds in Frameworks */,
+				{ids['ump_build']} /* UserMessagingPlatform in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		}};
@@ -263,6 +292,8 @@ def create_xcode_project():
 			name = iosApp;
 			packageProductDependencies = (
 				{ids['firebase_messaging_product']} /* FirebaseMessaging */,
+				{ids['google_mobile_ads_product']} /* GoogleMobileAds */,
+				{ids['ump_product']} /* UserMessagingPlatform */,
 			);
 			productName = iosApp;
 			productReference = {ids['app_product']} /* iosApp.app */;
@@ -295,6 +326,7 @@ def create_xcode_project():
 			mainGroup = {ids['main_group']};
 			packageReferences = (
 				{ids['firebase_package']} /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+				{ids['admob_package']} /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */,
 			);
 			productRefGroup = {ids['products_group']} /* Products */;
 			projectDirPath = "";
@@ -638,6 +670,14 @@ def create_xcode_project():
 				minimumVersion = {FIREBASE_IOS_SDK_MIN_VERSION};
 			}};
 		}};
+		{ids['admob_package']} /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */ = {{
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/googleads/swift-package-manager-google-mobile-ads.git";
+			requirement = {{
+				kind = upToNextMajorVersion;
+				minimumVersion = {GOOGLE_MOBILE_ADS_SDK_MIN_VERSION};
+			}};
+		}};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -645,6 +685,16 @@ def create_xcode_project():
 			isa = XCSwiftPackageProductDependency;
 			package = {ids['firebase_package']} /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseMessaging;
+		}};
+		{ids['google_mobile_ads_product']} /* GoogleMobileAds */ = {{
+			isa = XCSwiftPackageProductDependency;
+			package = {ids['admob_package']} /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */;
+			productName = GoogleMobileAds;
+		}};
+		{ids['ump_product']} /* UserMessagingPlatform */ = {{
+			isa = XCSwiftPackageProductDependency;
+			package = {ids['admob_package']} /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */;
+			productName = UserMessagingPlatform;
 		}};
 /* End XCSwiftPackageProductDependency section */
 	}};

@@ -180,7 +180,7 @@ it, so until that changes this checklist is the mechanism.
 | Blocked users | `BlockedListScreen` | `BlockedListScreen` (`ProfileScreens.swift`) |
 | Host analytics | `HostDashboard` | `HostDashboardScreen` (`ProfileScreens.swift`) |
 | Push notifications | `SplitCruiserMessagingService` + `syncPushToken` | `AppDelegate` + `SplitCruiserPush` (`PushNotifications.swift`) |
-| Ads on the browse feed | `AnchoredFeedBanner` + `FeedAdCard` (`ads/AdViews.kt`) | *pending — stage 2* |
+| Ads on the browse feed | `AnchoredFeedBanner` + `FeedAdCard` (`ads/AdViews.kt`) | `AnchoredFeedBanner` + `FeedAdCard` (`Ads.swift`) |
 
 (Two entries used to sit here as accepted structural differences, and both are now closed.
 Android's dead `host_dashboard` route — the Profile screen's safety section links to it on both

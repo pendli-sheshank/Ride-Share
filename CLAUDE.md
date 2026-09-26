@@ -205,8 +205,24 @@ not evidence. Verify against a build.
   nothing self-initialises from a ContentProvider at process start, and
   `SplitCruiserAds.ensureConsentThenInitialize` (UMP, then `MobileAds.initialize`) is the only
   call that starts it. Serving a personalised ad in the EEA/UK without a consent decision is a
-  policy violation, and the SDK will do it happily if initialised first. On iOS the order is UMP
-  **then** ATT, which is Google's documented sequence.
+  policy violation, and the SDK will do it happily if initialised first.
+  **On iOS the order is UMP, then ATT, then `MobileAds.shared.start`** — Google's documented
+  sequence, and backwards means asking for the advertising identifier before a consent decision
+  exists. `Ads.swift` holds all of it; `ContentView` calls it from the same `phase == .dashboard`
+  hook that asks for notification permission.
+  **iOS carries a second sample-id sentinel, in `Info.plist`.** `GADApplicationIdentifier` ships as
+  Google's sample *iOS* id, which is both a working placeholder — a missing or malformed id makes
+  `MobileAds.shared.start` raise `GADInvalidInitializationException` — and what
+  `SplitCruiserAds.isEnabled` tests. The release workflow overwrites it from `ADMOB_IOS_APP_ID`.
+  **Ad unit ids are per-app, so per-platform**: `ADMOB_IOS_BANNER_UNIT_ID` /
+  `ADMOB_IOS_FEED_UNIT_ID` are separate secrets, landing in `SCAdBannerUnitId` / `SCAdFeedUnitId`,
+  because an iOS app requesting an Android unit id gets no fill rather than an error.
+  **`SKAdNetworkItems` is scraped, never written from memory** — ~50 ids from
+  `developers.google.com/admob/ios/ios14`, and a stale list loses install attribution silently.
+  `verify-info-plist.py` checks it is well-formed; nothing can check it is current.
+  **`generate-project.py` emits one package reference and two products** for
+  `swift-package-manager-google-mobile-ads` (`GoogleMobileAds` + `UserMessagingPlatform`). A second
+  package reference for the second product resolves and then fails as a duplicate-package conflict.
   **Placement is shared, rendering is not.** `AdSlotting` in `:shared` decides which ride indices
   an ad card follows, so both platforms place them identically — the same reason `PlaceRanking`
   and `perRiderShare` are shared. Ads appear on the browse feed only: never on chat (a pickup

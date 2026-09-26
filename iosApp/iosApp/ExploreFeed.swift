@@ -163,7 +163,11 @@ struct ExploreFeed: View {
                 }
             )
         } else {
-            ForEach(offers, id: \.id) { offer in
+            // Which rides an ad card follows comes from `AdSlotting` in `:shared`, so Android and
+            // iOS place them at identical indices. Enumerated rather than keyed on `offer.id`
+            // alone because the slot is a property of the *position*, not of the ride.
+            let adSlots = viewModel.adSlotIndices(rideCount: offers.count)
+            ForEach(Array(offers.enumerated()), id: \.element.id) { index, offer in
                 TripOfferCard(
                     offer: offer,
                     cta: cta(for: offer),
@@ -171,6 +175,7 @@ struct ExploreFeed: View {
                     onJoin: { join(offer) },
                     onTap: { router.push(.tripDetail(id: offer.id, kind: .offer)) }
                 )
+                if adSlots.contains(index) { FeedAdCard() }
             }
         }
     }
