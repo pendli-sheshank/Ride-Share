@@ -192,10 +192,29 @@ not evidence. Verify against a build.
   `aps-environment` entitlement means **the App ID must have Push Notifications enabled and the
   provisioning profile regenerated**, or the release archive fails to sign; the PR simulator
   build is unaffected (`CODE_SIGNING_ALLOWED=NO`).
+- **Ads are the second and last native-SDK exception.** `play-services-ads` +
+  `user-messaging-platform` on `:app`; iOS pulls `googleads-mobile-sdk` by SPM. There is no REST
+  path for ad serving, same as push. The *data* SDKs still stay out.
+  **`ADMOB_APP_ID` has a sample-id default and that is load-bearing.** With `play-services-ads` on
+  the classpath and no `com.google.android.gms.ads.APPLICATION_ID` meta-data, the SDK throws at
+  init and **the app dies on launch** — so `app/build.gradle.kts` defaults the manifest
+  placeholder to Google's public sample id. That same sample id is the sentinel
+  `SplitCruiserAds.isEnabled` tests, so an unconfigured build draws no ad slots at all rather
+  than test ads in production-looking layout.
+  **Consent runs before the SDK starts.** The manifest sets `DELAY_APP_MEASUREMENT_INIT=true` so
+  nothing self-initialises from a ContentProvider at process start, and
+  `SplitCruiserAds.ensureConsentThenInitialize` (UMP, then `MobileAds.initialize`) is the only
+  call that starts it. Serving a personalised ad in the EEA/UK without a consent decision is a
+  policy violation, and the SDK will do it happily if initialised first. On iOS the order is UMP
+  **then** ATT, which is Google's documented sequence.
+  **Placement is shared, rendering is not.** `AdSlotting` in `:shared` decides which ride indices
+  an ad card follows, so both platforms place them identically — the same reason `PlaceRanking`
+  and `perRiderShare` are shared. Ads appear on the browse feed only: never on chat (a pickup
+  being agreed with a stranger) or ride detail (the host's contact and safety information).
 - **`Theme.swift` reads the shared tokens through the Kotlin/Native ObjC export**
   (`SplitCruiserColors.shared.Primary`). That cannot be compile-checked on Linux; if the exported
   property names turn out to differ, it is a one-token fix, and the whole mapping is in one file.
-- Test coverage: 232 tests in `:shared`, 83 rules tests against the emulator (`rules-tests/`), 23 in
+- Test coverage: 240 tests in `:shared`, 83 rules tests against the emulator (`rules-tests/`), 23 in
   `functions/`, and 3 unit tests in `:app` (a Robolectric label check, a Roborazzi screenshot, and
   an arithmetic placeholder). CI compiles the androidTest suite and runs lint, but **nothing runs
   the instrumented tests** — that needs an emulator job, and the suite spent a long time not even

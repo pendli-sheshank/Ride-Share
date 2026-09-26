@@ -101,6 +101,9 @@ once they exist.
 | `ANDROID_KEY_ALIAS` | key alias; defaults to `upload` if unset |
 | `PLAY_SERVICE_ACCOUNT_JSON` | full service-account JSON, raw (not base64) |
 | `GOOGLE_SERVICES_JSON` | contents of `google-services.json`. **Required for push notifications.** Without it the release build has no `FirebaseApp`, `SplitCruiserNotifications.currentToken` returns null, and no device ever registers — silently, by design, so a debug build without it still runs. Everything else in the app works without it, since the backend is REST. |
+| `ADMOB_APP_ID` | AdMob application id (`ca-app-pub-…~…`) → the `admobAppId` manifest placeholder **and** `BuildConfig.ADMOB_APP_ID`. **Optional.** Unset, the build falls back to Google's public sample id so the app still launches — the ads SDK crashes at init on a missing application id — and `SplitCruiserAds.isEnabled` is false, so no ad slot is drawn at all. |
+| `ADMOB_BANNER_UNIT_ID` | Ad unit for the anchored banner on the browse feed. Optional; debug builds always use Google's test unit regardless, because a developer clicking live inventory is how an AdMob account gets suspended. |
+| `ADMOB_FEED_UNIT_ID` | Ad unit for the in-feed sponsored card. Same rules. |
 
 ### Firebase — used by **both** platforms
 
@@ -249,6 +252,26 @@ mismatched-entitlements error. The PR job is unaffected — it builds with
 
 Nothing in this list is visible to a build. A fully green release with steps 1–2 skipped fails at
 signing; with steps 3–4 skipped it ships and uploads happily, and no notification ever arrives.
+
+### AdMob — one-time
+
+Nothing here is visible to a build. A green release with this skipped ships an app that simply
+shows no ads, because `SplitCruiserAds.isEnabled` stays false — which is the intended failure, not
+a broken one.
+
+1. Create an AdMob account and **link it to the existing Firebase project** (AdMob → Settings →
+   Firebase). Linking is what lets one project cover both.
+2. Register **both apps** — Android `com.splitcruiser.app` and the iOS bundle id. Each gets its own
+   application id; they are not interchangeable, and the iOS one goes in `ADMOB_IOS_APP_ID`.
+3. Create the ad units: one banner per platform for the anchored feed banner, one per platform for
+   the in-feed card. Put them in `ADMOB_BANNER_UNIT_ID` / `ADMOB_FEED_UNIT_ID`.
+4. AdMob → Privacy & messaging → **create a GDPR message** and publish it. The UMP SDK in the app
+   fetches this; with no published message `loadAndShowConsentFormIfRequired` has nothing to show,
+   and in the EEA/UK `canRequestAds()` then stays false, so no ads serve. This step is the one most
+   easily missed, because the app behaves correctly — it just earns nothing.
+5. **Update Play's Data Safety form and the App Store privacy label.** Ads means collecting an
+   advertising identifier, and both stores reject a submission whose declaration does not match the
+   SDKs in the binary. This is a store rejection, not a runtime failure.
 
 ### Apple — one-time *(planned)*
 
