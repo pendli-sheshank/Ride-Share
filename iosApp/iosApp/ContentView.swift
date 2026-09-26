@@ -17,6 +17,11 @@ struct ContentView: View {
     @StateObject private var viewModel = AppViewModel()
     @StateObject private var router = AppRouter()
 
+    /// Where `AppDelegate` parks the FCM token it was handed, possibly long before anyone signed
+    /// in. Observed rather than read once: Firebase rotates tokens, and a registration that is
+    /// never refreshed goes stale and then fails silently at send time.
+    @StateObject private var pushTokens = PushTokenStore.shared
+
     private var phase: AppPhase {
         if !viewModel.isSignedIn { return .login }
         if viewModel.needsProfileSetup { return .profileSetup }
@@ -50,7 +55,17 @@ struct ContentView: View {
         .environmentObject(router)
         .tint(Brand.primary)
         .animation(.easeInOut(duration: 0.2), value: viewModel.isLoading)
-        .onChange(of: phase) { _ in router.popToRoot() }
+        .onChange(of: phase) { newPhase in
+            router.popToRoot()
+            // Ask for notification permission at the same point in the flow Android does: once
+            // the user has an account, so "we'll tell you when a host accepts" is a reason they
+            // can weigh. iOS gives exactly one chance at this prompt.
+            if newPhase == .dashboard { Task { await syncPushRegistration() } }
+        }
+        // Drains the parked token, and re-drains whenever Firebase rotates it.
+        .onChange(of: pushTokens.token) { _ in
+            if phase == .dashboard { Task { await syncPushRegistration() } }
+        }
         .alert(
             "Information",
             isPresented: Binding(
@@ -62,6 +77,19 @@ struct ContentView: View {
         } message: {
             Text(viewModel.errorMessage ?? "")
         }
+    }
+
+    /// Registers this device for notifications, if it has permission and a token.
+    ///
+    /// Silent either way. A device that cannot register is one person not getting notifications,
+    /// which is where every account starts before the prompt is answered — not worth an error
+    /// banner over a working sign-in. `registerPushToken` on the shared repository swallows its
+    /// own failures for the same reason.
+    private func syncPushRegistration() async {
+        guard SplitCruiserPush.isConfigured else { return }
+        guard await SplitCruiserPush.requestAuthorization() else { return }
+        guard let token = pushTokens.token, !token.isEmpty else { return }
+        await viewModel.registerPushToken(token: token)
     }
 
     @ViewBuilder

@@ -50,9 +50,14 @@ text on a white card.
 
 One repository in `shared/commonMain` serves both platforms, over Firebase's **REST** APIs
 (Identity Toolkit, Firestore v1, Storage v0) with Ktor — not the native SDKs. That is deliberate:
-the Firebase iOS SDK would need CocoaPods or SPM entries in the generated Xcode project, whereas
-`ktor-client-darwin` is plain Kotlin/Native and needs neither. Both platforms therefore run the
-same code against the same collections.
+the Firebase *data* SDKs would need CocoaPods or SPM entries in the generated Xcode project,
+whereas `ktor-client-darwin` is plain Kotlin/Native and needs neither. Both platforms therefore
+run the same code against the same collections.
+
+**One exception now exists, and it is push notifications only.** `firebase-messaging` is on
+`:app` and `FirebaseMessaging` comes in by SPM on iOS, because a device cannot obtain an FCM
+token over REST at all — see the push entry under Known gaps. Auth, Firestore and Storage are
+still REST on both platforms, and that is what keeps the backend shared.
 
 Consequences worth knowing before changing anything here:
 
@@ -175,8 +180,18 @@ not evidence. Verify against a build.
   TypeScript sides share no constant, only a comment each. The Android channel id in
   `strings.xml` must equal `RIDE_CHANNEL_ID` in `pushPayload.ts`, or API 26+ drops every
   notification silently. The `secrets` Gradle plugin is still inert.
-  **iOS has no push yet** — that needs the Firebase iOS SDK via SPM in the generated Xcode
-  project, an `AppDelegate`, and a `GoogleService-Info.plist` secret. Tracked as the next stage.
+  **iOS gets there via SPM in the generated Xcode project.** `generate-project.py` emits the
+  `XCRemoteSwiftPackageReference` for firebase-ios-sdk plus the product dependency, build file,
+  `packageReferences` and `packageProductDependencies` — miss one and Xcode says only "the
+  project is damaged", which `verify-xcodeproj.py` catches on Linux. There is deliberately **no
+  committed `Package.resolved`**: fabricating one means inventing revision hashes, and a wrong
+  hash fails resolution outright. `iosApp/iosApp/GoogleService-Info.plist` in the repo is a
+  **placeholder** whose `API_KEY` is the sentinel `SplitCruiserPush.isConfigured` checks; while
+  it is in place the app never calls `FirebaseApp.configure()`, so push is off and *visibly*
+  off. The release workflow overwrites it from `GOOGLE_SERVICE_INFO_PLIST`. The
+  `aps-environment` entitlement means **the App ID must have Push Notifications enabled and the
+  provisioning profile regenerated**, or the release archive fails to sign; the PR simulator
+  build is unaffected (`CODE_SIGNING_ALLOWED=NO`).
 - **`Theme.swift` reads the shared tokens through the Kotlin/Native ObjC export**
   (`SplitCruiserColors.shared.Primary`). That cannot be compile-checked on Linux; if the exported
   property names turn out to differ, it is a one-token fix, and the whole mapping is in one file.

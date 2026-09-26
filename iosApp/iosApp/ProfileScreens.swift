@@ -30,7 +30,9 @@ struct ProfileScreen: View {
                     alertsSection
                     notificationPreferences(user)
                     safetySection(user)
-                    Button("Log Out") { viewModel.logOut() }
+                    // Suspending now: signing out unregisters this device for push first, while
+                    // the credentials are still valid.
+                    Button("Log Out") { Task { await viewModel.logOut() } }
                         .buttonStyle(BrandButtonStyle(background: Brand.danger))
                 } else {
                     // Previously this branch rendered nothing at all — a blank "Profile" screen

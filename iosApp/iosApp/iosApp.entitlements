@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Required for push. Without this entitlement registerForRemoteNotifications() fails at
+	  runtime with "no valid aps-environment entitlement string found" and no FCM token is ever
+	  issued — the whole chain goes quiet with nothing surfacing to the user.
+
+	  "production" because this project signs manually against a fixed distribution certificate
+	  and provisioning profile (see the release skill §3 — there is no fastlane match and no
+	  automatic signing). A distribution profile expects the production APNs environment; a
+	  development build would need "development" instead.
+
+	  IMPORTANT: the App ID must have the Push Notifications capability enabled and the
+	  provisioning profile regenerated afterwards, or the release archive fails to sign with a
+	  mismatched-entitlements error. The PR simulator build is unaffected — it runs with
+	  CODE_SIGNING_ALLOWED=NO.
+	-->
+	<key>aps-environment</key>
+	<string>production</string>
+</dict>
+</plist>

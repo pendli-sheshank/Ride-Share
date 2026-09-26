@@ -4,6 +4,11 @@ import UIKit
 @main
 struct iOSApp: App {
 
+    /// Push needs a UIKit delegate: `didRegisterForRemoteNotificationsWithDeviceToken` has no
+    /// SwiftUI equivalent, and Firebase's `MessagingDelegate` is a UIKit-era protocol. This is
+    /// the only reason a pure SwiftUI `App` has one. See `PushNotifications.swift`.
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
     init() {
         Self.applyBrandAppearance()
     }

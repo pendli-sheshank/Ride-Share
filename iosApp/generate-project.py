@@ -15,6 +15,20 @@ from pathlib import Path
 # correct — which is how 12 dangling references went unnoticed until a release build.
 _ID_NAMESPACE = uuid.UUID("6f1a9c3e-58d2-4a7b-9e14-2c8d5b0f7a63")
 
+# The Firebase iOS SDK, pulled in by Swift Package Manager for FirebaseMessaging alone.
+#
+# This is the one native Firebase SDK either platform uses, and it is here because push has no
+# REST equivalent a client can use: a device cannot obtain an FCM token without the platform
+# SDK. Everything else still goes through `:shared` over REST — do not add FirebaseAuth,
+# FirebaseFirestore or FirebaseStorage products here without moving the whole backend with them.
+#
+# `upToNextMajorVersion` rather than an exact pin: SPM resolution happens on the macOS runner,
+# and a hard pin that Firebase later yanks would break the build with no way to reproduce the
+# failure on Linux. There is deliberately **no committed Package.resolved** — fabricating one
+# means inventing revision hashes, and a wrong hash fails resolution outright. Xcode writes it
+# on first resolve.
+FIREBASE_IOS_SDK_MIN_VERSION = "11.0.0"
+
 
 def generate_id(name, length=24):
     """Stable identifier for a pbxproj object, derived from its role."""
@@ -36,6 +50,8 @@ SWIFT_SOURCES = [
     # Routing, state and shared formatting.
     "AppRouter.swift",
     "ViewModel.swift",
+    # Push registration. Owns the AppDelegate, so it sits above the screens.
+    "PushNotifications.swift",
     # Composite components.
     "LocationAutocompleteField.swift",
     "TripCards.swift",
@@ -103,6 +119,18 @@ def create_xcode_project():
         # that is exactly what "The project contains no build configurations" means.
         "project_config_list": generate_id("project_config_list"),
         "target_config_list": generate_id("target_config_list"),
+        # Push notifications. The Firebase iOS SDK arrives as a Swift Package, which needs four
+        # linked objects rather than one: the remote package reference, a product dependency on
+        # it, a PBXBuildFile carrying that product into the Frameworks phase, and entries in
+        # PBXProject.packageReferences and PBXNativeTarget.packageProductDependencies. Miss any
+        # one and Xcode reports only "the project is damaged" — which is what
+        # .github/scripts/verify-xcodeproj.py exists to catch on Linux.
+        "firebase_package": generate_id("firebase_package"),
+        "firebase_messaging_product": generate_id("firebase_messaging_product"),
+        "firebase_messaging_build": generate_id("firebase_messaging_build"),
+        "google_services_plist_ref": generate_id("google_services_plist_ref"),
+        "google_services_plist": generate_id("google_services_plist"),
+        "entitlements_ref": generate_id("entitlements_ref"),
     }
 
     # Two ids per Swift source: the PBXBuildFile and the PBXFileReference it points at.
@@ -143,6 +171,8 @@ def create_xcode_project():
 		{ids['assets']} /* Assets.xcassets in Resources */ = {{isa = PBXBuildFile; fileRef = {ids['assets_ref']} /* Assets.xcassets */; }};
 		{ids['launchscreen']} /* LaunchScreen.storyboard in Resources */ = {{isa = PBXBuildFile; fileRef = {ids['launchscreen_ref']} /* LaunchScreen.storyboard */; }};
 		{ids['shared_framework_build']} /* Shared.xcframework in Frameworks */ = {{isa = PBXBuildFile; fileRef = {ids['shared_framework_ref']} /* Shared.xcframework */; }};
+		{ids['google_services_plist']} /* GoogleService-Info.plist in Resources */ = {{isa = PBXBuildFile; fileRef = {ids['google_services_plist_ref']} /* GoogleService-Info.plist */; }};
+		{ids['firebase_messaging_build']} /* FirebaseMessaging in Frameworks */ = {{isa = PBXBuildFile; productRef = {ids['firebase_messaging_product']} /* FirebaseMessaging */; }};
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -152,6 +182,8 @@ def create_xcode_project():
 		{ids['assets_ref']} /* Assets.xcassets */ = {{isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; }};
 		{ids['launchscreen_ref']} /* LaunchScreen.storyboard */ = {{isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; }};
 		{ids['shared_framework_ref']} /* Shared.xcframework */ = {{isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = ../shared/build/XCFrameworks/release/Shared.xcframework; sourceTree = SOURCE_ROOT; }};
+		{ids['google_services_plist_ref']} /* GoogleService-Info.plist */ = {{isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; }};
+		{ids['entitlements_ref']} /* iosApp.entitlements */ = {{isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = iosApp.entitlements; sourceTree = "<group>"; }};
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -160,6 +192,7 @@ def create_xcode_project():
 			buildActionMask = 2147483647;
 			files = (
 				{ids['shared_framework_build']} /* Shared.xcframework in Frameworks */,
+				{ids['firebase_messaging_build']} /* FirebaseMessaging in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		}};
@@ -198,6 +231,8 @@ def create_xcode_project():
 				{ids['assets_ref']} /* Assets.xcassets */,
 				{ids['launchscreen_ref']} /* LaunchScreen.storyboard */,
 				{ids['info_plist_ref']} /* Info.plist */,
+				{ids['google_services_plist_ref']} /* GoogleService-Info.plist */,
+				{ids['entitlements_ref']} /* iosApp.entitlements */,
 			);
 			name = Resources;
 			sourceTree = "<group>";
@@ -226,6 +261,9 @@ def create_xcode_project():
 			dependencies = (
 			);
 			name = iosApp;
+			packageProductDependencies = (
+				{ids['firebase_messaging_product']} /* FirebaseMessaging */,
+			);
 			productName = iosApp;
 			productReference = {ids['app_product']} /* iosApp.app */;
 			productType = "com.apple.product-type.application";
@@ -255,6 +293,9 @@ def create_xcode_project():
 				Base,
 			);
 			mainGroup = {ids['main_group']};
+			packageReferences = (
+				{ids['firebase_package']} /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+			);
 			productRefGroup = {ids['products_group']} /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -271,6 +312,7 @@ def create_xcode_project():
 			files = (
 				{ids['assets']} /* Assets.xcassets in Resources */,
 				{ids['launchscreen']} /* LaunchScreen.storyboard in Resources */,
+				{ids['google_services_plist']} /* GoogleService-Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		}};
@@ -322,6 +364,7 @@ def create_xcode_project():
 				CLANG_WARN_SUSPICIOUS_MOVES = YES;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_ENTITLEMENTS = iosApp/iosApp.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
@@ -403,6 +446,7 @@ def create_xcode_project():
 				CLANG_WARN_SUSPICIOUS_MOVES = YES;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_ENTITLEMENTS = iosApp/iosApp.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = YES;
@@ -584,6 +628,25 @@ def create_xcode_project():
 			defaultConfigurationName = Release;
 		}};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		{ids['firebase_package']} /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {{
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git";
+			requirement = {{
+				kind = upToNextMajorVersion;
+				minimumVersion = {FIREBASE_IOS_SDK_MIN_VERSION};
+			}};
+		}};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		{ids['firebase_messaging_product']} /* FirebaseMessaging */ = {{
+			isa = XCSwiftPackageProductDependency;
+			package = {ids['firebase_package']} /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseMessaging;
+		}};
+/* End XCSwiftPackageProductDependency section */
 	}};
 	rootObject = {ids['project']} /* Project object */;
 }}

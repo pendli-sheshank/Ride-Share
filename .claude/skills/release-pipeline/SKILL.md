@@ -140,6 +140,7 @@ throwaway keychain. It does **not** use `fastlane match`; there is no fastlane i
 | `APPSTORE_CONNECT_KEY_ID` | App Store Connect API key ID |
 | `APPSTORE_CONNECT_ISSUER_ID` | App Store Connect issuer ID |
 | `APPSTORE_CONNECT_PRIVATE_KEY` | the `.p8` contents **raw, not base64** — full PEM including the BEGIN/END lines and real newlines |
+| `GOOGLE_SERVICE_INFO_PLIST` | contents of `GoogleService-Info.plist` from the Firebase console (Project settings → Your apps → iOS), raw XML. **Required for push on iOS.** Without it the release ships the committed placeholder, `SplitCruiserPush.isConfigured` stays false, `FirebaseApp.configure()` is never called, and notifications silently never arrive — the workflow emits a warning rather than failing, because everything else in the app works over REST. |
 
 ---
 
@@ -222,6 +223,32 @@ curl -s -X POST \
   -H 'Content-Type: application/json' \
   -d '{"email":"probe@example.com","password":"hunter22","returnSecureToken":true}'
 ```
+
+### Apple push notifications — one-time
+
+**This is the step that can break a release that was previously green.** The app now declares the
+`aps-environment` entitlement (`iosApp/iosApp/iosApp.entitlements`), and an entitlement the
+provisioning profile does not grant makes `codesign` fail during `xcodebuild archive` with a
+mismatched-entitlements error. The PR job is unaffected — it builds with
+`CODE_SIGNING_ALLOWED=NO`.
+
+1. Apple Developer → Certificates, Identifiers & Profiles → **Identifiers** → the
+   `com.splitcruiser.app` App ID → tick **Push Notifications** → Save.
+2. **Regenerate the distribution provisioning profile** and put the new one in
+   `IOS_PROVISIONING_PROFILE_BASE64` (`base64 -w0`). An existing profile does not pick the
+   capability up; it has to be reissued.
+3. Keys → **+** → **Apple Push Notification service (APNs)** → download the `.p8`. Note the Key ID
+   and your Team ID.
+4. Firebase console → Project settings → **Cloud Messaging** → **APNs Authentication Key** →
+   upload that `.p8` with its Key ID and Team ID. This is where the key goes — **not** into a
+   GitHub secret. With the Firebase SDK in the app, Firebase talks to APNs on our behalf.
+5. `aps-environment` is `production` in the committed entitlements file, which is what a
+   distribution profile expects. A *development*-signed build would need `development`; this
+   project signs manually against a fixed distribution profile, so production is the right
+   constant here rather than something Xcode rewrites.
+
+Nothing in this list is visible to a build. A fully green release with steps 1–2 skipped fails at
+signing; with steps 3–4 skipped it ships and uploads happily, and no notification ever arrives.
 
 ### Apple — one-time *(planned)*
 
