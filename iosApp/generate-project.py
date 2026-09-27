@@ -29,6 +29,34 @@ _ID_NAMESPACE = uuid.UUID("6f1a9c3e-58d2-4a7b-9e14-2c8d5b0f7a63")
 # on first resolve.
 FIREBASE_IOS_SDK_MIN_VERSION = "11.0.0"
 
+# The Google Mobile Ads SDK, also by Swift Package Manager, for ads on the browse feed.
+#
+# The second and last native-SDK exception, for the same reason as push: there is no REST path
+# for ad serving — an ad has to be requested and rendered by the platform SDK. `:shared` still
+# speaks REST for auth, Firestore and Storage, and `AdSlotting` in `:shared` is what keeps the
+# two platforms placing ads at identical indices.
+#
+# **One package, one product, and UMP is not that product.** This package declares exactly one
+# product, `GoogleMobileAds` — checked against its Package.swift at tags 12.0.0, 12.9.0 and main.
+# The consent SDK lives in a *separate* package,
+# swift-package-manager-google-user-messaging-platform, whose product is named
+# `GoogleUserMessagingPlatform` while its binary xcframework — and therefore its Swift module — is
+# named `UserMessagingPlatform`. Declaring a product dependency on `UserMessagingPlatform` is
+# what produced "error: Missing package product 'UserMessagingPlatform'" and cost a CI round trip:
+# that is a module name, not a product name. UMP arrives transitively as a dependency of
+# GoogleMobileAdsTarget, and `Ads.swift` imports it by module name, which is Google's documented
+# setup.
+#
+# **13.0.0 is a floor, not a preference.** GMA 12 constrains UMP to "1.1.0"..<"3.0.0", so it
+# resolves UMP 2.x, which still uses the Objective-C-prefixed spellings
+# (`UMPConsentInformation.sharedInstance`, `UMPConsentForm`, `UMPRequestParameters`). The
+# un-prefixed Swift names `Ads.swift` uses — and that Google's current docs publish — arrived in
+# UMP 3.x, which only GMA 13's wider "1.1.0"..<"4.0.0" range admits. Lowering this pin silently
+# breaks the consent flow rather than the build.
+#
+# `upToNextMajorVersion` rather than an exact pin, for the reason given for Firebase above.
+GOOGLE_MOBILE_ADS_SDK_MIN_VERSION = "13.0.0"
+
 
 def generate_id(name, length=24):
     """Stable identifier for a pbxproj object, derived from its role."""
@@ -56,6 +84,8 @@ SWIFT_SOURCES = [
     "LocationAutocompleteField.swift",
     "TripCards.swift",
     "ScheduleCards.swift",
+    # Ads. Owns the SDK surface and the two ad views, so it sits above the screens that draw them.
+    "Ads.swift",
     # Screens.
     "ContentView.swift",
     "ExploreFeed.swift",
@@ -128,6 +158,12 @@ def create_xcode_project():
         "firebase_package": generate_id("firebase_package"),
         "firebase_messaging_product": generate_id("firebase_messaging_product"),
         "firebase_messaging_build": generate_id("firebase_messaging_build"),
+        # Ads. Exactly the same four-object shape as Firebase above — one package reference, one
+        # product. See the note by GOOGLE_MOBILE_ADS_SDK_MIN_VERSION for why there is no second
+        # product here for UMP.
+        "admob_package": generate_id("admob_package"),
+        "google_mobile_ads_product": generate_id("google_mobile_ads_product"),
+        "google_mobile_ads_build": generate_id("google_mobile_ads_build"),
         "google_services_plist_ref": generate_id("google_services_plist_ref"),
         "google_services_plist": generate_id("google_services_plist"),
         "entitlements_ref": generate_id("entitlements_ref"),
@@ -173,6 +209,7 @@ def create_xcode_project():
 		{ids['shared_framework_build']} /* Shared.xcframework in Frameworks */ = {{isa = PBXBuildFile; fileRef = {ids['shared_framework_ref']} /* Shared.xcframework */; }};
 		{ids['google_services_plist']} /* GoogleService-Info.plist in Resources */ = {{isa = PBXBuildFile; fileRef = {ids['google_services_plist_ref']} /* GoogleService-Info.plist */; }};
 		{ids['firebase_messaging_build']} /* FirebaseMessaging in Frameworks */ = {{isa = PBXBuildFile; productRef = {ids['firebase_messaging_product']} /* FirebaseMessaging */; }};
+		{ids['google_mobile_ads_build']} /* GoogleMobileAds in Frameworks */ = {{isa = PBXBuildFile; productRef = {ids['google_mobile_ads_product']} /* GoogleMobileAds */; }};
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -193,6 +230,7 @@ def create_xcode_project():
 			files = (
 				{ids['shared_framework_build']} /* Shared.xcframework in Frameworks */,
 				{ids['firebase_messaging_build']} /* FirebaseMessaging in Frameworks */,
+				{ids['google_mobile_ads_build']} /* GoogleMobileAds in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		}};
@@ -263,6 +301,7 @@ def create_xcode_project():
 			name = iosApp;
 			packageProductDependencies = (
 				{ids['firebase_messaging_product']} /* FirebaseMessaging */,
+				{ids['google_mobile_ads_product']} /* GoogleMobileAds */,
 			);
 			productName = iosApp;
 			productReference = {ids['app_product']} /* iosApp.app */;
@@ -295,6 +334,7 @@ def create_xcode_project():
 			mainGroup = {ids['main_group']};
 			packageReferences = (
 				{ids['firebase_package']} /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+				{ids['admob_package']} /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */,
 			);
 			productRefGroup = {ids['products_group']} /* Products */;
 			projectDirPath = "";
@@ -638,6 +678,14 @@ def create_xcode_project():
 				minimumVersion = {FIREBASE_IOS_SDK_MIN_VERSION};
 			}};
 		}};
+		{ids['admob_package']} /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */ = {{
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/googleads/swift-package-manager-google-mobile-ads.git";
+			requirement = {{
+				kind = upToNextMajorVersion;
+				minimumVersion = {GOOGLE_MOBILE_ADS_SDK_MIN_VERSION};
+			}};
+		}};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -645,6 +693,11 @@ def create_xcode_project():
 			isa = XCSwiftPackageProductDependency;
 			package = {ids['firebase_package']} /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseMessaging;
+		}};
+		{ids['google_mobile_ads_product']} /* GoogleMobileAds */ = {{
+			isa = XCSwiftPackageProductDependency;
+			package = {ids['admob_package']} /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */;
+			productName = GoogleMobileAds;
 		}};
 /* End XCSwiftPackageProductDependency section */
 	}};

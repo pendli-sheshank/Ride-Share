@@ -69,6 +69,27 @@
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
             android:value="@string/push_channel_id" />
+
+        <!--
+          AdMob's application id. **Required, not optional.** With play-services-ads on the
+          classpath and this meta-data absent, the SDK throws at initialisation and the app dies
+          on launch. The value is a manifest placeholder filled from ADMOB_APP_ID, defaulting to
+          Google's public sample id so a build with no secrets still starts — see
+          app/build.gradle.kts.
+        -->
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="${admobAppId}" />
+
+        <!--
+          Defers ads-SDK initialisation to our own call in `SplitCruiserAds`, which runs the UMP
+          consent flow first. Left at the default, the SDK initialises itself from a
+          ContentProvider at process start — before any consent decision exists, which is the
+          policy violation this whole ordering exists to avoid.
+        -->
+        <meta-data
+            android:name="com.google.android.gms.ads.DELAY_APP_MEASUREMENT_INIT"
+            android:value="true" />
     </application>
 
 </manifest>

@@ -192,10 +192,53 @@ not evidence. Verify against a build.
   `aps-environment` entitlement means **the App ID must have Push Notifications enabled and the
   provisioning profile regenerated**, or the release archive fails to sign; the PR simulator
   build is unaffected (`CODE_SIGNING_ALLOWED=NO`).
+- **Ads are the second and last native-SDK exception.** `play-services-ads` +
+  `user-messaging-platform` on `:app`; iOS pulls `googleads-mobile-sdk` by SPM. There is no REST
+  path for ad serving, same as push. The *data* SDKs still stay out.
+  **`ADMOB_APP_ID` has a sample-id default and that is load-bearing.** With `play-services-ads` on
+  the classpath and no `com.google.android.gms.ads.APPLICATION_ID` meta-data, the SDK throws at
+  init and **the app dies on launch** — so `app/build.gradle.kts` defaults the manifest
+  placeholder to Google's public sample id. That same sample id is the sentinel
+  `SplitCruiserAds.isEnabled` tests, so an unconfigured build draws no ad slots at all rather
+  than test ads in production-looking layout.
+  **Consent runs before the SDK starts.** The manifest sets `DELAY_APP_MEASUREMENT_INIT=true` so
+  nothing self-initialises from a ContentProvider at process start, and
+  `SplitCruiserAds.ensureConsentThenInitialize` (UMP, then `MobileAds.initialize`) is the only
+  call that starts it. Serving a personalised ad in the EEA/UK without a consent decision is a
+  policy violation, and the SDK will do it happily if initialised first.
+  **On iOS the order is UMP, then ATT, then `MobileAds.shared.start`** — Google's documented
+  sequence, and backwards means asking for the advertising identifier before a consent decision
+  exists. `Ads.swift` holds all of it; `ContentView` calls it from the same `phase == .dashboard`
+  hook that asks for notification permission.
+  **iOS carries a second sample-id sentinel, in `Info.plist`.** `GADApplicationIdentifier` ships as
+  Google's sample *iOS* id, which is both a working placeholder — a missing or malformed id makes
+  `MobileAds.shared.start` raise `GADInvalidInitializationException` — and what
+  `SplitCruiserAds.isEnabled` tests. The release workflow overwrites it from `ADMOB_IOS_APP_ID`.
+  **Ad unit ids are per-app, so per-platform**: `ADMOB_IOS_BANNER_UNIT_ID` /
+  `ADMOB_IOS_FEED_UNIT_ID` are separate secrets, landing in `SCAdBannerUnitId` / `SCAdFeedUnitId`,
+  because an iOS app requesting an Android unit id gets no fill rather than an error.
+  **`SKAdNetworkItems` is scraped, never written from memory** — ~50 ids from
+  `developers.google.com/admob/ios/ios14`, and a stale list loses install attribution silently.
+  `verify-info-plist.py` checks it is well-formed; nothing can check it is current.
+  **`generate-project.py` emits one package reference and one product**,
+  `GoogleMobileAds` — that package declares no others. UMP is a *separate* package whose product is
+  `GoogleUserMessagingPlatform` while its module is `UserMessagingPlatform`; it arrives transitively
+  and `Ads.swift` imports it by module name, which is Google's documented setup. Declaring a
+  product dependency on `UserMessagingPlatform` fails the build with "Missing package product" —
+  that is a module name, not a product name. **The pin must stay at GMA 13+**: GMA 12 constrains UMP
+  to `<3.0.0`, which is the prefixed `UMPConsentInformation.sharedInstance` era, and lowering it
+  breaks the consent flow rather than the build. Adaptive banners are
+  `largeAnchoredAdaptiveBanner(width:)`; `currentOrientationAnchoredAdaptiveBanner` is gone from
+  Swift. Check the SDK's `Package.swift` and current docs before changing any of these names — every
+  one of them was got wrong from memory first.
+  **Placement is shared, rendering is not.** `AdSlotting` in `:shared` decides which ride indices
+  an ad card follows, so both platforms place them identically — the same reason `PlaceRanking`
+  and `perRiderShare` are shared. Ads appear on the browse feed only: never on chat (a pickup
+  being agreed with a stranger) or ride detail (the host's contact and safety information).
 - **`Theme.swift` reads the shared tokens through the Kotlin/Native ObjC export**
   (`SplitCruiserColors.shared.Primary`). That cannot be compile-checked on Linux; if the exported
   property names turn out to differ, it is a one-token fix, and the whole mapping is in one file.
-- Test coverage: 232 tests in `:shared`, 83 rules tests against the emulator (`rules-tests/`), 23 in
+- Test coverage: 240 tests in `:shared`, 83 rules tests against the emulator (`rules-tests/`), 23 in
   `functions/`, and 3 unit tests in `:app` (a Robolectric label check, a Roborazzi screenshot, and
   an arithmetic placeholder). CI compiles the androidTest suite and runs lint, but **nothing runs
   the instrumented tests** — that needs an emulator job, and the suite spent a long time not even

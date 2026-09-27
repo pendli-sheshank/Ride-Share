@@ -60,7 +60,18 @@ struct ContentView: View {
             // Ask for notification permission at the same point in the flow Android does: once
             // the user has an account, so "we'll tell you when a host accepts" is a reason they
             // can weigh. iOS gives exactly one chance at this prompt.
-            if newPhase == .dashboard { Task { await syncPushRegistration() } }
+            if newPhase == .dashboard {
+                Task { await syncPushRegistration() }
+                // Consent for ads at the same moment, and for the same reason: a consent sheet
+                // over a login screen has no context, and UMP's form cannot be re-shown casually.
+                // Resolves consent, asks for tracking, then starts the ads SDK — in that order.
+                //
+                // Hopped onto the main actor explicitly. `onChange`'s action is not a
+                // `@MainActor` closure in this SDK, so calling a main-actor function from it
+                // directly is a warning under Swift 5 and an error under Swift 6 — the same trap
+                // `PushTokenStore` was rewritten to avoid.
+                Task { @MainActor in SplitCruiserAds.ensureConsentThenStart() }
+            }
         }
         // Drains the parked token, and re-drains whenever Firebase rotates it.
         .onChange(of: pushTokens.token) { _ in
@@ -150,6 +161,12 @@ struct DashboardScreen: View {
 
                 if selectedTab == .explore { postFAB }
             }
+
+            // The anchored banner, browse feed only, directly above the tab bar — the same place
+            // Android puts it (`bottomBar`, gated on the explore tab). Outside the ZStack so it
+            // never sits over a ride card or the post button, and never on My trips, which is
+            // where someone manages a ride they have already committed to.
+            if selectedTab == .explore { AnchoredFeedBanner() }
 
             DashboardTabBar(selected: $selectedTab)
         }

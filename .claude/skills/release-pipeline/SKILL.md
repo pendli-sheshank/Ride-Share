@@ -101,6 +101,21 @@ once they exist.
 | `ANDROID_KEY_ALIAS` | key alias; defaults to `upload` if unset |
 | `PLAY_SERVICE_ACCOUNT_JSON` | full service-account JSON, raw (not base64) |
 | `GOOGLE_SERVICES_JSON` | contents of `google-services.json`. **Required for push notifications.** Without it the release build has no `FirebaseApp`, `SplitCruiserNotifications.currentToken` returns null, and no device ever registers — silently, by design, so a debug build without it still runs. Everything else in the app works without it, since the backend is REST. |
+| `ADMOB_APP_ID` | AdMob application id (`ca-app-pub-…~…`) → the `admobAppId` manifest placeholder **and** `BuildConfig.ADMOB_APP_ID`. **Optional.** Unset, the build falls back to Google's public sample id so the app still launches — the ads SDK crashes at init on a missing application id — and `SplitCruiserAds.isEnabled` is false, so no ad slot is drawn at all. |
+| `ADMOB_BANNER_UNIT_ID` | **Android's** ad unit for the anchored banner on the browse feed. Optional; debug builds always use Google's test unit regardless, because a developer clicking live inventory is how an AdMob account gets suspended. |
+| `ADMOB_FEED_UNIT_ID` | **Android's** ad unit for the in-feed sponsored card. Same rules. |
+
+### AdMob — iOS only
+
+An AdMob ad unit belongs to **one app**, and an app is one platform, so iOS needs its own three
+values. There is no shared unit id, and getting this wrong fails the quiet way: an iOS app
+requesting an Android unit id gets **no fill** — not an error, just a slot that never fills.
+
+| Secret | Where it goes |
+|---|---|
+| `ADMOB_IOS_APP_ID` | AdMob **iOS** application id (`ca-app-pub-…~…`) → `GADApplicationIdentifier` in `Info.plist`, written by `ios-release.yml`. **Optional.** Unset, the committed plist keeps Google's sample iOS id — which is both a working placeholder (a missing or malformed id makes `MobileAds.shared.start` raise `GADInvalidInitializationException`) and the sentinel `SplitCruiserAds.isEnabled` tests, so no ad slot is drawn. Not the Firebase iOS app id, and not the Android AdMob id. |
+| `ADMOB_IOS_BANNER_UNIT_ID` | iOS ad unit for the anchored banner → `SCAdBannerUnitId`. Optional; empty means Google's test unit, and debug builds use the test unit regardless. |
+| `ADMOB_IOS_FEED_UNIT_ID` | iOS ad unit for the in-feed card → `SCAdFeedUnitId`. Same rules. |
 
 ### Firebase — used by **both** platforms
 
@@ -249,6 +264,36 @@ mismatched-entitlements error. The PR job is unaffected — it builds with
 
 Nothing in this list is visible to a build. A fully green release with steps 1–2 skipped fails at
 signing; with steps 3–4 skipped it ships and uploads happily, and no notification ever arrives.
+
+### AdMob — one-time
+
+Nothing here is visible to a build. A green release with this skipped ships an app that simply
+shows no ads, because `SplitCruiserAds.isEnabled` stays false — which is the intended failure, not
+a broken one.
+
+1. Create an AdMob account and **link it to the existing Firebase project** (AdMob → Settings →
+   Firebase). Linking is what lets one project cover both.
+2. Register **both apps** — Android `com.splitcruiser.app` and the iOS bundle id. Each gets its own
+   application id; they are not interchangeable, and the iOS one goes in `ADMOB_IOS_APP_ID`.
+3. Create the ad units: **four in total** — a banner and an in-feed unit under *each* app. A unit
+   belongs to one app, so there is no sharing them; an iOS app requesting an Android unit id gets
+   no fill rather than an error. Android's go in `ADMOB_BANNER_UNIT_ID` / `ADMOB_FEED_UNIT_ID`,
+   iOS's in `ADMOB_IOS_BANNER_UNIT_ID` / `ADMOB_IOS_FEED_UNIT_ID`.
+4. AdMob → Privacy & messaging → **create a GDPR message** and publish it. The UMP SDK in the app
+   fetches this; with no published message `loadAndShowConsentFormIfRequired` (Android) and
+   `ConsentForm.loadAndPresentIfRequired` (iOS) have nothing to show, and in the EEA/UK
+   `canRequestAds` then stays false, so no ads serve. One published message covers both platforms.
+   This step is the one most easily missed, because the app behaves correctly — it just earns
+   nothing.
+5. Refresh `SKAdNetworkItems` in `iosApp/iosApp/Info.plist` from
+   <https://developers.google.com/admob/ios/ios14> if it has been a while. iOS install attribution
+   runs through those identifiers whenever the IDFA is unavailable, which is most of the time.
+   Google adds buyers over time and a stale list loses attribution **silently** — it never fails a
+   build, and `verify-info-plist.py` can only check the list is well-formed, not that it is
+   current. Scrape the page; never reconstruct it from memory.
+6. **Update Play's Data Safety form and the App Store privacy label.** Ads means collecting an
+   advertising identifier, and both stores reject a submission whose declaration does not match the
+   SDKs in the binary. This is a store rejection, not a runtime failure.
 
 ### Apple — one-time *(planned)*
 
@@ -1463,6 +1508,58 @@ person understands why these lines look the way they do.**
   (tighter authorization, input validation) but there is no emulator or `firebase emulators:exec`
   rules-test job, so a rules regression cannot be caught before it reaches the live project. Validate
   against a throwaway Firebase project before deploying, and consider adding a rules-test job.
+
+### 2026-09-26 — `Missing package product 'UserMessagingPlatform'`: a module name is not a product name
+**Symptom:** `Build iOS App` failed in seconds, before compiling any Swift, with the same line twice:
+
+```
+iosApp.xcodeproj: error: Missing package product 'UserMessagingPlatform'
+                         (in target 'iosApp' from project 'iosApp')
+```
+
+Note what was *not* in the error: `GoogleMobileAds`. The package resolved fine; only the second
+product was missing.
+
+**Cause:** the AdMob SPM package was given two `XCSwiftPackageProductDependency` objects,
+`GoogleMobileAds` and `UserMessagingPlatform`, on the belief that UMP ships as a second product of
+the same repository. It does not. `swift-package-manager-google-mobile-ads` declares **exactly one**
+product, `GoogleMobileAds` (verified in its `Package.swift` at tags `12.0.0`, `12.9.0` and `main`).
+UMP is a *separate* package, `swift-package-manager-google-user-messaging-platform`, whose **product**
+is `GoogleUserMessagingPlatform` while its binary xcframework — and therefore its Swift **module** —
+is `UserMessagingPlatform`. `import UserMessagingPlatform` names the module; there is no product by
+that name anywhere in the graph.
+
+**Fix:** drop the UMP product dependency. It arrives transitively as a dependency of
+`GoogleMobileAdsTarget`, and importing it by module name is Google's documented setup — their own
+samples add only the `GoogleMobileAds` product.
+
+**The expensive part was what the early failure hid.** Because the build died at the package graph,
+it never reached the Swift, so a second defect was invisible: the pin was
+`GOOGLE_MOBILE_ADS_SDK_MIN_VERSION = "12.0.0"`, and GMA 12's manifest constrains UMP to
+`"1.1.0"..<"3.0.0"`. UMP 2.x still uses the Objective-C-prefixed spellings
+(`UMPConsentInformation.sharedInstance`, `UMPConsentForm`, `UMPRequestParameters`), while `Ads.swift`
+uses the un-prefixed Swift names that Google's current docs publish and that arrived in UMP 3.x —
+admitted only by GMA 13's wider `..<"4.0.0"` range. So the pin moved to **13.0.0**, and it is a
+floor: lowering it breaks the consent flow rather than the build. Verifying that also turned up a
+third wrong name — the adaptive banner is `largeAnchoredAdaptiveBanner(width:)`;
+`currentOrientationAnchoredAdaptiveBanner` no longer exists in Swift, only as the legacy ObjC
+`GADCurrentOrientationAnchoredAdaptiveBannerAdSizeWithWidth`.
+
+**The lesson, which is the reusable part:** three SDK names, all written from memory, all wrong, and
+`verify-xcodeproj.py` passed on every one of them — it proves the pbxproj graph is internally
+consistent, not that a product exists in a remote package. For any SPM dependency, fetch the real
+manifest before wiring it up; it is one `curl` and it is authoritative:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/<owner>/<repo>/<tag>/Package.swift | grep -A6 'products:'
+```
+
+**If this recurs as `no such module 'UserMessagingPlatform'`** — meaning the transitive module is not
+on the search path after all — the answer is a *second* `XCRemoteSwiftPackageReference` for
+`https://github.com/googleads/swift-package-manager-google-user-messaging-platform.git` with product
+name `GoogleUserMessagingPlatform` (not `UserMessagingPlatform`), and a version range that intersects
+GMA 13's `1.1.0..<4.0.0`. Recorded here so it costs one round trip instead of this investigation
+again.
 
 ---
 

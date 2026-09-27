@@ -45,6 +45,11 @@ roborazzi = "1.59.0"
 firebaseBom = "34.15.0"
 secretsGradlePlugin = "2.0.1"
 googleServices = "4.5.0"
+# AdMob. play-services-ads carries the User Messaging Platform (UMP) consent SDK as a transitive
+# dependency, but it is declared explicitly below: consent is a hard requirement rather than an
+# incidental transitive, and an explicit line means a future ads-SDK bump cannot silently drop it.
+playServicesAds = "24.9.0"
+userMessagingPlatform = "3.2.0"
 # 1.10.2 was a copy of the coroutines version and does not exist; 1.9.0 pairs with Kotlin 2.2.10
 kotlinxSerialization = "1.9.0"
 kotlinxDatetime = "0.6.2"
@@ -121,6 +126,8 @@ firebase-appcheck-recaptcha = { group = "com.google.firebase", name = "firebase-
 firebase-auth = { group = "com.google.firebase", name = "firebase-auth" }
 firebase-firestore = { group = "com.google.firebase", name = "firebase-firestore" }
 firebase-messaging = { group = "com.google.firebase", name = "firebase-messaging" }
+play-services-ads = { group = "com.google.android.gms", name = "play-services-ads", version.ref = "playServicesAds" }
+user-messaging-platform = { group = "com.google.android.ump", name = "user-messaging-platform", version.ref = "userMessagingPlatform" }
 firebase-storage = { group = "com.google.firebase", name = "firebase-storage" }
 kotlinx-serialization = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
 kotlinx-datetime = { group = "org.jetbrains.kotlinx", name = "kotlinx-datetime", version.ref = "kotlinxDatetime" }

@@ -20,6 +20,13 @@ plugins {
 val releaseKeystorePath: String? =
   providers.environmentVariable("KEYSTORE_PATH").orNull?.takeIf { it.isNotBlank() }
 
+// Google's documented sample AdMob application id, published for exactly this purpose.
+//
+// Not a secret and not a placeholder to be "fixed": it is what a build without ADMOB_APP_ID uses,
+// so the app still launches (the ads SDK crashes on a missing application id), and it is the
+// sentinel `SplitCruiserAds.isEnabled` tests to keep ad slots hidden in an unconfigured build.
+val SAMPLE_ADMOB_APP_ID = "ca-app-pub-3940256099942544~3347511713"
+
 android {
   namespace = "com.splitcruiser.app"
   compileSdk = 36
@@ -33,6 +40,41 @@ android {
     versionName = providers.environmentVariable("VERSION_NAME").orElse("1.0.1").get()
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+    // AdMob's application id, injected into the manifest meta-data the ads SDK reads.
+    //
+    // The default is **Google's public sample app id**, and that is load-bearing rather than lazy.
+    // With play-services-ads on the classpath and no `com.google.android.gms.ads.APPLICATION_ID`
+    // meta-data present, the SDK throws at initialisation and the app dies on launch — not a
+    // warning, a crash. `google-services.json` is already absent from this repo, so a developer
+    // or CI build has no secrets at all; without a default, `assembleDebug` would produce an APK
+    // that cannot start.
+    //
+    // ADMOB_APP_ID being the sample is also what `SplitCruiserAds.isEnabled` detects, so an
+    // unconfigured build shows no ad slots rather than test ads dressed as real inventory. Same
+    // sentinel discipline as the placeholder GoogleService-Info.plist on iOS.
+    manifestPlaceholders["admobAppId"] =
+      providers.environmentVariable("ADMOB_APP_ID").orNull?.takeIf { it.isNotBlank() }
+        ?: SAMPLE_ADMOB_APP_ID
+
+    buildConfigField("String", "ADMOB_APP_ID", "\"${
+      providers.environmentVariable("ADMOB_APP_ID").orNull?.takeIf { it.isNotBlank() }
+        ?: SAMPLE_ADMOB_APP_ID
+    }\"")
+    buildConfigField("String", "ADMOB_SAMPLE_APP_ID", "\"$SAMPLE_ADMOB_APP_ID\"")
+    // Empty means "use the SDK's test unit", which `SplitCruiserAds` resolves. Never ship a real
+    // unit id in a debug build: clicks from a developer's phone on live inventory are exactly what
+    // gets an AdMob account suspended.
+    buildConfigField(
+      "String",
+      "ADMOB_BANNER_UNIT_ID",
+      "\"${providers.environmentVariable("ADMOB_BANNER_UNIT_ID").orElse("").get()}\"",
+    )
+    buildConfigField(
+      "String",
+      "ADMOB_FEED_UNIT_ID",
+      "\"${providers.environmentVariable("ADMOB_FEED_UNIT_ID").orElse("").get()}\"",
+    )
   }
 
   signingConfigs {
@@ -112,6 +154,13 @@ dependencies {
   // REST, to `users/{uid}/private/push`.
   implementation(platform(libs.firebase.bom))
   implementation(libs.firebase.messaging)
+  // AdMob, plus the consent SDK it needs. Neither is a Firebase *data* SDK and neither changes
+  // where the backend lives — see the ads entry in CLAUDE.md. `user-messaging-platform` is
+  // declared explicitly rather than relied on transitively: serving a personalised ad in the
+  // EEA/UK without a consent decision is a policy violation, so the dependency that provides that
+  // decision should not be able to disappear in an ads-SDK bump.
+  implementation(libs.play.services.ads)
+  implementation(libs.user.messaging.platform)
   // implementation(libs.accompanist.permissions)
   implementation(libs.androidx.activity.compose)
   // implementation(libs.androidx.camera.camera2)

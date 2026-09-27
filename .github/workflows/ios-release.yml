@@ -259,6 +259,64 @@ jobs:
           fi
           echo "Real Firebase configuration written for bundle $(/usr/libexec/PlistBuddy -c 'Print :BUNDLE_ID' "$plist")"
 
+      # --- AdMob configuration ----------------------------------------------------------
+      # Overwrites the sample application id and the two empty ad unit ids committed in
+      # Info.plist. The committed values are a working placeholder on purpose: a missing or
+      # malformed GADApplicationIdentifier makes MobileAds.shared.start raise
+      # GADInvalidInitializationException, so the PR simulator build — which has no secrets —
+      # needs something valid there. That sample id is also the sentinel
+      # SplitCruiserAds.isEnabled tests, so a release built without these secrets ships an app
+      # that draws no ad slot at all rather than test ads in production layout.
+      #
+      # The ids are iOS-specific and are NOT the Android ones: an AdMob ad unit belongs to a
+      # single app, and an iOS app requesting an Android unit id gets no fill — not an error,
+      # just a slot that never fills.
+      - name: Write AdMob configuration
+        env:
+          ADMOB_IOS_APP_ID: ${{ secrets.ADMOB_IOS_APP_ID }}
+          ADMOB_IOS_BANNER_UNIT_ID: ${{ secrets.ADMOB_IOS_BANNER_UNIT_ID }}
+          ADMOB_IOS_FEED_UNIT_ID: ${{ secrets.ADMOB_IOS_FEED_UNIT_ID }}
+        run: |
+          set -euo pipefail
+          plist="iosApp/iosApp/Info.plist"
+          sample="ca-app-pub-3940256099942544~1458002511"
+
+          if [ -z "${ADMOB_IOS_APP_ID:-}" ]; then
+            echo "::warning::ADMOB_IOS_APP_ID is not set. This build ships with Google's sample"
+            echo "::warning::application id, so no ad slots are drawn. Everything else works."
+            exit 0
+          fi
+          if [ "$ADMOB_IOS_APP_ID" = "$sample" ]; then
+            echo "::error::ADMOB_IOS_APP_ID is Google's sample id, which is the sentinel meaning"
+            echo "\"unconfigured\". Put the real iOS application id from the AdMob console in it."
+            echo "Note it is not the Firebase iOS app id, and not the Android AdMob id."
+            exit 1
+          fi
+          # A tilde separates an application id; a slash means an ad *unit* id was pasted here.
+          case "$ADMOB_IOS_APP_ID" in
+            ca-app-pub-*~*) ;;
+            *)
+              echo "::error::ADMOB_IOS_APP_ID is not of the form ca-app-pub-<digits>~<digits>."
+              exit 1
+              ;;
+          esac
+
+          /usr/libexec/PlistBuddy -c "Set :GADApplicationIdentifier $ADMOB_IOS_APP_ID" "$plist"
+          if [ -n "${ADMOB_IOS_BANNER_UNIT_ID:-}" ]; then
+            /usr/libexec/PlistBuddy -c "Set :SCAdBannerUnitId $ADMOB_IOS_BANNER_UNIT_ID" "$plist"
+          else
+            echo "::warning::ADMOB_IOS_BANNER_UNIT_ID is not set; the anchored banner falls back"
+            echo "::warning::to Google's test unit, which serves ads that earn nothing."
+          fi
+          if [ -n "${ADMOB_IOS_FEED_UNIT_ID:-}" ]; then
+            /usr/libexec/PlistBuddy -c "Set :SCAdFeedUnitId $ADMOB_IOS_FEED_UNIT_ID" "$plist"
+          else
+            echo "::warning::ADMOB_IOS_FEED_UNIT_ID is not set; the in-feed card falls back to"
+            echo "::warning::Google's test unit, which serves ads that earn nothing."
+          fi
+          plutil -lint "$plist"
+          echo "AdMob configured for application id ending ~${ADMOB_IOS_APP_ID##*~}"
+
       # --- Version / build number -------------------------------------------------------
       # App Store Connect rejects a build whose CFBundleVersion it has already seen for this
       # CFBundleShortVersionString. run_number is monotonic per workflow, so it never repeats.

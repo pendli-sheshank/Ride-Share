@@ -125,6 +125,21 @@ Three rules that cover most of it:
 (`MainViewModel.loadingMessage`); "Securing your ride…" is for reserving a seat, not for logging
 in or blocking someone. The neutral default is "Just a moment…".
 
+### "No commission or app fees" stays, with ads on the feed — a decision, not an oversight
+
+`SplitCruiserApp.kt`'s cost card says *"Cash split is paid in-person directly to the host. No
+commission or app fees."* and `RideDetailView.swift` says *"Split Cruiser never takes a cut and
+never handles the money."* Both are still literally true with ads on the browse feed: the app takes
+no share of the cost split and never touches the money.
+
+This was raised when ads were added and **deliberately left as it is.** Do not "correct" it to
+mention advertising without asking — it reads as a claim about the *cost split*, which is the
+subject of the card it sits on. Worth knowing that a reviewer may read it as a claim the app is
+free of monetisation altogether; if that ever shows up in store feedback, that is the signal to
+revisit, not this note.
+
+Ads never appear on this card's screen, or on chat. See the ads entry in CLAUDE.md.
+
 ### Is it a fare or a cost split?
 
 It's a cost split. The host's total is "Chipped in", not "Revenue"; a rider's share is a
@@ -165,6 +180,7 @@ it, so until that changes this checklist is the mechanism.
 | Blocked users | `BlockedListScreen` | `BlockedListScreen` (`ProfileScreens.swift`) |
 | Host analytics | `HostDashboard` | `HostDashboardScreen` (`ProfileScreens.swift`) |
 | Push notifications | `SplitCruiserMessagingService` + `syncPushToken` | `AppDelegate` + `SplitCruiserPush` (`PushNotifications.swift`) |
+| Ads on the browse feed | `AnchoredFeedBanner` + `FeedAdCard` (`ads/AdViews.kt`) | `AnchoredFeedBanner` + `FeedAdCard` (`Ads.swift`) |
 
 (Two entries used to sit here as accepted structural differences, and both are now closed.
 Android's dead `host_dashboard` route — the Profile screen's safety section links to it on both

@@ -3,6 +3,7 @@ package com.splitcruiser.app.ui
 
 import android.content.Intent
 import android.Manifest
+import android.app.Activity
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -106,6 +108,9 @@ import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.ui.semantics.Role
 import com.splitcruiser.app.data.Gender
 import com.splitcruiser.app.push.SplitCruiserNotifications
+import com.splitcruiser.app.ads.AnchoredFeedBanner
+import com.splitcruiser.app.ads.FeedAdCard
+import com.splitcruiser.app.ads.SplitCruiserAds
 import androidx.compose.foundation.lazy.rememberLazyListState
 
 // --- Material 3 Animation Utilities ---
@@ -324,6 +329,16 @@ fun SplitCruiserApp(viewModel: MainViewModel = viewModel()) {
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { viewModel.syncPushToken(context) }
+
+    // Ad consent, at the same point in the flow as the notification prompt and for the same
+    // reason: the UMP form is a sheet, iOS and Android both give one realistic chance at it, and
+    // over a login screen it has no context. This is also the *only* call that starts the ads SDK
+    // — the manifest's DELAY_APP_MEASUREMENT_INIT stops it self-initialising before a consent
+    // decision exists, which is the policy violation the ordering exists to prevent.
+    LaunchedEffect(authPhase) {
+        if (authPhase != "dashboard") return@LaunchedEffect
+        (context as? Activity)?.let { SplitCruiserAds.ensureConsentThenInitialize(it) }
+    }
 
     LaunchedEffect(authPhase) {
         if (authPhase != "dashboard") return@LaunchedEffect
@@ -1738,6 +1753,14 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
         TripFeedFilters.apply(activeOffers, searchQuery, selectedFilter)
     }
 
+    // Which rides an ad card follows. `AdSlotting` lives in `:shared` so iOS places them
+    // identically — the same reason `PlaceRanking` and `perRiderShare` are shared. Keyed on the
+    // *filtered* count, so narrowing the feed with a search re-derives the slots rather than
+    // leaving an ad stranded past the end of a short result set.
+    val adSlots = remember(filteredOffers.size) {
+        AdSlotting.adSlotIndices(filteredOffers.size).toSet()
+    }
+
     val dashboardSubtitle = currentUser?.homeArea?.takeIf { it.isNotBlank() } ?: "Find your next ride"
 
     Scaffold(
@@ -1878,6 +1901,15 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
             }
         },
         bottomBar = {
+          Column {
+            // The anchored banner, Explore only. Not on My trips or Chats: a banner under a list
+            // of your own rides earns almost nothing and costs the same screen, and the chat tab
+            // leads to a screen where a pickup is being agreed with a stranger. Renders nothing
+            // when the build is unconfigured or consent has not allowed a request.
+            if (selectedTab == "explore") {
+                AnchoredFeedBanner()
+            }
+
             // Material 3's NavigationBar rather than a hand-built Row of clickable Columns. The
             // hand-built version looked the same but announced nothing to a screen reader: no
             // tab role, no selected state, no "1 of 4". The pill behind the selected icon is
@@ -1939,6 +1971,7 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                     colors = itemColors,
                 )
             }
+          }
         },
         floatingActionButton = {
             if (selectedTab == "explore") {
@@ -2119,7 +2152,7 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                         // One lazy item per offer. This whole list used to be a single item holding
                         // a Column of every card, so nothing virtualised — the host feed below has
                         // always done it this way.
-                        items(filteredOffers, key = { it.id }) { offer ->
+                        itemsIndexed(filteredOffers, key = { _, offer -> offer.id }) { offerIndex, offer ->
                             val isHost = (offer.hostId == currentUserId)
                             val hasAlreadyJoined = offer.passengers.contains(currentUserId)
                             val hasPendingRequest = userMatches.any {
@@ -2144,6 +2177,15 @@ fun DashboardScreen(viewModel: MainViewModel, navController: NavController) {
                                 }
                             ) {
                                 navController.navigate("trip_detail/${offer.id}/offer")
+                            }
+
+                            // Drawn inside the ride's own lazy item rather than as a separate
+                            // keyed item: the ad belongs to the gap after this ride, and giving it
+                            // its own key would mean inventing stable ids for slots that move as
+                            // the feed is filtered. Renders nothing at all unless the build is
+                            // configured and consent allows a request.
+                            if (offerIndex in adSlots) {
+                                FeedAdCard()
                             }
                         }
                     }

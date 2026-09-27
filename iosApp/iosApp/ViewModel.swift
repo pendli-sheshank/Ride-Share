@@ -263,6 +263,21 @@ final class AppViewModel: ObservableObject {
         repository.maxTripCost(totalSeats: Int32(totalSeats))
     }
 
+    /// The feed positions an ad card follows, from `AdSlotting` in `:shared`.
+    ///
+    /// Wrapped here rather than called from the view for the reason `perRiderShare` is: the
+    /// Kotlin/Native ObjC export cannot be compile-checked on Linux, so if `AdSlotting` exports
+    /// under a different name than expected it is a one-line fix in one file instead of a hunt
+    /// through views. It also converts `[KotlinInt]` to something Swift can read directly, and a
+    /// `Set` is what the call site actually wants — it asks "is this index a slot?" once per row.
+    ///
+    /// Shared on purpose: two copies of "every sixth ride" drift the moment either is touched, and
+    /// an ad in a different place on each platform is the kind of difference nobody notices until
+    /// a screenshot comparison.
+    func adSlotIndices(rideCount: Int) -> Set<Int> {
+        Set(AdSlotting.shared.adSlotIndices(rideCount: Int32(rideCount)).map(\.intValue))
+    }
+
     func postRideRequest(
         origin: String,
         destination: String,
