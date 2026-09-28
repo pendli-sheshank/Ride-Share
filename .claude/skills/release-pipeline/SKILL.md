@@ -1609,10 +1609,24 @@ It went unnoticed because the `#59` PR gate was green, so TestFlight was broken 
 before anyone looked. The `#60` ads merge inherited the failure and did not cause it — its own
 packages just lengthened the list.
 
-**Still outstanding behind this:** the archive never reached the point of codesigning the app, so the
-`aps-environment` entitlement problem described in §4 (App ID needs Push Notifications, profile must
-be reissued) has never actually been exercised. Expect it to surface at **export** on the next run
-if those two steps have not been done.
+**Confirmed fixed by `workflow_dispatch` run 38** on `9fad92b` (2026-09-28, `release_type=beta`):
+`** ARCHIVE SUCCEEDED **`, `** EXPORT SUCCEEDED **`, `No errors validating archive`,
+`UPLOAD SUCCEEDED with no errors`. Build `1.0 (38)` reached TestFlight — the first successful iOS
+upload since the regression.
+
+**A prediction this entry originally made, and got wrong:** that the `aps-environment` entitlement
+problem in §4 was queued up behind this one and would surface at **export**, because the archive had
+never got as far as codesigning the app. It did not. Export signed cleanly on the first attempt,
+which means the §4 steps 1-2 console work (App ID → Push Notifications, distribution profile
+reissued) was already done. Recorded because the wrong half of a prediction is worth as much as the
+right half here: the entitlement and the signing-scope bug were independent, and only one of them
+ever existed.
+
+**`workflow_dispatch` is the way to test a signing change** rather than merging and hoping. It runs
+the workflow from the *chosen ref*, so a fix on a branch can be proven before it reaches `main`.
+The cost is one permanently consumed build number (`CFBundleVersion = github.run_number`), which is
+true of any run of this workflow — cheap next to a broken release nobody notices. Always pass
+`release_type=beta`; `production` also submits for App Store review.
 
 ---
 
