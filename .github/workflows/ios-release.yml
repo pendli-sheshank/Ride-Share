@@ -331,6 +331,27 @@ jobs:
       # --- Archive ----------------------------------------------------------------------
       # No CocoaPods step: the Podfile declares no pods for the iosApp target, so there is
       # nothing to install, and running it would force building a .xcworkspace instead.
+      #
+      # **Archived unsigned on purpose; the signing happens at export.** This used to pass
+      # CODE_SIGN_STYLE=Manual, PROVISIONING_PROFILE_SPECIFIER and CODE_SIGN_IDENTITY here, and
+      # that is fatal once the project has any Swift Package: a build setting given on the
+      # xcodebuild command line is **global**, so it lands on every target in the graph —
+      # including the resource-bundle targets SPM synthesises per package, which cannot take a
+      # provisioning profile. Two releases died here with fourteen copies of
+      #
+      #   error: Firebase_FirebaseCoreInternal does not support provisioning profiles, but
+      #   provisioning profile <uuid> has been manually specified.
+      #
+      # one per Firebase / GoogleUtilities / GoogleDataTransport / Promises / nanopb bundle. See
+      # §7 of the release skill. No pre-merge job can catch it: the PR build already passes
+      # CODE_SIGNING_ALLOWED=NO, so it is immune for the same reason this is now.
+      #
+      # The app target's real signing is in `Export signed IPA` below, whose exportOptions.plist
+      # names the profile per bundle id — which is where a per-target profile belongs and where
+      # the package targets are out of scope. DEVELOPMENT_TEAM stays so the archive's team
+      # metadata is right. Deliberately NOT -allowProvisioningUpdates: see "Why fastlane match
+      # and not Xcode automatic signing" in the skill — each ephemeral runner would mint a new
+      # distribution certificate and discard the key, and Apple caps those at two per account.
       - name: Create Xcode archive
         env:
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -343,10 +364,8 @@ jobs:
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/iosApp.xcarchive" \
             -derivedDataPath "$RUNNER_TEMP/DerivedData" \
-            CODE_SIGN_STYLE=Manual \
             DEVELOPMENT_TEAM="$TEAM_ID" \
-            PROVISIONING_PROFILE_SPECIFIER="$PROVISIONING_PROFILE_UUID" \
-            CODE_SIGN_IDENTITY="Apple Distribution"
+            CODE_SIGNING_ALLOWED=NO
 
       - name: Export signed IPA
         env:

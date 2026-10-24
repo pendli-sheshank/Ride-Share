@@ -1561,6 +1561,73 @@ name `GoogleUserMessagingPlatform` (not `UserMessagingPlatform`), and a version 
 GMA 13's `1.1.0..<4.0.0`. Recorded here so it costs one round trip instead of this investigation
 again.
 
+### 2026-09-27 — two releases died in `xcodebuild archive`: a global signing setting hits every SPM target
+**Symptom:** `iOS App Release Pipeline` failed at **Create Xcode archive** with fourteen copies of
+one error, and `** ARCHIVE FAILED **`:
+
+```
+/Users/runner/work/_temp/DerivedData/SourcePackages/checkouts/firebase-ios-sdk/Package.swift:
+error: Firebase_FirebaseCoreInternal does not support provisioning profiles, but provisioning
+profile f3d4cc50-… has been manually specified. Set the provisioning profile value to
+"Automatic" in the build settings editor. (in target 'Firebase_FirebaseCoreInternal' from
+project 'Firebase')
+```
+
+once each for `Firebase_FirebaseCore`, `Firebase_FirebaseCoreInternal`,
+`Firebase_FirebaseInstallations`, `Firebase_FirebaseMessaging`, seven `GoogleUtilities_*` bundles,
+`GoogleDataTransport_GoogleDataTransport`, `Promises_FBLPromises` and `nanopb_nanopb`. Note what is
+*absent* from the error list: the `iosApp` target itself. Export and upload were skipped, so no App
+Store Connect build number was consumed.
+
+**Cause:** the archive step passed `CODE_SIGN_STYLE=Manual`,
+`PROVISIONING_PROFILE_SPECIFIER=<uuid>` and `CODE_SIGN_IDENTITY="Apple Distribution"` as
+**command-line** xcodebuild settings. A setting given that way is global — it applies to every
+target in the build graph, not just the app. SPM synthesises a resource-bundle target per package,
+those cannot take a provisioning profile, and each one errors. Harmless while the project had no
+Swift Packages; fatal from the first one.
+
+**Fix:** archive unsigned and sign at export. Drop the three signing settings from the archive
+command, add `CODE_SIGNING_ALLOWED=NO`, keep `DEVELOPMENT_TEAM`. The export step's
+`exportOptions.plist` already does manual signing properly, naming the profile per bundle id — which
+is where a per-target profile belongs, and where the package targets are out of scope.
+
+**Not** `-allowProvisioningUpdates`, which also silences it: see "Why `fastlane match` and not Xcode
+automatic signing" in §4 — each ephemeral runner mints a new Apple Distribution certificate and
+discards the key, and Apple caps those at two per account, so the third run wedges the account.
+
+**Two things made this expensive, and both are the reusable lesson.**
+
+*No pre-merge job can see it.* `build-ios.yml` builds for the simulator with
+`CODE_SIGNING_ALLOWED=NO`, so it is immune to exactly this class of failure — for the same reason
+the fix works. A green PR therefore says nothing about whether the archive will sign. **After
+merging anything that touches the iOS project or adds a Swift Package, read the
+`ios-release.yml` run on `main`, not just the PR checks.**
+
+*It regressed silently one merge earlier.* The first SPM package (firebase-ios-sdk, added for push)
+landed in the `#59` merge `689134a`, and that release run failed with the identical fourteen errors.
+It went unnoticed because the `#59` PR gate was green, so TestFlight was broken for two merges
+before anyone looked. The `#60` ads merge inherited the failure and did not cause it — its own
+packages just lengthened the list.
+
+**Confirmed fixed by `workflow_dispatch` run 38** on `9fad92b` (2026-09-28, `release_type=beta`):
+`** ARCHIVE SUCCEEDED **`, `** EXPORT SUCCEEDED **`, `No errors validating archive`,
+`UPLOAD SUCCEEDED with no errors`. Build `1.0 (38)` reached TestFlight — the first successful iOS
+upload since the regression.
+
+**A prediction this entry originally made, and got wrong:** that the `aps-environment` entitlement
+problem in §4 was queued up behind this one and would surface at **export**, because the archive had
+never got as far as codesigning the app. It did not. Export signed cleanly on the first attempt,
+which means the §4 steps 1-2 console work (App ID → Push Notifications, distribution profile
+reissued) was already done. Recorded because the wrong half of a prediction is worth as much as the
+right half here: the entitlement and the signing-scope bug were independent, and only one of them
+ever existed.
+
+**`workflow_dispatch` is the way to test a signing change** rather than merging and hoping. It runs
+the workflow from the *chosen ref*, so a fix on a branch can be proven before it reaches `main`.
+The cost is one permanently consumed build number (`CFBundleVersion = github.run_number`), which is
+true of any run of this workflow — cheap next to a broken release nobody notices. Always pass
+`release_type=beta`; `production` also submits for App Store review.
+
 ---
 
 ## 8. Pre-flight checklist before merging to `main`
@@ -1592,6 +1659,10 @@ again.
       regenerated, or Xcode will not compile it
 - [ ] If a screen in `.claude/DESIGN_SYSTEM.md`'s parity table changed, both platforms changed —
       or the PR says why not
+- [ ] **After** merging anything that touches `iosApp/` or adds a Swift Package: read the
+      `ios-release.yml` run on `main`. A green PR proves nothing about signing — `build-ios.yml`
+      builds with `CODE_SIGNING_ALLOWED=NO`, so the archive-and-sign path has no pre-merge gate at
+      all. Two releases broke this way before anyone looked (§7, 2026-09-27)
 
 ## 9. Rollback
 
